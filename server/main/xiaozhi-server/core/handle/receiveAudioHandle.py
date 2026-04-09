@@ -147,7 +147,7 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
     if conn.last_activity_time > 0.0:
         no_voice_time = time.time() * 1000 - conn.last_activity_time
         close_connection_no_voice_time = int(
-            conn.config.get("close_connection_no_voice_time", 120)
+            conn.config.get("close_connection_no_voice_time", 315360000)
         )
         if (
             not conn.close_after_chat

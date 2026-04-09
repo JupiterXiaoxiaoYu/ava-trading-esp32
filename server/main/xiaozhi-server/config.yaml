@@ -57,8 +57,9 @@ log:
 
 # 使用完声音文件后删除文件(Delete the sound file when you are done using it)
 delete_audio: true
-# 没有语音输入多久后断开连接(秒)，默认2分钟，即120秒
-close_connection_no_voice_time: 120
+# 没有语音输入多久后断开连接(秒)
+# AVE掌机主要靠屏幕和摇杆浏览，这里默认设置为接近“永不超时”（10年）
+close_connection_no_voice_time: 315360000
 # TTS请求超时时间(秒)
 tts_timeout: 10
 # 工具调用超时时间(秒)
@@ -72,7 +73,7 @@ enable_stop_tts_notify: false
 # 说完话是否开启提示音，音效地址
 stop_tts_notify_voice: "config/assets/tts_notify.mp3"
 # 是否启用WebSocket心跳保活机制
-enable_websocket_ping: false
+enable_websocket_ping: true
 
 
 # TTS音频发送延迟配置

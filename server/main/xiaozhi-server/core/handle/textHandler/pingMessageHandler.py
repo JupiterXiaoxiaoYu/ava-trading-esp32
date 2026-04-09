@@ -24,7 +24,7 @@ class PingMessageHandler(TextMessageHandler):
             msg_json: PING消息的JSON数据
         """
         # 检查是否启用了WebSocket心跳功能
-        enable_websocket_ping = conn.config.get("enable_websocket_ping", False)
+        enable_websocket_ping = conn.config.get("enable_websocket_ping", True)
         if not enable_websocket_ping:
             conn.logger.debug(f"WebSocket心跳功能未启用，忽略PING消息")
             return
