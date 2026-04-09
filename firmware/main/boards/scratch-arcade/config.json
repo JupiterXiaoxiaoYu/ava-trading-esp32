@@ -1,0 +1,18 @@
+{
+  "target": "esp32s3",
+  "builds": [
+    {
+      "name": "scratch-arcade",
+      "sdkconfig_append": [
+        "CONFIG_OTA_URL=\"https://jupdev.tech/xiaozhi/ota/\"",
+        "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/8m.csv\"",
+        "CONFIG_LV_USE_CHART=y",
+        "CONFIG_LV_FONT_MONTSERRAT_12=y",
+        "CONFIG_LV_FONT_MONTSERRAT_16=y",
+        "CONFIG_LV_FONT_MONTSERRAT_24=y",
+        "CONFIG_LV_FONT_MONTSERRAT_32=y"
+      ]
+    }
+  ]
+}

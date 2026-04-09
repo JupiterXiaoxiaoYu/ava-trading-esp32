@@ -1,0 +1,43 @@
+{
+  "type": "display",
+  "screen": "feed",
+  "ts": 1775457993,
+  "data": {
+    "source_label": "SEARCH",
+    "tokens": [
+      {
+        "token_id": "7zQwX9evFdUxKxS6f82gVY3rYv4K2M7W5yQhT4uCpump",
+        "chain": "solana",
+        "symbol": "ALPHA",
+        "price": "$0.01234",
+        "change_24h": "▲ +15.42%",
+        "change_positive": 1,
+        "volume_24h": "$1.2M",
+        "market_cap": "$12.3M",
+        "source": "search"
+      },
+      {
+        "token_id": "0xC0FFEE00BADC0DE0000000000000000000BEEF",
+        "chain": "eth",
+        "symbol": "BETA",
+        "price": "$2.45",
+        "change_24h": "▼ -4.09%",
+        "change_positive": 0,
+        "volume_24h": "$820K",
+        "market_cap": "$43.0M",
+        "source": "search"
+      },
+      {
+        "token_id": "base_6M4zQqfYwJiXxF6k3bmTRj2nN8pCvA",
+        "chain": "base",
+        "symbol": "GAMMA",
+        "price": "$0.431",
+        "change_24h": "▲ +2.01%",
+        "change_positive": 1,
+        "volume_24h": "$95K",
+        "market_cap": "$3.8M",
+        "source": "search"
+      }
+    ]
+  }
+}

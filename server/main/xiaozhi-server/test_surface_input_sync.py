@@ -1,0 +1,1641 @@
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from core.handle.textHandler.keyActionHandler import KeyActionHandler
+from core.handle.textHandler.listenMessageHandler import ListenTextMessageHandler
+from core.providers.asr.dto.dto import InterfaceType
+
+
+class _FakeLogger:
+    def bind(self, **kwargs):
+        return self
+
+    def debug(self, *args, **kwargs):
+        return None
+
+    def info(self, *args, **kwargs):
+        return None
+
+    def warning(self, *args, **kwargs):
+        return None
+
+    def error(self, *args, **kwargs):
+        return None
+
+
+def _build_disambiguation_listen_harness():
+    repo_root = Path(__file__).resolve().parents[3]
+    include_dir = repo_root / "simulator/mock/json_verify_include"
+    manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+    display_json = (
+        '{"screen":"disambiguation","data":{"cursor":1,"items":['
+        '{"token_id":"So111...","chain":"solana","symbol":"PEPE"},'
+        '{"token_id":"0xabc...","chain":"base","symbol":"PEPE"}'
+        "]}}"
+    )
+    display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+    screen_disambiguation_src = repo_root / "shared/ave_screens/screen_disambiguation.c"
+    extra_sources = []
+    extra_ldflags = []
+    if screen_disambiguation_src.exists():
+        extra_sources.append(screen_disambiguation_src)
+        extra_ldflags.append("-DHAVE_SCREEN_DISAMBIGUATION")
+
+    harness_source = """
+#include <stdio.h>
+#include <string.h>
+
+#include "ave_screen_manager.h"
+
+void ave_send_json(const char *json) { (void)json; }
+void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_key(int key) { (void)key; }
+bool screen_feed_should_ignore_live_push(void) { (void)0; return false; }
+int screen_feed_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_spotlight_show(const char *json_data) { (void)json_data; }
+void screen_spotlight_key(int key) { (void)key; }
+void screen_spotlight_cancel_back_timer(void) { }
+int screen_spotlight_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_confirm_show(const char *json_data) { (void)json_data; }
+void screen_confirm_key(int key) { (void)key; }
+void screen_confirm_cancel_timers(void) { }
+int screen_confirm_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_limit_confirm_show(const char *json_data) { (void)json_data; }
+void screen_limit_confirm_key(int key) { (void)key; }
+void screen_limit_confirm_cancel_timers(void) { }
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_result_show(const char *json_data) { (void)json_data; }
+void screen_result_key(int key) { (void)key; }
+void screen_result_cancel_timers(void) { }
+int screen_result_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_portfolio_show(const char *json_data) { (void)json_data; }
+void screen_portfolio_key(int key) { (void)key; }
+void screen_portfolio_cancel_back_timer(void) { }
+int screen_portfolio_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_notify_show(const char *json_data) { (void)json_data; }
+bool screen_notify_is_visible(void) { return false; }
+void screen_notify_key(int key) { (void)key; }
+
+#if !defined(HAVE_SCREEN_DISAMBIGUATION)
+void screen_disambiguation_show(const char *json_data) { (void)json_data; }
+void screen_disambiguation_key(int key) { (void)key; }
+void screen_disambiguation_cancel_timers(void) { }
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+#endif
+
+int main(void)
+{
+    char out[4096];
+    ave_sm_handle_json("{display_json_c}");
+    if (!ave_sm_build_listen_detect_json("看这个", out, sizeof(out))) {
+        fprintf(stderr, "listen payload build failed\\n");
+        return 2;
+    }
+    printf("%s", out);
+    return 0;
+}
+"""
+
+    harness_source = harness_source.replace("{display_json_c}", display_json_c)
+
+    return harness_source, include_dir, manager_src, tuple(extra_sources), tuple(extra_ldflags)
+
+class SurfaceInputSyncTests(unittest.IsolatedAsyncioTestCase):
+    def _build_listen_conn(self, ave_state=None):
+        conn = SimpleNamespace()
+        conn.logger = _FakeLogger()
+        conn.config = {"wakeup_words": [], "enable_greeting": True}
+        conn.client_listen_mode = "auto"
+        conn.client_have_voice = False
+        conn.client_voice_stop = False
+        conn.last_activity_time = 0
+        conn.just_woken_up = False
+        conn.asr = SimpleNamespace(interface_type=InterfaceType.NON_STREAM)
+        conn.asr_audio = []
+        conn.ave_state = ave_state or {}
+        conn.reset_audio_states = MagicMock()
+        return conn
+
+    def _assert_real_selection_emitter_missing_chain_fails_closed(
+        self,
+        *,
+        screen_macro,
+        screen_source,
+        display_json,
+        extra_sources=(),
+        extra_ldflags=(),
+    ):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        display_json_c = (
+            display_json.replace("\\", "\\\\").replace('"', '\\"')
+        )
+        harness_source = f"""
+#define {screen_macro}
+{verifier_prefix}
+
+/* json_verify_include/lvgl/lvgl.h is intentionally minimal. Keep forward-compat
+ * with production screen code by stubbing newer LVGL constants/APIs here. */
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+#include "{screen_source}"
+
+int main(void)
+{{
+    char out[1024];
+
+    ave_sm_handle_json("{display_json_c}");
+    if (!ave_sm_build_listen_detect_json("watch this", out, sizeof(out))) {{
+        fprintf(stderr, "build failed\\n");
+        return 2;
+    }}
+    if (strstr(out, "\\"selection\\"")) {{
+        fprintf(stderr, "unexpected selection for missing-chain payload: %s\\n", out);
+        return 3;
+    }}
+    if (strstr(out, "\\"chain\\":\\"solana\\"")) {{
+        fprintf(stderr, "unexpected synthetic solana chain: %s\\n", out);
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_missing_chain_selection.c"
+            binary = tmpdir_path / "verify_missing_chain_selection"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    *[str(source) for source in extra_sources],
+                    *extra_ldflags,
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def _compile_and_run_c_harness(
+        self,
+        harness_source,
+        include_dir,
+        manager_src,
+        *,
+        extra_sources=(),
+        extra_ldflags=(),
+        binary_name="verify_feed_explore_overlay",
+    ):
+        repo_root = Path(__file__).resolve().parents[3]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / f"{binary_name}.c"
+            binary_path = tmpdir_path / binary_name
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    *[str(source) for source in extra_sources],
+                    *extra_ldflags,
+                    "-o",
+                    str(binary_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+            return run_result.stdout
+
+    def _assert_real_key_action_missing_chain_fails_closed(
+        self,
+        *,
+        screen_name,
+        screen_source,
+        display_json,
+        key_steps,
+        extra_sources=(),
+        extra_ldflags=(),
+    ):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+        screen_macro = {
+            "feed": "VERIFY_FEED",
+            "portfolio": "VERIFY_PORTFOLIO",
+            "spotlight": "VERIFY_SPOTLIGHT",
+        }.get(screen_name, "")
+
+        harness_source = f"""
+{f"#define {screen_macro}" if screen_macro else ""}
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+{"void screen_disambiguation_show(const char *json_data) { (void)json_data; }\nvoid screen_disambiguation_key(int key) { (void)key; }\nvoid screen_disambiguation_cancel_timers(void) { }\nint screen_disambiguation_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }" if screen_name != "disambiguation" else ""}
+
+int main(void)
+{{
+    ave_sm_handle_json("{display_json_c}");
+    clear_last_json();
+    {key_steps}
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "unexpected action emitted with missing chain: %s\\n", g_last_json);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name=f"verify_{screen_name}_missing_chain_action",
+            extra_sources=(screen_source, *extra_sources),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                *extra_ldflags,
+            ),
+        )
+
+    def _verify_disambiguation_selection_payload(self):
+        harness_source, include_dir, manager_src, extra_sources, extra_ldflags = _build_disambiguation_listen_harness()
+        payload_json = self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_disambiguation_selection",
+            extra_sources=extra_sources,
+            extra_ldflags=extra_ldflags,
+        )
+        payload = json.loads(payload_json.strip())
+        selection = payload.get("selection")
+        # Task 1's fail-closed contract is stricter than "no top-level token_id":
+        # DISAMBIGUATION listen payloads may only expose inert screen/cursor
+        # metadata, never nested trusted token aliases such as selection.token.
+        self.assertEqual(
+            selection,
+            {
+                "screen": "disambiguation",
+                "cursor": 1,
+            },
+        )
+
+    def _assert_real_feed_overlay_omits_trusted_selection_in_listen_payload(
+        self,
+        *,
+        key_sequence,
+        binary_name,
+        failure_label,
+    ):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+        key_steps = "\n    ".join(
+            f"screen_feed_key({key_name});" for key_name in key_sequence
+        )
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+int main(void)
+{{
+    char out[1024];
+
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"feed-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
+    {key_steps}
+    if (!ave_sm_build_listen_detect_json("看这个", out, sizeof(out))) {{
+        return 2;
+    }}
+    if (strstr(out, "\\"selection\\"")) {{
+        fprintf(stderr, "unexpected selection in {failure_label}: %s\\n", out);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name=binary_name,
+        )
+
+    async def test_feed_mixed_input_watch_and_buy_use_explicit_selection_payload(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "feed",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "feed-1", "chain": "solana", "symbol": "OLD"},
+                    {"addr": "feed-2", "chain": "base", "symbol": "NEW"},
+                ],
+                "current_token": {"addr": "stale-spot", "chain": "solana", "symbol": "STALE"},
+            }
+        )
+
+        def _detail_side_effect(passed_conn, addr, chain, symbol=""):
+            passed_conn.ave_state["screen"] = "spotlight"
+            passed_conn.ave_state["current_token"] = {
+                "addr": "stale-after-watch",
+                "chain": "solana",
+                "symbol": "STALE",
+            }
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_token_detail", side_effect=_detail_side_effect) as mock_detail, \
+             patch("plugins_func.functions.ave_tools.ave_buy_token") as mock_buy:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "看这个",
+                    "selection": {
+                        "screen": "feed",
+                        "cursor": 1,
+                        "token": {"addr": "feed-2", "chain": "base", "symbol": "NEW"},
+                    },
+                },
+            )
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "买这个",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "feed-2", "chain": "base", "symbol": "NEW"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        mock_detail.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
+        mock_buy.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
+
+    async def test_portfolio_mixed_input_watch_uses_explicit_selection_payload(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "portfolio",
+                "portfolio_cursor": 0,
+                "portfolio_holdings": [
+                    {"addr": "pf-1", "chain": "solana", "symbol": "OLD"},
+                    {"addr": "pf-2", "chain": "eth", "symbol": "REAL"},
+                ],
+                "current_token": {"addr": "stale-spot", "chain": "solana", "symbol": "STALE"},
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_token_detail") as mock_detail:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "看这个",
+                    "selection": {
+                        "screen": "portfolio",
+                        "cursor": 1,
+                        "token": {"addr": "pf-2", "chain": "eth", "symbol": "REAL"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        mock_detail.assert_called_once_with(conn, addr="pf-2", chain="eth", symbol="REAL")
+
+    async def test_non_router_listen_detect_forwards_selection_payload_into_chat_pipeline(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+        message = {
+            "state": "detect",
+            "text": "帮我分析这个",
+            "selection": {
+                "screen": "feed",
+                "cursor": 1,
+                "token": {"addr": "feed-2", "chain": "base", "symbol": "NEW"},
+            },
+        }
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat:
+            await handler.handle(conn, message)
+
+        start_chat.assert_awaited_once_with(conn, "帮我分析这个", message_payload=message)
+
+    async def test_malformed_selection_payload_fails_closed_instead_of_using_stale_feed_cursor(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "feed",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "stale-1", "chain": "solana", "symbol": "STALE"},
+                ],
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_token_detail") as mock_detail:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "看这个",
+                    "selection": {"screen": "feed", "token": {"symbol": "BROKEN"}},
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        mock_detail.assert_not_called()
+        send_stt.assert_awaited_once_with(conn, "请先在界面上选中你要操作的代币，然后再说一次。")
+
+    async def test_quick_sell_prefers_explicit_symbol_over_state_fallback(self):
+        handler = KeyActionHandler()
+        conn = SimpleNamespace(
+            ave_state={"current_token": {"symbol": "STALE"}},
+            loop=SimpleNamespace(create_task=lambda coro, name=None: None),
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_sell_token") as mock_sell:
+            await handler.handle(
+                conn,
+                {
+                    "type": "key_action",
+                    "action": "quick_sell",
+                    "token_id": "token-1",
+                    "chain": "solana",
+                    "symbol": "REAL",
+                },
+            )
+
+        mock_sell.assert_called_once_with(
+            conn,
+            addr="token-1",
+            chain="solana",
+            sell_ratio=1.0,
+            symbol="REAL",
+        )
+
+    def test_touched_c_key_action_payloads_escape_dynamic_values(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        price_fmt_src = repo_root / "shared/ave_screens/ave_price_fmt.c"
+        selection_stub_source = """
+#include <stddef.h>
+#include "lvgl/lvgl.h"
+
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{
+    (void)obj;
+    (void)align;
+    (void)part;
+}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+
+void screen_disambiguation_show(const char *json_data) { (void)json_data; }
+void screen_disambiguation_key(int key) { (void)key; }
+void screen_disambiguation_cancel_timers(void) {}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            selection_stub = Path(tmpdir) / "selection_context_stubs.c"
+            selection_stub.write_text(selection_stub_source)
+            for macro in ("VERIFY_FEED", "VERIFY_PORTFOLIO", "VERIFY_SPOTLIGHT"):
+                binary = Path(tmpdir) / macro.lower()
+                compile_cmd = [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    "-DLV_OPA_TRANSP=0",
+                    "-DLV_TEXT_ALIGN_LEFT=0",
+                    "-DLV_TEXT_ALIGN_CENTER=1",
+                    "-DLV_TEXT_ALIGN_RIGHT=2",
+                    f"-D{macro}",
+                    str(verifier),
+                    str(manager_src),
+                    str(selection_stub),
+                    str(price_fmt_src),
+                    "-lm",
+                    "-o",
+                    str(binary),
+                ]
+                compile_result = subprocess.run(
+                    compile_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    compile_result.returncode,
+                    0,
+                    msg=compile_result.stdout + compile_result.stderr,
+                )
+
+                run_result = subprocess.run(
+                    [str(binary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    run_result.returncode,
+                    0,
+                    msg=run_result.stdout + run_result.stderr,
+                )
+
+    def test_real_feed_selection_emitter_omits_missing_chain_in_listen_payload(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_selection_emitter_missing_chain_fails_closed(
+            screen_macro="VERIFY_FEED",
+            screen_source=repo_root / "shared/ave_screens/screen_feed.c",
+            display_json=(
+                '{"screen":"feed","data":{"tokens":['
+                '{"token_id":"feed-no-chain","symbol":"BROKEN","price":"$1"}'
+                "]}}"
+            ),
+        )
+
+    def test_real_feed_key_action_omits_missing_chain(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_key_action_missing_chain_fails_closed(
+            screen_name="feed",
+            screen_source=repo_root / "shared/ave_screens/screen_feed.c",
+            display_json=(
+                '{"screen":"feed","data":{"tokens":['
+                '{"token_id":"feed-no-chain","symbol":"BROKEN","price":"$1"}'
+                "]}}"
+            ),
+            key_steps="ave_sm_key_press(AVE_KEY_A);",
+        )
+
+    def test_real_spotlight_key_action_omits_missing_chain(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_key_action_missing_chain_fails_closed(
+            screen_name="spotlight",
+            screen_source=repo_root / "shared/ave_screens/screen_spotlight.c",
+            display_json=(
+                '{"screen":"spotlight","data":{'
+                '"token_id":"spot-no-chain",'
+                '"symbol":"BROKEN",'
+                '"price":"$1",'
+                '"change_24h":"+1%",'
+                '"chart":[1,2],'
+                '"chart_min":"$1",'
+                '"chart_max":"$2"'
+                "}}"
+            ),
+            key_steps="ave_sm_key_press(AVE_KEY_A);",
+            extra_sources=(repo_root / "shared/ave_screens/ave_price_fmt.c",),
+            extra_ldflags=("-lm",),
+        )
+
+    def test_real_spotlight_partial_payload_clears_stale_identity_before_actions(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        full_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"spot-1",'
+            '"chain":"solana",'
+            '"symbol":"PEPE",'
+            '"price":"$1",'
+            '"change_24h":"+1%",'
+            '"chart":[1,2],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        partial_json = (
+            '{"screen":"spotlight","data":{'
+            '"symbol":"WIF",'
+            '"price":"$2",'
+            '"change_24h":"+2%",'
+            '"chart":[2,3],'
+            '"chart_min":"$2",'
+            '"chart_max":"$3"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int main(void)
+{{
+    ave_sm_handle_json("{full_json}");
+    clear_last_json();
+    ave_sm_handle_json("{partial_json}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "stale spotlight identity emitted action: %s\\n", g_last_json);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_spotlight_stale_identity",
+            extra_sources=(
+                repo_root / "shared/ave_screens/screen_spotlight.c",
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+            ),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+        )
+
+    def test_real_portfolio_key_action_omits_missing_chain(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_key_action_missing_chain_fails_closed(
+            screen_name="portfolio",
+            screen_source=repo_root / "shared/ave_screens/screen_portfolio.c",
+            display_json=(
+                '{"screen":"portfolio","data":{"holdings":['
+                '{"symbol":"BROKEN","addr":"port-no-chain","value_usd":"$1","pnl_pct":"N/A"}'
+                "]}}"
+            ),
+            key_steps="ave_sm_key_press(AVE_KEY_A);",
+        )
+
+    def test_real_disambiguation_key_action_omits_missing_chain(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_key_action_missing_chain_fails_closed(
+            screen_name="disambiguation",
+            screen_source=repo_root / "shared/ave_screens/screen_disambiguation.c",
+            display_json=(
+                '{"screen":"disambiguation","data":{"items":['
+                '{"token_id":"amb-no-chain","symbol":"BROKEN"}'
+                "]}}"
+            ),
+            key_steps="ave_sm_key_press(AVE_KEY_A);",
+        )
+
+    def test_real_feed_explore_panel_omits_trusted_selection_in_listen_payload(self):
+        self._assert_real_feed_overlay_omits_trusted_selection_in_listen_payload(
+            key_sequence=("AVE_KEY_B",),
+            binary_name="verify_feed_explore_panel_selection",
+            failure_label="explore panel",
+        )
+
+    def test_real_feed_explore_search_guide_omits_trusted_selection_in_listen_payload(self):
+        self._assert_real_feed_overlay_omits_trusted_selection_in_listen_payload(
+            key_sequence=("AVE_KEY_B", "AVE_KEY_A"),
+            binary_name="verify_feed_search_guide_selection",
+            failure_label="search guide",
+        )
+
+    def test_real_feed_explore_search_guide_shows_last_search_query_when_available(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+static int label_contains(lv_obj_t *obj, const char *needle)
+{{
+    return obj && needle && strstr(obj->text, needle) != NULL;
+}}
+
+int main(void)
+{{
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"SEARCH\\",\\"mode\\":\\"search\\",\\"search_query\\":\\"PEPE\\",\\"cursor\\":1,\\"tokens\\":[{{\\"token_id\\":\\"feed-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$1\\"}},{{\\"token_id\\":\\"feed-2\\",\\"chain\\":\\"base\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$2\\"}}]}}}}");
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
+    screen_feed_key(AVE_KEY_B);
+    screen_feed_key(AVE_KEY_A);
+
+    if (!label_contains(s_rows[0].lbl_sym, "Search")) {{
+        fprintf(stderr, "search guide title missing\\n");
+        return 2;
+    }}
+    if (!label_contains(s_rows[1].lbl_price, "FN")) {{
+        fprintf(stderr, "guided FN prompt missing\\n");
+        return 3;
+    }}
+    if (!label_contains(s_rows[3].lbl_price, "PEPE")) {{
+        fprintf(stderr, "last search query not surfaced in guide\\n");
+        return 4;
+    }}
+    return 0;
+}}
+"""
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_search_guide_last_query",
+        )
+
+    def test_real_feed_empty_reset_preserves_last_search_query_for_search_guide(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+static int label_contains(lv_obj_t *obj, const char *needle)
+{{
+    return obj && needle && strstr(obj->text, needle) != NULL;
+}}
+
+int main(void)
+{{
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"SEARCH\\",\\"mode\\":\\"search\\",\\"search_query\\":\\"PEPE\\",\\"tokens\\":[{{\\"token_id\\":\\"feed-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$1\\"}}]}}}}");
+    ave_sm_go_to_feed();
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
+    screen_feed_key(AVE_KEY_B);
+    screen_feed_key(AVE_KEY_A);
+
+    if (!label_contains(s_rows[3].lbl_price, "PEPE")) {{
+        fprintf(stderr, "empty feed reset dropped last-search query\\n");
+        return 5;
+    }}
+    return 0;
+}}
+"""
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_empty_reset_preserves_last_query",
+        )
+
+    def test_disambiguation_surface_emits_no_trusted_selection_until_confirmed(self):
+        self._verify_disambiguation_selection_payload()
+
+    def test_real_feed_orders_mode_omits_trusted_selection_in_listen_payload(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        display_json = (
+            '{"screen":"feed","data":{"mode":"orders","tokens":['
+            '{"token_id":"ord-1","chain":"solana","symbol":"ORDER1","price":"$1","change_24h":"+1%"}'
+            "]}}"
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+/* Keep lvgl stubs in sync with production screen usage. */
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{}}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_feed.c'}"
+
+int main(void)
+{{
+    char out[1024];
+
+    ave_sm_handle_json("{display_json_c}");
+    if (!ave_sm_build_listen_detect_json("看这个", out, sizeof(out))) {{
+        fprintf(stderr, "build failed\\n");
+        return 2;
+    }}
+    if (strstr(out, "\\"selection\\"")) {{
+        fprintf(stderr, "unexpected selection in orders mode: %s\\n", out);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_orders_listen_selection.c"
+            binary = tmpdir_path / "verify_orders_listen_selection"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_real_portfolio_selection_emitter_omits_missing_chain_in_listen_payload(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_selection_emitter_missing_chain_fails_closed(
+            screen_macro="VERIFY_PORTFOLIO",
+            screen_source=repo_root / "shared/ave_screens/screen_portfolio.c",
+            display_json=(
+                '{"screen":"portfolio","data":{"holdings":['
+                '{"addr":"pf-no-chain","symbol":"BROKEN","value_usd":"$1"}'
+                "]}}"
+            ),
+        )
+
+    def test_real_spotlight_selection_emitter_omits_missing_chain_in_listen_payload(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_selection_emitter_missing_chain_fails_closed(
+            screen_macro="VERIFY_SPOTLIGHT",
+            screen_source=repo_root / "shared/ave_screens/screen_spotlight.c",
+            display_json=(
+                '{"screen":"spotlight","data":{'
+                '"token_id":"spot-no-chain",'
+                '"symbol":"BROKEN",'
+                '"price":"$1",'
+                '"change_24h":"+1%",'
+                '"chart":[1,2],'
+                '"chart_min":"$1",'
+                '"chart_max":"$2"'
+                "}}"
+            ),
+            extra_sources=(repo_root / "shared/ave_screens/ave_price_fmt.c",),
+            extra_ldflags=("-lm",),
+        )
+
+    def test_listen_detect_payload_generation_escapes_text_and_includes_selection(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        harness_source = r"""
+#include <stdio.h>
+#include <string.h>
+
+#include "ave_screen_manager.h"
+
+void ave_send_json(const char *json) { (void)json; }
+
+void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_key(int key) { (void)key; }
+bool screen_feed_should_ignore_live_push(void) { return false; }
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{
+    const char *selection =
+        "{\"screen\":\"feed\",\"cursor\":2,\"token\":{\"addr\":\"feed\\\"2\",\"chain\":\"ba\\\\se\",\"symbol\":\"NE\\nW\"}}";
+    int n = snprintf(out, out_n, "%s", selection);
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
+}
+
+void screen_spotlight_show(const char *json_data) { (void)json_data; }
+void screen_spotlight_key(int key) { (void)key; }
+void screen_spotlight_cancel_back_timer(void) {}
+int screen_spotlight_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_confirm_show(const char *json_data) { (void)json_data; }
+void screen_confirm_key(int key) { (void)key; }
+void screen_confirm_cancel_timers(void) {}
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+void screen_limit_confirm_show(const char *json_data) { (void)json_data; }
+void screen_limit_confirm_key(int key) { (void)key; }
+void screen_limit_confirm_cancel_timers(void) {}
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+void screen_result_show(const char *json_data) { (void)json_data; }
+void screen_result_key(int key) { (void)key; }
+void screen_result_cancel_timers(void) {}
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+void screen_portfolio_show(const char *json_data) { (void)json_data; }
+void screen_portfolio_key(int key) { (void)key; }
+void screen_portfolio_cancel_back_timer(void) {}
+int screen_portfolio_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+void screen_notify_show(const char *json_data) { (void)json_data; }
+bool screen_notify_is_visible(void) { return false; }
+void screen_notify_key(int key) { (void)key; }
+void screen_disambiguation_show(const char *json_data) { (void)json_data; }
+void screen_disambiguation_key(int key) { (void)key; }
+void screen_disambiguation_cancel_timers(void) { }
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int main(void)
+{
+    char out[1024];
+    const char *text = "buy \"this\"\\\\now\n";
+
+    if (!ave_sm_build_listen_detect_json(text, out, sizeof(out))) {
+        fprintf(stderr, "build failed\n");
+        return 1;
+    }
+    if (!strstr(out, "\"type\":\"listen\"")) {
+        fprintf(stderr, "missing listen type: %s\n", out);
+        return 1;
+    }
+    if (!strstr(out, "buy \\\"this\\\"\\\\\\\\now\\n")) {
+        fprintf(stderr, "text not escaped: %s\n", out);
+        return 1;
+    }
+    if (!strstr(out, "\"selection\":{\"screen\":\"feed\",\"cursor\":2")) {
+        fprintf(stderr, "selection missing: %s\n", out);
+        return 1;
+    }
+    if (!strstr(out, "feed\\\"2")) {
+        fprintf(stderr, "addr not preserved: %s\n", out);
+        return 1;
+    }
+    if (!strstr(out, "ba\\\\se")) {
+        fprintf(stderr, "chain not preserved: %s\n", out);
+        return 1;
+    }
+    if (!strstr(out, "NE\\nW")) {
+        fprintf(stderr, "symbol not preserved: %s\n", out);
+        return 1;
+    }
+
+    return 0;
+}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_listen_detect.c"
+            binary = tmpdir_path / "verify_listen_detect"
+            source_path.write_text(harness_source)
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_listen_detect_payload_includes_authoritative_screen_for_confirm_limit_and_result(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        harness_source = r"""
+#include <stdio.h>
+#include <string.h>
+
+#include "ave_screen_manager.h"
+
+void ave_send_json(const char *json) { (void)json; }
+
+void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_key(int key) { (void)key; }
+bool screen_feed_should_ignore_live_push(void) { return false; }
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_spotlight_show(const char *json_data) { (void)json_data; }
+void screen_spotlight_key(int key) { (void)key; }
+void screen_spotlight_cancel_back_timer(void) {}
+int screen_spotlight_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_confirm_show(const char *json_data) { (void)json_data; }
+void screen_confirm_key(int key) { (void)key; }
+void screen_confirm_cancel_timers(void) {}
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    int n = snprintf(out, out_n, "%s", "{\"screen\":\"confirm\"}");
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
+}
+
+void screen_limit_confirm_show(const char *json_data) { (void)json_data; }
+void screen_limit_confirm_key(int key) { (void)key; }
+void screen_limit_confirm_cancel_timers(void) {}
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    int n = snprintf(out, out_n, "%s", "{\"screen\":\"limit_confirm\"}");
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
+}
+
+void screen_result_show(const char *json_data) { (void)json_data; }
+void screen_result_key(int key) { (void)key; }
+void screen_result_cancel_timers(void) {}
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{
+    int n = snprintf(out, out_n, "%s", "{\"screen\":\"result\"}");
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
+}
+
+void screen_portfolio_show(const char *json_data) { (void)json_data; }
+void screen_portfolio_key(int key) { (void)key; }
+void screen_portfolio_cancel_back_timer(void) {}
+int screen_portfolio_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_notify_show(const char *json_data) { (void)json_data; }
+bool screen_notify_is_visible(void) { return false; }
+void screen_notify_key(int key) { (void)key; }
+
+void screen_disambiguation_show(const char *json_data) { (void)json_data; }
+void screen_disambiguation_key(int key) { (void)key; }
+void screen_disambiguation_cancel_timers(void) {}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+static int expect_screen(const char *screen)
+{
+    char json[256];
+    char out[512];
+    char needle[64];
+
+    snprintf(
+        json,
+        sizeof(json),
+        "{\"type\":\"display\",\"screen\":\"%s\",\"data\":{\"trade_id\":\"trade-1\"}}",
+        screen
+    );
+    ave_sm_handle_json(json);
+    if (!ave_sm_build_listen_detect_json("确认", out, sizeof(out))) {
+        fprintf(stderr, "build failed for %s\n", screen);
+        return 0;
+    }
+    snprintf(needle, sizeof(needle), "\"selection\":{\"screen\":\"%s\"}", screen);
+    if (!strstr(out, needle)) {
+        fprintf(stderr, "missing authoritative screen %s in %s\n", screen, out);
+        return 0;
+    }
+    return 1;
+}
+
+int main(void)
+{
+    if (!expect_screen("confirm")) return 1;
+    if (!expect_screen("limit_confirm")) return 1;
+    if (!expect_screen("result")) return 1;
+    return 0;
+}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_listen_detect_screens.c"
+            binary = tmpdir_path / "verify_listen_detect_screens"
+            source_path.write_text(harness_source)
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,1274 @@
+/**
+ * @file screen_feed.c
+ * @brief FEED screen - multi-chain token list view with FEED-local Explore/Search-guide overlays.
+ *
+ * Layout (320x240 landscape):
+ *   y=  0..21   top bar (22px): [source label (left)] [mode label (right)] [N/M counter (far right)]
+ *              - ORDERS mode tints the top bar orange.
+ *   y= 22..213  list (8 rows x 24px): [Chain 38px] [Symbol 74px] [Price 112px] [Change 82px]
+ *   y=214       divider
+ *   y=215..239  bottom bar (25px) segmented into fixed slots with vertical dividers:
+ *              - left (x=0..79):   navigation hint (e.g. "^ v MOVE")
+ *              - center (x=80..199): source controls (e.g. "< REFRESH  X SOURCE" or "< X SOURCE OFF")
+ *              - right (x=200..319): action hint (e.g. "> DETAIL  Y PORTFOLIO", "> OFF  Y PORTFOLIO")
+ *
+ * Navigation:
+ *   Standard FEED home:
+ *     LEFT     -> refresh current standard source
+ *     X        -> cycle standard source
+ *     A/RIGHT  -> enter detail (server-driven "watch")
+ *     B        -> open local Explore panel (Search / Orders / Sources)
+ *   FEED Explore panel:
+ *     UP/DOWN  -> clamp within Search / Orders / Sources
+ *     A/RIGHT  -> Search opens local Search guide; Orders reuses ORDERS flow; Sources opens local chooser
+ *     LEFT/B   -> close Explore without emitting a server action
+ *   FEED Search guide:
+ *     LEFT/B   -> close guide back to standard FEED without emitting a server action
+ *     Y        -> unchanged global shortcut handling in ave_screen_manager.c
+ *   FEED Sources chooser:
+ *     UP/DOWN  -> clamp within topic/platform entries
+ *     A/RIGHT  -> reuse feed_source/feed_platform actions
+ *     LEFT/B   -> close back to unchanged standard FEED
+ *   SEARCH / SPECIAL mode:
+ *     LEFT/X disabled
+ *     A/RIGHT  -> enter detail (server-driven "watch")
+ *     B        -> restore remembered standard source (or default), show local LOADING, and refresh
+ *   ORDERS mode:
+ *     browse-only list (no detail)
+ *     LEFT/X/A/RIGHT disabled
+ *     B        -> send key_action back and exit orders locally (go_to_feed placeholder)
+ */
+#include "ave_screen_manager.h"
+#include "ave_transport.h"
+#include "ave_price_fmt.h"
+#if __has_include("lvgl.h")
+#include "lvgl.h"
+#else
+#include "lvgl/lvgl.h"
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ─── Token data ──────────────────────────────────────────────────────────── */
+#define MAX_FEED_TOKENS  20
+
+typedef struct {
+    char token_id[80];
+    char chain[16];
+    char symbol[24];
+    char contract_tail[12];
+    char source_tag[24];
+    char price[24];
+    char change_24h[16];
+    int  change_positive;
+    char volume_24h[16];
+    char market_cap[16];
+    char source[24];
+} feed_token_t;
+
+static feed_token_t s_tokens[MAX_FEED_TOKENS];
+static int          s_token_count = 0;
+static int          s_token_idx   = 0;   /* highlighted / selected */
+static int          s_scroll_top  = 0;   /* first visible row */
+
+/* Feed source cycling */
+static int s_source_idx = 0;
+static const char *SOURCE_NAMES[] = {"TRENDING", "GAINER", "LOSER", "NEW", "MEME", "AI", "DEPIN", "GAMEFI"};
+static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme", "ai", "depin", "gamefi"};
+#define N_SOURCES 8
+
+/* ─── Layout ──────────────────────────────────────────────────────────────── */
+#define VISIBLE_ROWS  8
+#define ROW_H        24
+#define TOP_BAR_H    22
+#define BOTTOM_Y     215
+#define BOTTOM_BAR_H (240 - BOTTOM_Y)
+
+/* Bottom bar segmented slots (320x240):
+ * Prevent hint overlap by reserving explicit widths for left/center/right regions. */
+#define BOT_SLOT_LEFT_W   80
+#define BOT_SLOT_CENTER_W 120
+#define BOT_SLOT_RIGHT_W  (320 - BOT_SLOT_LEFT_W - BOT_SLOT_CENTER_W) /* 120 */
+#define BOT_SLOT_PAD_X    6
+#define BOT_DIV_X1        BOT_SLOT_LEFT_W
+#define BOT_DIV_X2        (BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W)
+
+/* Column x positions (within the row container, i.e. relative to x=0) */
+#define COL_CHAIN_X    4
+#define COL_SYM_X     44
+#define COL_PRICE_X   120
+#define COL_CHG_X     234
+
+/* ─── Colors ──────────────────────────────────────────────────────────────── */
+#define COLOR_GREEN   lv_color_hex(0x00C853)
+#define COLOR_RED     lv_color_hex(0xFF1744)
+#define COLOR_ORANGE  lv_color_hex(0xFF6D00)
+#define COLOR_WHITE   lv_color_hex(0xFFFFFF)
+#define COLOR_GRAY    lv_color_hex(0x9E9E9E)
+#define COLOR_BG      lv_color_hex(0x0A0A0A)
+#define COLOR_BAR     lv_color_hex(0x141414)
+#define COLOR_DIVIDER lv_color_hex(0x2A2A2A)
+#define COLOR_SEL     lv_color_hex(0x0D2010)   /* selected row tint */
+#define COLOR_ALT     lv_color_hex(0x0D0D0D)   /* alternating row */
+
+/* Chain badge colors */
+#define COLOR_SOL     lv_color_hex(0x9945FF)
+#define COLOR_ETH     lv_color_hex(0x627EEA)
+#define COLOR_BSC     lv_color_hex(0xF3BA2F)
+#define COLOR_BASE    lv_color_hex(0x0052FF)
+
+/* ─── LVGL objects ────────────────────────────────────────────────────────── */
+static lv_obj_t *s_screen     = NULL;
+static lv_obj_t *s_top_bar    = NULL;
+static lv_obj_t *s_lbl_count  = NULL;
+static lv_obj_t *s_lbl_source = NULL;
+static lv_obj_t *s_lbl_src_hint = NULL;
+static lv_obj_t *s_lbl_nav_hint = NULL;
+static lv_obj_t *s_lbl_action_hint = NULL;
+static lv_obj_t *s_lbl_mode = NULL;
+static int s_is_orders_mode = 0;
+static int s_is_search_mode = 0;
+static char s_feed_source_label[24] = "TRENDING";
+static char s_active_source_label[24] = "TRENDING";
+static char s_last_search_query[24] = "";
+static int s_has_special_source_label = 0;
+
+typedef enum {
+    FEED_SURFACE_STANDARD = 0,
+    FEED_SURFACE_EXPLORE_PANEL,
+    FEED_SURFACE_EXPLORE_SEARCH_GUIDE,
+    FEED_SURFACE_EXPLORE_SOURCES,
+} feed_surface_t;
+
+typedef enum {
+    FEED_EXPLORE_ITEM_SEARCH = 0,
+    FEED_EXPLORE_ITEM_ORDERS,
+    FEED_EXPLORE_ITEM_SOURCES,
+    FEED_EXPLORE_ITEM_COUNT,
+} feed_explore_item_id_t;
+
+typedef struct {
+    feed_explore_item_id_t id;
+    const char *title;
+    const char *subtitle;
+    feed_surface_t surface;
+} feed_explore_item_t;
+
+typedef enum {
+    FEED_SOURCE_ENTRY_TOPIC = 0,
+    FEED_SOURCE_ENTRY_PLATFORM,
+} feed_source_entry_kind_t;
+
+typedef struct {
+    const char *label;
+    const char *value;
+    const char *subtitle;
+    feed_source_entry_kind_t kind;
+} feed_source_entry_t;
+
+typedef struct {
+    feed_surface_t surface;
+    const char *mode_label;
+    int mode_dim;
+    const char *nav_hint;
+    const char *src_hint;
+    const char *action_hint;
+    int is_overlay_local;
+} feed_surface_model_t;
+
+static feed_surface_t s_feed_surface = FEED_SURFACE_STANDARD;
+static int s_explore_idx = 0;
+static int s_source_menu_idx = 0;
+
+static void _update_rows(void);
+static void _close_feed_overlay(void);
+
+static const feed_explore_item_t EXPLORE_ITEMS[FEED_EXPLORE_ITEM_COUNT] = {
+    {FEED_EXPLORE_ITEM_SEARCH,  "Search",  "FN 说币名",                    FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
+    {FEED_EXPLORE_ITEM_ORDERS,  "Orders",  "Open current orders list",    FEED_SURFACE_STANDARD},
+    {FEED_EXPLORE_ITEM_SOURCES, "Sources", "Choose topic or platform",    FEED_SURFACE_STANDARD},
+};
+
+static const feed_source_entry_t SOURCE_MENU[] = {
+    {"TRENDING",    "trending",        "Topic",    FEED_SOURCE_ENTRY_TOPIC},
+    {"GAINER",      "gainer",          "Topic",    FEED_SOURCE_ENTRY_TOPIC},
+    {"LOSER",       "loser",           "Topic",    FEED_SOURCE_ENTRY_TOPIC},
+    {"NEW",         "new",             "Topic",    FEED_SOURCE_ENTRY_TOPIC},
+    {"PUMP HOT",    "pump_in_hot",     "Platform", FEED_SOURCE_ENTRY_PLATFORM},
+    {"PUMP NEW",    "pump_in_new",     "Platform", FEED_SOURCE_ENTRY_PLATFORM},
+    {"4MEME HOT",   "fourmeme_in_hot", "Platform", FEED_SOURCE_ENTRY_PLATFORM},
+    {"4MEME NEW",   "fourmeme_in_new", "Platform", FEED_SOURCE_ENTRY_PLATFORM},
+};
+
+static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
+    {FEED_SURFACE_STANDARD,             "FEED",    1, "^ v MOVE", "< REFRESH  X SOURCE", "> DETAIL  Y PORTFOLIO", 0},
+    {FEED_SURFACE_EXPLORE_PANEL,        "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
+    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "EXPLORE", 0, "FN 说币名", "< CLOSE",              "> OFF  Y PORTFOLIO",    1},
+    {FEED_SURFACE_EXPLORE_SOURCES,      "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
+};
+
+typedef struct {
+    lv_obj_t *row;
+    lv_obj_t *lbl_chain;
+    lv_obj_t *lbl_sym;
+    lv_obj_t *lbl_price;
+    lv_obj_t *lbl_chg;
+} feed_row_ui_t;
+
+static feed_row_ui_t s_rows[VISIBLE_ROWS];
+
+static int _source_index_from_label(const char *label)
+{
+    if (!label || !label[0]) return -1;
+    for (int i = 0; i < N_SOURCES; i++) {
+        if (strcmp(label, SOURCE_NAMES[i]) == 0) return i;
+    }
+    return -1;
+}
+
+static int _label_is_standard_source(const char *label)
+{
+    return _source_index_from_label(label) >= 0;
+}
+
+static int _is_empty_payload(const char *json)
+{
+    return (!json || strcmp(json, "{}") == 0);
+}
+
+static void _apply_source_label(const char *label, int remember_as_feed_source)
+{
+    const char *effective = label;
+    if (!effective || !effective[0]) {
+        effective = s_feed_source_label[0] ? s_feed_source_label : SOURCE_NAMES[s_source_idx];
+    }
+
+    if (remember_as_feed_source && label && label[0]) {
+        int idx = _source_index_from_label(label);
+        if (idx >= 0) {
+            snprintf(s_feed_source_label, sizeof(s_feed_source_label), "%s", label);
+            s_source_idx = idx;
+        }
+    }
+
+    snprintf(s_active_source_label, sizeof(s_active_source_label), "%s", effective);
+    s_has_special_source_label = !_label_is_standard_source(s_active_source_label);
+
+    if (s_lbl_source) lv_label_set_text(s_lbl_source, s_active_source_label);
+}
+
+static void _load_local_placeholder(void)
+{
+    memset(s_tokens, 0, sizeof(s_tokens));
+    s_token_count = 1;
+    s_token_idx = 0;
+    s_scroll_top = 0;
+    strcpy(s_tokens[0].symbol, "LOADING");
+    strcpy(s_tokens[0].price, "--");
+    strcpy(s_tokens[0].change_24h, "--");
+    s_tokens[0].change_positive = 1;
+}
+
+static int _clamp_explore_idx(int idx)
+{
+    if (idx < 0) return 0;
+    if (idx >= FEED_EXPLORE_ITEM_COUNT) return FEED_EXPLORE_ITEM_COUNT - 1;
+    return idx;
+}
+
+static const feed_explore_item_t *_current_explore_item(void)
+{
+    return &EXPLORE_ITEMS[_clamp_explore_idx(s_explore_idx)];
+}
+
+static int _source_menu_count(void)
+{
+    return (int)(sizeof(SOURCE_MENU) / sizeof(SOURCE_MENU[0]));
+}
+
+static int _clamp_source_menu_idx(int idx)
+{
+    if (idx < 0) return 0;
+    if (idx >= _source_menu_count()) return _source_menu_count() - 1;
+    return idx;
+}
+
+static const feed_source_entry_t *_current_source_entry(void)
+{
+    return &SOURCE_MENU[_clamp_source_menu_idx(s_source_menu_idx)];
+}
+
+static const feed_surface_model_t *_surface_model_for(feed_surface_t surface)
+{
+    int idx = (int)surface;
+
+    if (idx < 0 || idx >= (int)(sizeof(FEED_SURFACE_MODELS) / sizeof(FEED_SURFACE_MODELS[0]))) {
+        return &FEED_SURFACE_MODELS[0];
+    }
+    return &FEED_SURFACE_MODELS[idx];
+}
+
+static const feed_surface_model_t *_current_surface_model(void)
+{
+    if (s_is_orders_mode) {
+        static const feed_surface_model_t orders_model = {
+            FEED_SURFACE_STANDARD,
+            "ORDERS",
+            0,
+            "^ v MOVE",
+            "Orders: view only",
+            "B BACK  Y PORT",
+            0,
+        };
+        return &orders_model;
+    }
+    if (s_is_search_mode) {
+        static const feed_surface_model_t search_model = {
+            FEED_SURFACE_STANDARD,
+            "SEARCH",
+            0,
+            "^ v MOVE",
+            "< X SOURCE OFF",
+            "> DETAIL  Y PORTFOLIO",
+            0,
+        };
+        return &search_model;
+    }
+    if (s_has_special_source_label) {
+        static const feed_surface_model_t special_model = {
+            FEED_SURFACE_STANDARD,
+            "SPECIAL",
+            0,
+            "^ v MOVE",
+            "< X SOURCE OFF",
+            "> DETAIL  Y PORTFOLIO",
+            0,
+        };
+        return &special_model;
+    }
+    return _surface_model_for(s_feed_surface);
+}
+
+static void _update_mode_identity(const feed_surface_model_t *surface_model)
+{
+    if (!s_lbl_mode) return;
+
+    lv_label_set_text(s_lbl_mode, surface_model->mode_label);
+    lv_obj_set_style_text_color(s_lbl_mode, surface_model->mode_dim ? COLOR_GRAY : COLOR_WHITE, 0);
+}
+
+static void _update_mode_hint(const feed_surface_model_t *surface_model)
+{
+    if (!s_lbl_src_hint || !s_lbl_action_hint || !s_lbl_nav_hint) return;
+
+    lv_label_set_text(s_lbl_nav_hint, surface_model->nav_hint);
+    lv_label_set_text(s_lbl_src_hint, surface_model->src_hint);
+    lv_label_set_text(s_lbl_action_hint, surface_model->action_hint);
+}
+
+static int _feed_overlay_active(void)
+{
+    return _current_surface_model()->is_overlay_local;
+}
+
+static int _is_standard_feed_home(void)
+{
+    return !s_is_orders_mode &&
+           !s_is_search_mode &&
+           !s_has_special_source_label &&
+           s_feed_surface == FEED_SURFACE_STANDARD;
+}
+
+static void _render_feed_surface(void)
+{
+    const feed_surface_model_t *surface_model = _current_surface_model();
+
+    /* Clamp the panel cursor through the shared Explore item model. */
+    s_explore_idx = _clamp_explore_idx(s_explore_idx);
+    s_source_menu_idx = _clamp_source_menu_idx(s_source_menu_idx);
+
+    _update_mode_identity(surface_model);
+    _update_mode_hint(surface_model);
+    _update_rows();
+}
+
+static void _activate_current_explore_item(void)
+{
+    const feed_explore_item_t *item = _current_explore_item();
+
+    if (item->id == FEED_EXPLORE_ITEM_ORDERS) {
+        ave_send_json("{\"type\":\"key_action\",\"action\":\"orders\"}");
+        _close_feed_overlay();
+        return;
+    }
+
+    if (item->id == FEED_EXPLORE_ITEM_SOURCES) {
+        s_feed_surface = FEED_SURFACE_EXPLORE_SOURCES;
+        s_source_menu_idx = 0;
+        _render_feed_surface();
+        return;
+    }
+
+    if (item->surface == FEED_SURFACE_STANDARD) {
+        return;
+    }
+
+    s_feed_surface = item->surface;
+    _render_feed_surface();
+}
+
+static void _activate_current_source_entry(void)
+{
+    const feed_source_entry_t *entry = _current_source_entry();
+    char cmd[256];
+
+    if (entry->kind == FEED_SOURCE_ENTRY_TOPIC) {
+        snprintf(cmd, sizeof(cmd),
+                 "{\"type\":\"key_action\",\"action\":\"feed_source\",\"source\":\"%s\"}",
+                 entry->value);
+    } else {
+        snprintf(cmd, sizeof(cmd),
+                 "{\"type\":\"key_action\",\"action\":\"feed_platform\",\"platform\":\"%s\"}",
+                 entry->value);
+    }
+
+    ave_send_json(cmd);
+    _close_feed_overlay();
+}
+
+static void _open_explore_panel(void)
+{
+    s_feed_surface = FEED_SURFACE_EXPLORE_PANEL;
+    s_explore_idx = 0;
+    _render_feed_surface();
+}
+
+static void _close_feed_overlay(void)
+{
+    s_feed_surface = FEED_SURFACE_STANDARD;
+    _render_feed_surface();
+}
+
+/* ─── Chain helpers ───────────────────────────────────────────────────────── */
+static const char *_chain_short(const char *chain)
+{
+    if (!chain || !chain[0]) return "???";
+    if (strncmp(chain, "solana", 6) == 0) return "SOL";
+    if (strncmp(chain, "eth",    3) == 0) return "ETH";
+    if (strncmp(chain, "bsc",    3) == 0) return "BSC";
+    if (strncmp(chain, "base",   4) == 0) return "BASE";
+    /* Generic: first 4 chars uppercased */
+    static char buf[8];
+    int i = 0;
+    while (chain[i] && i < 4) {
+        char c = chain[i];
+        buf[i++] = (c >= 'a' && c <= 'z') ? c - 32 : c;
+    }
+    buf[i] = '\0';
+    return buf;
+}
+
+static lv_color_t _chain_color(const char *chain)
+{
+    if (!chain) return COLOR_GRAY;
+    if (strncmp(chain, "solana", 6) == 0) return COLOR_SOL;
+    if (strncmp(chain, "eth",    3) == 0) return COLOR_ETH;
+    if (strncmp(chain, "bsc",    3) == 0) return COLOR_BSC;
+    if (strncmp(chain, "base",   4) == 0) return COLOR_BASE;
+    return COLOR_GRAY;
+}
+
+/* ─── JSON parsing ────────────────────────────────────────────────────────── */
+static int _get_json_str_field(const char *obj, const char *key, char *out, int n)
+{
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *p = strstr(obj, needle);
+    if (!p) return 0;
+    p += strlen(needle);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p == '"') {
+        p++;
+        int i = 0;
+        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
+        out[i] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int _get_json_int_field(const char *obj, const char *key, int def)
+{
+    char val[32] = {0};
+    if (_get_json_str_field(obj, key, val, sizeof(val)))
+        return atoi(val);
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *p = strstr(obj, needle);
+    if (!p) return def;
+    p += strlen(needle);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p >= '0' && *p <= '9') return atoi(p);
+    if (*p == '-') return atoi(p);
+    if (*p == 't') return 1;
+    if (*p == 'f') return 0;
+    return def;
+}
+
+static int _get_json_tristate_field(const char *obj, const char *key, int def)
+{
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *p = strstr(obj, needle);
+    if (!p) return def;
+    p += strlen(needle);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p >= '0' && *p <= '9') return atoi(p);
+    if (*p == '-') return atoi(p);
+    if (*p == 't') return 1;
+    if (*p == 'f') return 0;
+    if (*p == 'n') return -1;
+    return def;
+}
+
+static void _parse_tokens_from_json(const char *json)
+{
+    s_token_count = 0;
+
+    const char *arr = strstr(json, "\"tokens\"");
+    if (!arr) {
+        /* No tokens array — show placeholder */
+        s_token_count = 1;
+        strcpy(s_tokens[0].symbol,    "---");
+        strcpy(s_tokens[0].price,     "$0");
+        strcpy(s_tokens[0].change_24h,"N/A");
+        strcpy(s_tokens[0].source,    "loading");
+        return;
+    }
+    arr = strchr(arr, '[');
+    if (!arr) return;
+    arr++;
+
+    const char *p = arr;
+    while (*p && s_token_count < MAX_FEED_TOKENS) {
+        p = strchr(p, '{');
+        if (!p) break;
+        int depth = 1;
+        const char *obj_start = p++;
+        while (*p && depth > 0) {
+            if (*p == '"') {
+                p++;
+                while (*p && *p != '"') {
+                    if (*p == '\\') p++;
+                    if (*p) p++;
+                }
+                if (*p) p++;
+                continue;
+            }
+            if (*p == '{') depth++;
+            if (*p == '}') depth--;
+            p++;
+        }
+        size_t obj_len = (size_t)(p - obj_start);
+        char  *obj = (char *)malloc(obj_len + 1);
+        if (!obj) break;
+        memcpy(obj, obj_start, obj_len);
+        obj[obj_len] = '\0';
+
+        feed_token_t *t = &s_tokens[s_token_count];
+        memset(t, 0, sizeof(*t));
+        _get_json_str_field(obj, "token_id",   t->token_id,   sizeof(t->token_id));
+        _get_json_str_field(obj, "chain",      t->chain,      sizeof(t->chain));
+        _get_json_str_field(obj, "symbol",     t->symbol,     sizeof(t->symbol));
+        _get_json_str_field(obj, "contract_tail", t->contract_tail, sizeof(t->contract_tail));
+        _get_json_str_field(obj, "source_tag", t->source_tag, sizeof(t->source_tag));
+        _get_json_str_field(obj, "price",      t->price,      sizeof(t->price));
+        _get_json_str_field(obj, "change_24h", t->change_24h, sizeof(t->change_24h));
+        _get_json_str_field(obj, "volume_24h", t->volume_24h, sizeof(t->volume_24h));
+        _get_json_str_field(obj, "market_cap", t->market_cap, sizeof(t->market_cap));
+        _get_json_str_field(obj, "source",     t->source,     sizeof(t->source));
+        t->change_positive = _get_json_tristate_field(obj, "change_positive", -1);
+        if (!t->symbol[0]) strcpy(t->symbol, "???");
+        free(obj);
+        s_token_count++;
+    }
+}
+
+static void _feed_symbol_text(const feed_token_t *t, char *out, size_t out_n)
+{
+    if (!out || out_n == 0) return;
+    if (!t) {
+        out[0] = '\0';
+        return;
+    }
+    if (t->contract_tail[0]) {
+        snprintf(out, out_n, "%s *%s", t->symbol[0] ? t->symbol : "???", t->contract_tail);
+        return;
+    }
+    if (t->source_tag[0]) {
+        snprintf(out, out_n, "%s %s", t->symbol[0] ? t->symbol : "???", t->source_tag);
+        return;
+    }
+    snprintf(out, out_n, "%s", t->symbol[0] ? t->symbol : "???");
+}
+
+/* ─── Update visible rows ─────────────────────────────────────────────────── */
+static void _set_row_text(feed_row_ui_t *ui,
+                          lv_color_t row_bg,
+                          lv_color_t chain_color,
+                          lv_color_t chg_color,
+                          const char *chain,
+                          const char *sym,
+                          const char *price,
+                          const char *chg)
+{
+    lv_obj_set_style_bg_color(ui->row, row_bg, 0);
+    lv_label_set_text(ui->lbl_chain, chain ? chain : "");
+    lv_obj_set_style_text_color(ui->lbl_chain, chain_color, 0);
+    lv_label_set_text(ui->lbl_sym, sym ? sym : "");
+    lv_label_set_text(ui->lbl_price, price ? price : "");
+    lv_label_set_text(ui->lbl_chg, chg ? chg : "");
+    lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
+}
+
+static void _clear_row(feed_row_ui_t *ui)
+{
+    _set_row_text(ui, COLOR_BG, COLOR_GRAY, COLOR_GRAY, "", "", "", "");
+}
+
+static void _update_overlay_rows(void)
+{
+    int total = 0;
+    int cursor = 0;
+
+    if (s_feed_surface == FEED_SURFACE_EXPLORE_PANEL) {
+        total = FEED_EXPLORE_ITEM_COUNT;
+        cursor = _clamp_explore_idx(s_explore_idx);
+    } else if (s_feed_surface == FEED_SURFACE_EXPLORE_SOURCES) {
+        total = _source_menu_count();
+        cursor = _clamp_source_menu_idx(s_source_menu_idx);
+    }
+
+    if (s_lbl_count) {
+        if (total > 0) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d/%d", cursor + 1, total);
+            lv_label_set_text(s_lbl_count, buf);
+        } else {
+            lv_label_set_text(s_lbl_count, "");
+        }
+    }
+
+    for (int r = 0; r < VISIBLE_ROWS; r++) {
+        feed_row_ui_t *ui = &s_rows[r];
+
+        if (s_feed_surface == FEED_SURFACE_EXPLORE_PANEL) {
+            if (r >= FEED_EXPLORE_ITEM_COUNT) {
+                _clear_row(ui);
+                continue;
+            }
+
+            const feed_explore_item_t *item = &EXPLORE_ITEMS[r];
+            int selected = (r == cursor);
+            _set_row_text(ui,
+                          selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
+                          selected ? COLOR_WHITE : COLOR_GRAY,
+                          COLOR_GRAY,
+                          selected ? ">" : "",
+                          item->title,
+                          item->subtitle,
+                          "");
+            continue;
+        }
+
+        if (s_feed_surface == FEED_SURFACE_EXPLORE_SEARCH_GUIDE) {
+            char last_search_line[40];
+            static const char *guide_sym[VISIBLE_ROWS] = {
+                "Search",
+                "Hold FN",
+                "Example",
+                "Last search",
+                "Voice",
+                "",
+                "",
+                "",
+            };
+            snprintf(last_search_line, sizeof(last_search_line), "%s",
+                     s_last_search_query[0] ? s_last_search_query : "No recent search");
+            const char *guide_price[VISIBLE_ROWS] = {
+                "Guided entry",
+                "FN 说币名",
+                "BONK / PEPE / DOGE",
+                last_search_line,
+                "Y stays global",
+                "",
+                "",
+                "",
+            };
+            _set_row_text(ui,
+                          (r == 0) ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
+                          (r == 0) ? COLOR_WHITE : COLOR_GRAY,
+                          COLOR_GRAY,
+                          "",
+                          guide_sym[r],
+                          guide_price[r],
+                          "");
+            continue;
+        }
+
+        if (s_feed_surface == FEED_SURFACE_EXPLORE_SOURCES) {
+            if (r >= _source_menu_count()) {
+                _clear_row(ui);
+                continue;
+            }
+
+            const feed_source_entry_t *entry = &SOURCE_MENU[r];
+            int selected = (r == cursor);
+            _set_row_text(ui,
+                          selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
+                          selected ? COLOR_WHITE : COLOR_GRAY,
+                          COLOR_GRAY,
+                          selected ? ">" : "",
+                          entry->label,
+                          entry->subtitle,
+                          "");
+            continue;
+        }
+
+        _clear_row(ui);
+    }
+}
+
+static void _update_token_rows(void)
+{
+    for (int r = 0; r < VISIBLE_ROWS; r++) {
+        int tok_idx = s_scroll_top + r;
+        feed_row_ui_t *ui = &s_rows[r];
+
+        if (tok_idx >= s_token_count) {
+            lv_obj_set_style_bg_color(ui->row, COLOR_BG, 0);
+            lv_label_set_text(ui->lbl_chain, "");
+            lv_label_set_text(ui->lbl_sym,   "");
+            lv_label_set_text(ui->lbl_price, "");
+            lv_label_set_text(ui->lbl_chg,   "");
+            continue;
+        }
+
+        const feed_token_t *t = &s_tokens[tok_idx];
+        char sym_buf[48];
+        lv_color_t row_bg;
+        if (tok_idx == s_token_idx)
+            row_bg = COLOR_SEL;
+        else
+            row_bg = (r & 1) ? COLOR_ALT : COLOR_BG;
+        lv_obj_set_style_bg_color(ui->row, row_bg, 0);
+
+        lv_label_set_text(ui->lbl_chain, _chain_short(t->chain));
+        lv_obj_set_style_text_color(ui->lbl_chain, _chain_color(t->chain), 0);
+
+        _feed_symbol_text(t, sym_buf, sizeof(sym_buf));
+        lv_label_set_text(ui->lbl_sym, sym_buf);
+        lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : "$0");
+
+        lv_label_set_text(ui->lbl_chg, t->change_24h[0] ? t->change_24h : "N/A");
+        if (!t->change_24h[0] ||
+            strcmp(t->change_24h, "N/A") == 0 ||
+            strcmp(t->change_24h, "--") == 0 ||
+            t->change_positive < 0) {
+            lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
+        } else {
+            lv_obj_set_style_text_color(ui->lbl_chg,
+                t->change_positive ? COLOR_GREEN : COLOR_RED, 0);
+        }
+    }
+
+    if (s_lbl_count && s_token_count > 0) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%d/%d", s_token_idx + 1, s_token_count);
+        lv_label_set_text(s_lbl_count, buf);
+    }
+}
+
+static void _update_rows(void)
+{
+    if (_feed_overlay_active()) {
+        _update_overlay_rows();
+        return;
+    }
+    _update_token_rows();
+}
+
+/* ─── Build screen ────────────────────────────────────────────────────────── */
+static void _build_screen(void)
+{
+    s_screen = lv_obj_create(NULL);
+    lv_obj_set_size(s_screen, 320, 240);
+    lv_obj_set_style_bg_color(s_screen, COLOR_BG, 0);
+    lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ── Top bar ─────────────────────────────────────────────────────────── */
+    s_top_bar = lv_obj_create(s_screen);
+    lv_obj_set_size(s_top_bar, 320, TOP_BAR_H);
+    lv_obj_set_pos(s_top_bar, 0, 0);
+    lv_obj_set_style_bg_color(s_top_bar, COLOR_BAR, 0);
+    lv_obj_set_style_bg_opa(s_top_bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_top_bar, 0, 0);
+    lv_obj_set_style_pad_all(s_top_bar, 0, 0);
+    lv_obj_clear_flag(s_top_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_lbl_source = lv_label_create(s_top_bar);
+    lv_obj_set_pos(s_lbl_source, 8, 4);
+    lv_label_set_text(s_lbl_source, "TRENDING");
+    lv_obj_set_style_text_color(s_lbl_source, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(s_lbl_source, &lv_font_montserrat_12, 0);
+
+    s_lbl_count = lv_label_create(s_top_bar);
+    lv_obj_align(s_lbl_count, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_set_style_text_color(s_lbl_count, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_count, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_lbl_count, "");
+
+    s_lbl_mode = lv_label_create(s_top_bar);
+    lv_obj_align(s_lbl_mode, LV_ALIGN_RIGHT_MID, -74, 0);
+    lv_obj_set_width(s_lbl_mode, 64);
+    lv_label_set_long_mode(s_lbl_mode, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_mode, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_mode, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_lbl_mode, "FEED");
+
+    /* ── List rows ───────────────────────────────────────────────────────── */
+    for (int r = 0; r < VISIBLE_ROWS; r++) {
+        feed_row_ui_t *ui = &s_rows[r];
+        int row_y = TOP_BAR_H + r * ROW_H;
+
+        ui->row = lv_obj_create(s_screen);
+        lv_obj_set_size(ui->row, 320, ROW_H);
+        lv_obj_set_pos(ui->row, 0, row_y);
+        lv_obj_set_style_bg_color(ui->row, COLOR_BG, 0);
+        lv_obj_set_style_bg_opa(ui->row, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(ui->row, 0, 0);
+        lv_obj_set_style_pad_all(ui->row, 0, 0);
+        lv_obj_clear_flag(ui->row, LV_OBJ_FLAG_SCROLLABLE);
+
+        /* Chain badge */
+        ui->lbl_chain = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, 5);
+        lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
+        lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(ui->lbl_chain, 38);
+
+        /* Symbol */
+        ui->lbl_sym = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, 4);
+        lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
+        lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(ui->lbl_sym, 74);
+
+        /* Price */
+        ui->lbl_price = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, 5);
+        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
+        lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(ui->lbl_price, 112);
+
+        /* Change % */
+        ui->lbl_chg = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, 5);
+        lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
+        lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
+        lv_obj_set_width(ui->lbl_chg, 82);
+    }
+
+    /* ── Divider ─────────────────────────────────────────────────────────── */
+    lv_obj_t *div = lv_obj_create(s_screen);
+    lv_obj_set_size(div, 320, 1);
+    lv_obj_set_pos(div, 0, BOTTOM_Y - 1);
+    lv_obj_set_style_bg_color(div, COLOR_DIVIDER, 0);
+    lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(div, 0, 0);
+
+    /* ── Bottom bar ──────────────────────────────────────────────────────── */
+    lv_obj_t *bot = lv_obj_create(s_screen);
+    lv_obj_set_size(bot, 320, 240 - BOTTOM_Y);
+    lv_obj_set_pos(bot, 0, BOTTOM_Y);
+    lv_obj_set_style_bg_color(bot, COLOR_BAR, 0);
+    lv_obj_set_style_bg_opa(bot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(bot, 0, 0);
+    lv_obj_set_style_pad_all(bot, 0, 0);
+    lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Explicit left/center/right slots prevent overlap on 320x240. */
+    lv_obj_t *bot_left = lv_obj_create(bot);
+    lv_obj_set_size(bot_left, BOT_SLOT_LEFT_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_left, 0, 0);
+    lv_obj_set_style_bg_opa(bot_left, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_left, 0, 0);
+    lv_obj_set_style_pad_all(bot_left, 0, 0);
+    lv_obj_clear_flag(bot_left, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *bot_center = lv_obj_create(bot);
+    lv_obj_set_size(bot_center, BOT_SLOT_CENTER_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_center, BOT_SLOT_LEFT_W, 0);
+    lv_obj_set_style_bg_opa(bot_center, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_center, 0, 0);
+    lv_obj_set_style_pad_all(bot_center, 0, 0);
+    lv_obj_clear_flag(bot_center, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *bot_right = lv_obj_create(bot);
+    lv_obj_set_size(bot_right, BOT_SLOT_RIGHT_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_right, BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W, 0);
+    lv_obj_set_style_bg_opa(bot_right, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_right, 0, 0);
+    lv_obj_set_style_pad_all(bot_right, 0, 0);
+    lv_obj_clear_flag(bot_right, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_lbl_nav_hint = lv_label_create(bot_left);
+    lv_label_set_long_mode(s_lbl_nav_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_lbl_nav_hint, BOT_SLOT_LEFT_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_nav_hint, LV_ALIGN_LEFT_MID, BOT_SLOT_PAD_X, 0);
+    lv_label_set_text(s_lbl_nav_hint, "^ v MOVE");
+    lv_obj_set_style_text_color(s_lbl_nav_hint, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_nav_hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_nav_hint, LV_TEXT_ALIGN_LEFT, 0);
+
+    s_lbl_src_hint = lv_label_create(bot_center);
+    lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_lbl_src_hint, BOT_SLOT_CENTER_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_src_hint, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(s_lbl_src_hint, "< REFRESH  X SOURCE");
+    lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_src_hint, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_lbl_action_hint = lv_label_create(bot_right);
+    lv_label_set_long_mode(s_lbl_action_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_lbl_action_hint, BOT_SLOT_RIGHT_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -BOT_SLOT_PAD_X, 0);
+    lv_label_set_text(s_lbl_action_hint, "> DETAIL  Y PORTFOLIO");
+    lv_obj_set_style_text_color(s_lbl_action_hint, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(s_lbl_action_hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_action_hint, LV_TEXT_ALIGN_RIGHT, 0);
+
+    /* Vertical dividers between slots (also used by the screenshot gate).
+     * Create last so they stay visible even if a label ever regresses to overlap. */
+    lv_obj_t *vdiv1 = lv_obj_create(bot);
+    lv_obj_set_size(vdiv1, 1, BOTTOM_BAR_H);
+    lv_obj_set_pos(vdiv1, BOT_DIV_X1, 0);
+    lv_obj_set_style_bg_color(vdiv1, COLOR_DIVIDER, 0);
+    lv_obj_set_style_bg_opa(vdiv1, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(vdiv1, 0, 0);
+    lv_obj_set_style_pad_all(vdiv1, 0, 0);
+    lv_obj_clear_flag(vdiv1, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *vdiv2 = lv_obj_create(bot);
+    lv_obj_set_size(vdiv2, 1, BOTTOM_BAR_H);
+    lv_obj_set_pos(vdiv2, BOT_DIV_X2, 0);
+    lv_obj_set_style_bg_color(vdiv2, COLOR_DIVIDER, 0);
+    lv_obj_set_style_bg_opa(vdiv2, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(vdiv2, 0, 0);
+    lv_obj_set_style_pad_all(vdiv2, 0, 0);
+    lv_obj_clear_flag(vdiv2, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/* ─── Public screen API ───────────────────────────────────────────────────── */
+
+void screen_feed_show(const char *json_data)
+{
+    if (!s_screen) _build_screen();
+    lv_screen_load(s_screen);
+
+    if (_is_empty_payload(json_data)) {
+        s_is_orders_mode = 0;
+        s_is_search_mode = 0;
+        s_feed_surface = FEED_SURFACE_STANDARD;
+        _apply_source_label(NULL, 0);
+        if (s_top_bar) lv_obj_set_style_bg_color(s_top_bar, COLOR_BAR, 0);
+        _render_feed_surface();
+        _load_local_placeholder();
+        _render_feed_surface();
+        return;
+    }
+
+    int has_tokens = (json_data && strstr(json_data, "\"tokens\"") != NULL);
+    int is_live_push = (json_data && strstr(json_data, "\"live\":true") != NULL);
+    char source_label[24] = {0};
+    char search_query[24] = {0};
+    char mode[16] = {0};
+    char prev_label[24];
+    int has_source_label = _get_json_str_field(json_data, "source_label", source_label, sizeof(source_label));
+    int has_search_query = _get_json_str_field(json_data, "search_query", search_query, sizeof(search_query));
+    int has_mode = _get_json_str_field(json_data, "mode", mode, sizeof(mode));
+    int prev_orders_mode = s_is_orders_mode;
+
+    snprintf(prev_label, sizeof(prev_label), "%s", s_active_source_label);
+
+    if (has_search_query) {
+        snprintf(s_last_search_query, sizeof(s_last_search_query), "%s", search_query);
+    }
+
+    if (has_mode) {
+        s_is_orders_mode = (strcmp(mode, "orders") == 0);
+        s_is_search_mode = (strcmp(mode, "search") == 0);
+    } else {
+        if (has_source_label) {
+            s_is_search_mode = (strcmp(source_label, "SEARCH") == 0);
+        } else if (has_tokens) {
+            /* Fresh list without an explicit SEARCH label should clear SEARCH mode. */
+            s_is_search_mode = 0;
+        }
+
+        /* Fresh non-orders payloads should leave orders mode. */
+        if (has_tokens) s_is_orders_mode = 0;
+    }
+
+    if (s_lbl_source) {
+        if (has_source_label && source_label[0]) {
+            _apply_source_label(source_label, !s_is_orders_mode);
+        } else if (s_is_orders_mode) {
+            _apply_source_label("ORDERS", 0);
+        } else if (s_is_search_mode) {
+            _apply_source_label("SEARCH", 0);
+        } else if (!s_is_orders_mode && has_tokens) {
+            _apply_source_label(NULL, 0);
+        }
+    }
+
+    if ((has_tokens && !is_live_push) ||
+        s_is_orders_mode ||
+        s_is_search_mode ||
+        s_has_special_source_label) {
+        s_feed_surface = FEED_SURFACE_STANDARD;
+    }
+
+    if (s_top_bar) {
+        lv_obj_set_style_bg_color(s_top_bar, s_is_orders_mode ? COLOR_ORANGE : COLOR_BAR, 0);
+    }
+    _render_feed_surface();
+
+    if (!has_tokens &&
+        ((has_mode && prev_orders_mode != s_is_orders_mode) ||
+         (has_source_label && strcmp(prev_label, s_active_source_label) != 0))) {
+        _load_local_placeholder();
+    }
+
+    if (has_tokens || s_token_count == 0) {
+        int requested_cursor = _get_json_int_field(json_data, "cursor", -1);
+        _parse_tokens_from_json(json_data);
+        if (has_tokens) {
+            /* New list payloads reset to top unless a restore cursor is supplied. */
+            if (requested_cursor >= 0 && requested_cursor < s_token_count) {
+                s_token_idx = requested_cursor;
+            } else {
+                s_token_idx = 0;
+            }
+            s_scroll_top = (s_token_idx >= VISIBLE_ROWS) ? (s_token_idx - VISIBLE_ROWS + 1) : 0;
+        }
+    }
+
+    _update_rows();
+}
+
+static void _move_selection(int delta)
+{
+    if (s_token_count < 1) return;
+    s_token_idx = (s_token_idx + delta + s_token_count) % s_token_count;
+    /* Scroll window to keep selection visible */
+    if (s_token_idx < s_scroll_top)
+        s_scroll_top = s_token_idx;
+    else if (s_token_idx >= s_scroll_top + VISIBLE_ROWS)
+        s_scroll_top = s_token_idx - VISIBLE_ROWS + 1;
+    _update_rows();
+}
+
+static void _enter_selected_detail(void)
+{
+    char cmd[384];
+    char cursor_buf[16];
+    ave_sm_json_field_t fields[] = {
+        {"token_id", ""},
+        {"chain", ""},
+        {"cursor", cursor_buf},
+    };
+
+    if (s_token_count < 1) return;
+    const feed_token_t *t = &s_tokens[s_token_idx];
+    if (!t->token_id[0] || !t->chain[0]) return;
+
+    snprintf(cursor_buf, sizeof(cursor_buf), "%d", s_token_idx);
+    fields[0].value = t->token_id;
+    fields[1].value = t->chain;
+    if (!ave_sm_build_key_action_json("watch", fields, 3, cmd, sizeof(cmd))) return;
+    ave_send_json(cmd);
+    printf("[FEED] WATCH -> %s (%s)\n", t->symbol, t->chain);
+}
+
+void screen_feed_key(int key)
+{
+    if (_feed_overlay_active()) {
+        if (key == AVE_KEY_B || key == AVE_KEY_LEFT) {
+            _close_feed_overlay();
+            return;
+        }
+        if (s_feed_surface == FEED_SURFACE_EXPLORE_PANEL) {
+            if (key == AVE_KEY_UP) {
+                if (s_explore_idx > 0) s_explore_idx--;
+                _render_feed_surface();
+                return;
+            }
+            if (key == AVE_KEY_DOWN) {
+                if (s_explore_idx < FEED_EXPLORE_ITEM_COUNT - 1) s_explore_idx++;
+                _render_feed_surface();
+                return;
+            }
+            if (key == AVE_KEY_RIGHT || key == AVE_KEY_A) {
+                _activate_current_explore_item();
+                return;
+            }
+        }
+        if (s_feed_surface == FEED_SURFACE_EXPLORE_SOURCES) {
+            if (key == AVE_KEY_UP) {
+                if (s_source_menu_idx > 0) s_source_menu_idx--;
+                _render_feed_surface();
+                return;
+            }
+            if (key == AVE_KEY_DOWN) {
+                if (s_source_menu_idx < _source_menu_count() - 1) s_source_menu_idx++;
+                _render_feed_surface();
+                return;
+            }
+            if (key == AVE_KEY_RIGHT || key == AVE_KEY_A) {
+                _activate_current_source_entry();
+                return;
+            }
+        }
+        return;
+    }
+
+    if (key == AVE_KEY_B && _is_standard_feed_home()) {
+        _open_explore_panel();
+        return;
+    }
+
+    if (key == AVE_KEY_UP) {
+        _move_selection(-1);
+
+    } else if (key == AVE_KEY_DOWN) {
+        _move_selection(+1);
+
+    } else if (key == AVE_KEY_RIGHT || key == AVE_KEY_A) {
+        if (s_is_orders_mode) {
+            /* ORDERS is browse-only: do not enter detail / emit watch actions. */
+            return;
+        }
+        _enter_selected_detail();
+
+    } else if (key == AVE_KEY_LEFT) {
+        if (s_is_orders_mode) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"订单模式不支持刷新，请按 B 返回\"}");
+            return;
+        }
+        if (s_is_search_mode) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"SEARCH 模式不支持刷新/切换来源，请按 B 回到 FEED\"}");
+            return;
+        }
+        if (s_has_special_source_label) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"当前列表不支持切换来源，请按 B 回到 FEED\"}");
+            return;
+        }
+        /* Refresh current source (no index change) */
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd),
+                 "{\"type\":\"key_action\",\"action\":\"feed_source\",\"source\":\"%s\"}",
+                 SOURCE_KEYS[s_source_idx]);
+        ave_send_json(cmd);
+
+    } else if (key == AVE_KEY_X) {
+        if (s_is_orders_mode) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"订单模式暂不支持 X 操作，请按 B 返回\"}");
+            return;
+        }
+        if (s_is_search_mode) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"SEARCH 模式不支持刷新/切换来源，请按 B 回到 FEED\"}");
+            return;
+        }
+        if (s_has_special_source_label) {
+            screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"当前列表不支持切换来源，请按 B 回到 FEED\"}");
+            return;
+        }
+        s_source_idx = (s_source_idx + 1) % N_SOURCES;
+        _apply_source_label(SOURCE_NAMES[s_source_idx], 1);
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd),
+                 "{\"type\":\"key_action\",\"action\":\"feed_source\",\"source\":\"%s\"}",
+                 SOURCE_KEYS[s_source_idx]);
+        ave_send_json(cmd);
+    } else if (key == AVE_KEY_B) {
+        if (s_is_orders_mode) {
+            ave_send_json("{\"type\":\"key_action\",\"action\":\"back\"}");
+            ave_sm_go_to_feed();
+            return;
+        }
+        if (s_is_search_mode || s_has_special_source_label) {
+            int idx = s_source_idx;
+            if (idx < 0 || idx >= N_SOURCES) idx = 0;
+
+            s_is_search_mode = 0;
+            _apply_source_label(SOURCE_NAMES[idx], 0);
+            _load_local_placeholder();
+            _render_feed_surface();
+
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd),
+                     "{\"type\":\"key_action\",\"action\":\"feed_source\",\"source\":\"%s\"}",
+                     SOURCE_KEYS[idx]);
+            ave_send_json(cmd);
+            return;
+        }
+        screen_notify_show("{\"level\":\"warning\",\"title\":\"提示\",\"body\":\"已在首页\"}");
+    }
+}
+
+bool screen_feed_should_ignore_live_push(void)
+{
+    return s_is_orders_mode ||
+           s_is_search_mode ||
+           s_has_special_source_label ||
+           _feed_overlay_active();
+}
+
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{
+    char addr_esc[256];
+    char chain_esc[64];
+    char symbol_esc[64];
+
+    if (!out || out_n == 0) return 0;
+    /* ORDERS is browse-only across all input surfaces: never emit a trusted
+     * deictic selection context for listen/text commands in this mode. */
+    if (s_is_orders_mode) return 0;
+    if (_feed_overlay_active()) return 0;
+    if (s_token_count < 1 || s_token_idx < 0 || s_token_idx >= s_token_count) return 0;
+
+    const feed_token_t *t = &s_tokens[s_token_idx];
+    if (!t->token_id[0]) return 0;
+    if (!t->chain[0]) return 0;
+    if (!ave_sm_json_escape_string(t->token_id, addr_esc, sizeof(addr_esc))) return 0;
+    if (!ave_sm_json_escape_string(t->chain, chain_esc, sizeof(chain_esc))) return 0;
+    if (!ave_sm_json_escape_string(t->symbol, symbol_esc, sizeof(symbol_esc))) return 0;
+
+    int n = snprintf(
+        out, out_n,
+        "{\"screen\":\"feed\",\"cursor\":%d,\"token\":{\"addr\":\"%s\",\"chain\":\"%s\",\"symbol\":\"%s\"}}",
+        s_token_idx,
+        addr_esc,
+        chain_esc,
+        symbol_esc
+    );
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
+}

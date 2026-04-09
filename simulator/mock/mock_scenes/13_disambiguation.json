@@ -1,0 +1,34 @@
+{
+  "type": "display",
+  "screen": "disambiguation",
+  "ts": 1775461993,
+  "data": {
+    "cursor": 1,
+    "nav_from": "feed",
+    "total_candidates": 3,
+    "overflow_count": 0,
+    "items": [
+      {
+        "token_id": "So111111111111111111111111111111111111pepe",
+        "chain": "solana",
+        "symbol": "PEPE",
+        "contract_tail": "pepe",
+        "source_tag": "pump"
+      },
+      {
+        "token_id": "0x1234567890abcdef1234567890abcdefc0ffee42",
+        "chain": "base",
+        "symbol": "PEPE",
+        "contract_tail": "ee42",
+        "source_tag": "base"
+      },
+      {
+        "token_id": "0xabcdefabcdefabcdefabcdefabcdefabcdbeef",
+        "chain": "eth",
+        "symbol": "PEPE",
+        "contract_tail": "beef",
+        "source_tag": "uni"
+      }
+    ]
+  }
+}

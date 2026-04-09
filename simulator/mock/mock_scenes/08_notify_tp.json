@@ -1,0 +1,10 @@
+{
+  "type": "display",
+  "screen": "notify",
+  "ts": 1775456993,
+  "data": {
+    "level": "success",
+    "title": "Take Profit Hit!",
+    "body": "stonks +25% TP triggered"
+  }
+}

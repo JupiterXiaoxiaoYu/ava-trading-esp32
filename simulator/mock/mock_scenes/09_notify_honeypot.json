@@ -1,0 +1,10 @@
+{
+  "type": "display",
+  "screen": "notify",
+  "ts": 1775456993,
+  "data": {
+    "level": "error",
+    "title": "Honeypot Blocked",
+    "body": "Contract flagged as honeypot"
+  }
+}

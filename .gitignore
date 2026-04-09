@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+.env
+.env.*
+
+# Build outputs
+build/
+build-*/
+bin/
+out/
+*.o
+*.a
+*.so
+
+# Local temp/cache
+tmp/
+.tmp-ui-venv/
+
+# Secrets / local state
+apiSecret.txt
+apiSecret.zip
+server/main/xiaozhi-server/wallet-1/
+server/.env.ave
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+
+# Large generated/vendor dirs kept external or regenerable
+firmware/managed_components/
+firmware/releases/
+server/data/

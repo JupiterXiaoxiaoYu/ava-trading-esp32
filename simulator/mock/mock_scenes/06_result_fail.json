@@ -1,0 +1,10 @@
+{
+  "type": "display",
+  "screen": "result",
+  "ts": 1775456993,
+  "data": {
+    "success": false,
+    "title": "Failed",
+    "error": "Slippage exceeded limit"
+  }
+}

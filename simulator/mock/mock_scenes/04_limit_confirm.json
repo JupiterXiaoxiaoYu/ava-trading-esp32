@@ -1,0 +1,17 @@
+{
+  "type": "display",
+  "screen": "limit_confirm",
+  "ts": 1775456993,
+  "data": {
+    "trade_id": "e5f6g7h8",
+    "symbol": "stonks",
+    "amount_native": "0.1 SOL",
+    "limit_price": "$0.000384064",
+    "limit_price_raw": 0.000384064,
+    "current_price": "$0.00045184",
+    "current_price_raw": 0.00045184,
+    "distance_pct": "-15.0%",
+    "expire_hours": 24,
+    "timeout_sec": 10
+  }
+}

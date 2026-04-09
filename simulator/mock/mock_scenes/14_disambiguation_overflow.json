@@ -1,0 +1,97 @@
+{
+  "type": "display",
+  "screen": "disambiguation",
+  "ts": 1775462993,
+  "data": {
+    "cursor": 5,
+    "nav_from": "feed",
+    "total_candidates": 17,
+    "overflow_count": 5,
+    "items": [
+      {
+        "token_id": "So111111111111111111111111111111111111aa01",
+        "chain": "solana",
+        "symbol": "PEPE",
+        "contract_tail": "aa01",
+        "source_tag": "pump"
+      },
+      {
+        "token_id": "So111111111111111111111111111111111111aa02",
+        "chain": "solana",
+        "symbol": "PEPE",
+        "contract_tail": "aa02",
+        "source_tag": "pump"
+      },
+      {
+        "token_id": "0x1234567890abcdef1234567890abcdefaa03",
+        "chain": "base",
+        "symbol": "PEPE",
+        "contract_tail": "aa03",
+        "source_tag": "base"
+      },
+      {
+        "token_id": "0x1234567890abcdef1234567890abcdefaa04",
+        "chain": "base",
+        "symbol": "PEPE",
+        "contract_tail": "aa04",
+        "source_tag": "base"
+      },
+      {
+        "token_id": "0xabcdefabcdefabcdefabcdefabcdefabcdefaa05",
+        "chain": "eth",
+        "symbol": "PEPE",
+        "contract_tail": "aa05",
+        "source_tag": "uni"
+      },
+      {
+        "token_id": "0xabcdefabcdefabcdefabcdefabcdefabcdefaa06",
+        "chain": "eth",
+        "symbol": "PEPE",
+        "contract_tail": "aa06",
+        "source_tag": "uni"
+      },
+      {
+        "token_id": "So111111111111111111111111111111111111aa07",
+        "chain": "solana",
+        "symbol": "PEPE",
+        "contract_tail": "aa07",
+        "source_tag": "ray"
+      },
+      {
+        "token_id": "So111111111111111111111111111111111111aa08",
+        "chain": "solana",
+        "symbol": "PEPE",
+        "contract_tail": "aa08",
+        "source_tag": "ray"
+      },
+      {
+        "token_id": "0x1234567890abcdef1234567890abcdefaa09",
+        "chain": "base",
+        "symbol": "PEPE",
+        "contract_tail": "aa09",
+        "source_tag": "base"
+      },
+      {
+        "token_id": "0x1234567890abcdef1234567890abcdefaa10",
+        "chain": "base",
+        "symbol": "PEPE",
+        "contract_tail": "aa10",
+        "source_tag": "base"
+      },
+      {
+        "token_id": "0xabcdefabcdefabcdefabcdefabcdefabcdefaa11",
+        "chain": "eth",
+        "symbol": "PEPE",
+        "contract_tail": "aa11",
+        "source_tag": "uni"
+      },
+      {
+        "token_id": "0xabcdefabcdefabcdefabcdefabcdefabcdefaa12",
+        "chain": "eth",
+        "symbol": "PEPE",
+        "contract_tail": "aa12",
+        "source_tag": "uni"
+      }
+    ]
+  }
+}

@@ -1,0 +1,519 @@
+import json
+import re
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+from config.logger import setup_logging
+from core.handle.sendAudioHandle import send_stt_message
+from core.utils.util import remove_punctuation_and_length
+from plugins_func.register import Action
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
+TAG = __name__
+logger = setup_logging()
+
+_FEED_COMMANDS = {"看热门", "刷新热门", "热门代币"}
+_PORTFOLIO_COMMANDS = {"我的持仓", "持仓"}
+_WATCH_CURRENT_COMMANDS = {"看这个", "详情", "进入"}
+_BUY_CURRENT_COMMANDS = {"买这个"}
+_CONFIRM_COMMANDS = {"确认", "确认购买", "执行"}
+_CANCEL_COMMANDS = {"取消", "算了", "不买了"}
+_BACK_COMMANDS = {"返回", "回去", "首页", "回到热门"}
+_CONFIRM_SCREENS = {"confirm", "limit_confirm"}
+_DEICTIC_MARKERS = ("这个", "这只", "这币", "它")
+_DEICTIC_RISK_KEYWORDS = (
+    "买",
+    "能买吗",
+    "能不能买",
+    "分析",
+    "详情",
+    "介绍",
+    "风险",
+    "涨",
+    "跌",
+    "走势",
+    "价格",
+)
+_DEICTIC_RISK_PHRASES = {
+    "这个怎么样",
+    "帮我分析这个",
+    "分析这个",
+    "看看这个",
+    "看下这个",
+    "给我讲讲这个",
+    "讲讲这个",
+    "说说这个",
+    "聊聊这个",
+    "这个如何",
+    "给我讲讲它",
+    "说说它",
+    "聊聊它",
+}
+_OPEN_ENDED_DEICTIC_PATTERN = re.compile(
+    r"(?:(?:给我讲讲|讲讲|说说|聊聊|看看|看下|分析)(?:这只币|这币|它)|(?:这只币|这币|它)(?:怎么样|如何))"
+)
+_SELECTION_GUARDED_SCREENS = {"feed", "portfolio", "spotlight", "confirm", "limit_confirm"}
+
+_WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
+_BUY_SYMBOL_PATTERN = re.compile(r"^买([A-Za-z][A-Za-z0-9._-]{1,15})$")
+
+
+def _extract_utterance_text(raw_text: str) -> str:
+    if not isinstance(raw_text, str):
+        return ""
+
+    text = raw_text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict) and isinstance(payload.get("content"), str):
+                return payload["content"].strip()
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return text
+
+
+def _normalize_utterance(raw_text: str) -> str:
+    _, normalized = remove_punctuation_and_length(raw_text or "")
+    return normalized.strip()
+
+
+def _normalize_token(entry: Any, *, require_chain: bool = False) -> Optional[Dict[str, str]]:
+    if not isinstance(entry, dict):
+        return None
+
+    addr = str(entry.get("addr") or "").strip()
+    if not addr:
+        return None
+
+    chain = str(entry.get("chain") or "").strip()
+    if require_chain and not chain:
+        return None
+    if not chain:
+        chain = "solana"
+    symbol = str(entry.get("symbol") or "").strip()
+    return {"addr": addr, "chain": chain, "symbol": symbol}
+
+
+def _extract_selection_payload(message_payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(message_payload, dict):
+        return None
+    selection = message_payload.get("selection")
+    return selection if isinstance(selection, dict) else None
+
+
+def _normalize_token_with_alias(
+    entry: Any,
+    *,
+    require_chain: bool = False,
+) -> Optional[Dict[str, str]]:
+    if not isinstance(entry, dict):
+        return None
+
+    normalized_entry = dict(entry)
+    if not normalized_entry.get("addr"):
+        token_id = normalized_entry.get("token_id")
+        if token_id:
+            normalized_entry["addr"] = token_id
+    return _normalize_token(normalized_entry, require_chain=require_chain)
+
+
+def _resolve_selection_token(selection_payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    if not isinstance(selection_payload, dict):
+        return None
+
+    for key in ("token", "holding", "current"):
+        token = _normalize_token_with_alias(
+            selection_payload.get(key),
+            require_chain=True,
+        )
+        if token:
+            return token
+
+    return _normalize_token_with_alias(selection_payload, require_chain=True)
+
+
+def _extract_selection_screen(selection_payload: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(selection_payload, dict):
+        return ""
+    return str(selection_payload.get("screen") or "").strip()
+
+
+def _resolve_effective_screen(
+    state_screen: str, selection_payload: Optional[Dict[str, Any]]
+) -> str:
+    selection_screen = _extract_selection_screen(selection_payload)
+    if selection_screen:
+        return selection_screen
+    return state_screen
+
+
+def _resolve_effective_feed_cursor(
+    state_cursor: Any, selection_payload: Optional[Dict[str, Any]]
+) -> Any:
+    if _extract_selection_screen(selection_payload) != "feed":
+        return state_cursor
+
+    if isinstance(selection_payload, dict) and "cursor" in selection_payload:
+        cursor = selection_payload.get("cursor")
+        if cursor is not None:
+            return cursor
+    return state_cursor
+
+
+def has_trusted_selection(selection_payload: Optional[Dict[str, Any]]) -> bool:
+    return bool(_extract_selection_screen(selection_payload)) and _resolve_selection_token(
+        selection_payload
+    ) is not None
+
+
+def missing_selection_reply(_: str = "") -> str:
+    return "请先在界面上选中你要操作的代币，然后再说一次。"
+
+
+def requires_trusted_selection(
+    raw_text: str, ave_context: Optional[Dict[str, Any]] = None
+) -> bool:
+    utterance = _extract_utterance_text(raw_text)
+    normalized = _normalize_utterance(utterance)
+
+    if normalized in _WATCH_CURRENT_COMMANDS or normalized in _BUY_CURRENT_COMMANDS:
+        return True
+    if normalized in _DEICTIC_RISK_PHRASES:
+        return True
+
+    if not any(marker in utterance for marker in _DEICTIC_MARKERS):
+        return False
+
+    if _OPEN_ENDED_DEICTIC_PATTERN.search(utterance):
+        return True
+
+    return any(keyword in utterance or keyword in normalized for keyword in _DEICTIC_RISK_KEYWORDS)
+
+
+def _resolve_pending_trade(state: Dict[str, Any]) -> Dict[str, Any]:
+    pending_trade = state.get("pending_trade")
+    if isinstance(pending_trade, dict) and pending_trade.get("trade_id"):
+        return dict(pending_trade)
+
+    trade_id = state.get("pending_trade_id")
+    if not trade_id:
+        return {}
+
+    return {
+        "trade_id": str(trade_id),
+        "trade_type": "",
+        "action": "TRADE",
+        "symbol": state.get("pending_symbol", "TOKEN"),
+        "amount_native": "",
+        "amount_usd": "",
+    }
+
+
+def _resolve_symbol_entry(state: Dict[str, Any], symbol: str) -> Optional[Dict[str, str]]:
+    normalized_symbol = symbol.upper()
+
+    symbol_entries = state.get("feed_symbol_entries")
+    if isinstance(symbol_entries, dict):
+        normalized_matches = []
+        seen = set()
+        for entry in symbol_entries.get(normalized_symbol, []):
+            token = _normalize_token(entry)
+            if not token:
+                continue
+            token_key = (token["addr"], token["chain"])
+            if token_key in seen:
+                continue
+            seen.add(token_key)
+            normalized_matches.append(token)
+        if len(normalized_matches) == 1:
+            token = normalized_matches[0]
+            token["symbol"] = normalized_symbol
+            return token
+        if len(normalized_matches) > 1:
+            return None
+
+    feed_tokens = state.get("feed_tokens")
+    if not isinstance(feed_tokens, dict):
+        return None
+
+    entry = feed_tokens.get(normalized_symbol)
+    token = _normalize_token(entry)
+    if token:
+        token["symbol"] = normalized_symbol
+    return token
+
+
+def _collect_feed_symbols(state: Dict[str, Any]) -> list[str]:
+    token_list = state.get("feed_token_list")
+    if isinstance(token_list, list):
+        symbols: list[str] = []
+        for token in token_list:
+            if isinstance(token, dict):
+                symbol = str(token.get("symbol") or "").strip().upper()
+                if symbol and symbol not in symbols:
+                    symbols.append(symbol)
+        return symbols
+
+    feed_tokens = state.get("feed_tokens")
+    symbols = []
+    if isinstance(feed_tokens, dict):
+        for symbol in feed_tokens.keys():
+            sym = str(symbol).strip().upper()
+            if sym and sym not in symbols:
+                symbols.append(sym)
+
+    return symbols
+
+
+def _build_allowed_actions(
+    screen: str,
+    current_token: Optional[Dict[str, str]],
+    pending_trade: Dict[str, Any],
+    has_trusted_selection: bool,
+) -> list[str]:
+    actions = {"search_symbol"}
+
+    if screen in {"feed", "portfolio", "spotlight"} and current_token and has_trusted_selection:
+        actions.add("watch_current")
+    if screen == "spotlight" and current_token and has_trusted_selection:
+        actions.add("buy_current")
+    if screen in {"confirm", "limit_confirm"} and pending_trade.get("trade_id"):
+        actions.add("confirm_trade")
+        actions.add("cancel_trade")
+
+    actions.add("back_to_feed")
+    actions.add("open_feed")
+    actions.add("open_portfolio")
+
+    return sorted(actions)
+
+
+def build_ave_context(
+    conn: "ConnectionHandler",
+    selection_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = getattr(conn, "ave_state", {})
+    if not isinstance(state, dict):
+        state = {}
+
+    screen = _resolve_effective_screen(str(state.get("screen") or ""), selection_payload)
+    trusted_selection = has_trusted_selection(selection_payload)
+    explicit_token = _resolve_selection_token(selection_payload) if trusted_selection else None
+    current_token = explicit_token
+    pending_trade = _resolve_pending_trade(state)
+    feed_visible_symbols = _collect_feed_symbols(state)
+    feed_cursor = _resolve_effective_feed_cursor(state.get("feed_cursor", 0), selection_payload)
+
+    return {
+        "screen": screen,
+        "nav_from": str(state.get("nav_from") or ""),
+        "current_token": current_token,
+        "has_trusted_selection": trusted_selection,
+        "selection_source": "explicit" if trusted_selection else "",
+        "pending_trade": pending_trade,
+        "feed_source": str(state.get("feed_source") or ""),
+        "feed_platform": str(state.get("feed_platform") or ""),
+        "feed_cursor": feed_cursor,
+        "feed_visible_symbols": feed_visible_symbols,
+        "allowed_actions": _build_allowed_actions(
+            screen,
+            current_token,
+            pending_trade,
+            trusted_selection,
+        ),
+    }
+
+
+async def _send_router_reply(conn: "ConnectionHandler", text: str) -> None:
+    if text:
+        await send_stt_message(conn, text)
+
+
+async def _handle_tool_response(conn: "ConnectionHandler", response: Any) -> None:
+    if not response:
+        return
+
+    if response.action == Action.RESPONSE and response.response:
+        await _send_router_reply(conn, response.response)
+
+
+async def _cancel_pending_trade_for_exit(
+    conn: "ConnectionHandler",
+    state: Dict[str, Any],
+    screen: str,
+    ave_tools: Any,
+) -> None:
+    if screen not in _CONFIRM_SCREENS:
+        return
+
+    pending_trade = _resolve_pending_trade(state)
+    if not pending_trade.get("trade_id"):
+        return
+
+    await _handle_tool_response(conn, ave_tools.ave_cancel_trade(conn))
+
+
+async def try_route_ave_command(
+    conn: "ConnectionHandler",
+    raw_text: str,
+    message_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
+    utterance = _extract_utterance_text(raw_text)
+    normalized = _normalize_utterance(utterance)
+    selection_payload = _extract_selection_payload(message_payload)
+
+    # Always refresh context so open-ended LLM handoff can reuse the same schema.
+    conn.ave_context = build_ave_context(conn, selection_payload=selection_payload)
+
+    def _refresh_turn_context() -> None:
+        conn.ave_context = build_ave_context(conn, selection_payload=selection_payload)
+
+    if not normalized:
+        return False
+
+    from plugins_func.functions import ave_tools
+
+    state = getattr(conn, "ave_state", {})
+    if not isinstance(state, dict):
+        state = {}
+
+    state_screen = str(state.get("screen") or "")
+    effective_screen = _resolve_effective_screen(state_screen, selection_payload)
+
+    if normalized in _FEED_COMMANDS:
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        await _handle_tool_response(conn, ave_tools.ave_get_trending(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _PORTFOLIO_COMMANDS:
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        await _handle_tool_response(conn, ave_tools.ave_portfolio(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _WATCH_CURRENT_COMMANDS:
+        token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+        if not token:
+            await _send_router_reply(conn, missing_selection_reply(utterance))
+            return True
+        await _handle_tool_response(
+            conn,
+            ave_tools.ave_token_detail(
+                conn,
+                addr=token["addr"],
+                chain=token["chain"],
+                symbol=token.get("symbol", ""),
+            ),
+        )
+        _refresh_turn_context()
+        return True
+
+    if normalized in _BUY_CURRENT_COMMANDS:
+        token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+        if not token:
+            await _send_router_reply(conn, missing_selection_reply(utterance))
+            return True
+        if effective_screen != "spotlight":
+            await _send_router_reply(conn, "请先进入代币详情页，再说买这个。")
+            return True
+        await _handle_tool_response(
+            conn,
+            ave_tools.ave_buy_token(
+                conn,
+                addr=token["addr"],
+                chain=token["chain"],
+                symbol=token.get("symbol", ""),
+            ),
+        )
+        _refresh_turn_context()
+        return True
+
+    if normalized in _CONFIRM_COMMANDS:
+        if effective_screen not in _CONFIRM_SCREENS:
+            await _send_router_reply(conn, "当前不在交易确认页。")
+            return True
+        pending_trade = _resolve_pending_trade(state)
+        if not pending_trade.get("trade_id"):
+            await _send_router_reply(conn, "当前没有待确认的交易。")
+            return True
+        await _handle_tool_response(conn, ave_tools.ave_confirm_trade(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _CANCEL_COMMANDS:
+        if effective_screen not in _CONFIRM_SCREENS:
+            await _send_router_reply(conn, "当前不在交易确认页。")
+            return True
+        pending_trade = _resolve_pending_trade(state)
+        if not pending_trade.get("trade_id"):
+            await _send_router_reply(conn, "当前没有待取消的交易。")
+            return True
+        await _handle_tool_response(conn, ave_tools.ave_cancel_trade(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _BACK_COMMANDS:
+        if effective_screen in _CONFIRM_SCREENS:
+            await _handle_tool_response(conn, ave_tools.ave_cancel_trade(conn))
+            _refresh_turn_context()
+            return True
+
+        nav_from = str(state.pop("nav_from", "") or "")
+        if nav_from == "portfolio":
+            await _handle_tool_response(conn, ave_tools.ave_portfolio(conn))
+        else:
+            source = str(state.get("feed_source") or "trending") or "trending"
+            platform = str(state.get("feed_platform") or "")
+            if platform:
+                await _handle_tool_response(
+                    conn, ave_tools.ave_get_trending(conn, topic="", platform=platform)
+                )
+            else:
+                await _handle_tool_response(conn, ave_tools.ave_get_trending(conn, topic=source))
+        _refresh_turn_context()
+        return True
+
+    watch_symbol_match = _WATCH_SYMBOL_PATTERN.match(normalized)
+    if watch_symbol_match:
+        symbol = watch_symbol_match.group(1).upper()
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        token = _resolve_symbol_entry(state, symbol)
+        if token:
+            await _handle_tool_response(
+                conn,
+                ave_tools.ave_token_detail(
+                    conn,
+                    addr=token["addr"],
+                    chain=token["chain"],
+                    symbol=symbol,
+                ),
+            )
+        else:
+            await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=symbol))
+        _refresh_turn_context()
+        return True
+
+    buy_symbol_match = _BUY_SYMBOL_PATTERN.match(normalized)
+    if buy_symbol_match:
+        symbol = buy_symbol_match.group(1).upper()
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        token = _resolve_symbol_entry(state, symbol)
+        if token:
+            await _handle_tool_response(
+                conn,
+                ave_tools.ave_buy_token(
+                    conn,
+                    addr=token["addr"],
+                    chain=token["chain"],
+                    symbol=symbol,
+                ),
+            )
+        else:
+            await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=symbol))
+        _refresh_turn_context()
+        return True
+
+    return False

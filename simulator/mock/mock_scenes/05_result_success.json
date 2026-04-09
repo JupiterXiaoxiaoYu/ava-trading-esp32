@@ -1,0 +1,15 @@
+{
+  "type": "display",
+  "screen": "result",
+  "ts": 1775456993,
+  "data": {
+    "success": true,
+    "title": "Bought stonks!",
+    "out_amount": "25000",
+    "out_symbol": "stonks",
+    "amount_usd": "$15.00",
+    "tp_price": "$0.0005648",
+    "sl_price": "$0.000384064",
+    "tx_id": "3xK9mP..."
+  }
+}

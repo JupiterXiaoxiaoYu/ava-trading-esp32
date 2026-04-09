@@ -1,0 +1,16 @@
+{
+  "type": "display",
+  "screen": "confirm",
+  "ts": 1775456993,
+  "data": {
+    "trade_id": "a1b2c3d4",
+    "action": "BUY",
+    "symbol": "stonks",
+    "amount_native": "0.1 SOL",
+    "amount_usd": "≈ $15.00",
+    "tp_pct": 25,
+    "sl_pct": 15,
+    "slippage_pct": 1.0,
+    "timeout_sec": 10
+  }
+}
