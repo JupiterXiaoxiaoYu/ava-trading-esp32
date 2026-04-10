@@ -263,22 +263,7 @@ class PortfolioSurfaceTests(unittest.IsolatedAsyncioTestCase):
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -327,13 +312,17 @@ int main(void)
         fprintf(stderr, "top pnl expected N/A, got: %s\\n", top_pnl ? top_pnl->text : "<null>");
         return 2;
     }}
-    if (!summary || strstr(summary->text, "Cost basis unavailable") == NULL) {{
+    if (!summary || strstr(summary->text, "P&L summary unavailable") == NULL) {{
         fprintf(stderr, "summary missing pnl reason: %s\\n", summary ? summary->text : "<null>");
         return 3;
     }}
-    if (strstr(summary->text, "Proxy wallet") == NULL) {{
-        fprintf(stderr, "summary missing wallet source: %s\\n", summary ? summary->text : "<null>");
+    if (strstr(summary->text, "Proxy wallet") != NULL) {{
+        fprintf(stderr, "summary should not expose wallet source: %s\\n", summary ? summary->text : "<null>");
         return 4;
+    }}
+    if (strstr(summary->text, "·") != NULL) {{
+        fprintf(stderr, "summary should not contain bullet separator: %s\\n", summary ? summary->text : "<null>");
+        return 5;
     }}
     return 0;
 }}
@@ -343,6 +332,375 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / "verify_portfolio_explanation_summary.c"
             binary = tmpdir_path / "verify_portfolio_explanation_summary"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_screen_portfolio_first_row_starts_below_header_band(self):
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+
+        display_json = (
+            '{"screen":"portfolio","data":{"holdings":[],"total_usd":"$0",'
+            '"pnl":"N/A","pnl_pct":"N/A","pnl_reason":"Cost basis unavailable",'
+            '"wallet_source_label":"Proxy wallet"}}'
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_PORTFOLIO
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
+
+int main(void)
+{{
+    screen_portfolio_show("{display_json_c}");
+
+    if (!s_row_bg[0]) {{
+        fprintf(stderr, "first portfolio row missing\\n");
+        return 2;
+    }}
+    if (s_row_bg[0]->y < 38) {{
+        fprintf(stderr, "first portfolio row overlaps header band, y=%d\\n", s_row_bg[0]->y);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_portfolio_header_spacing.c"
+            binary = tmpdir_path / "verify_portfolio_header_spacing"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_screen_portfolio_locks_value_and_pnl_columns_to_fixed_widths(self):
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+
+        display_json = (
+            '{"screen":"portfolio","data":{"holdings":['
+            '{"symbol":"BTC","addr":"0xbtc","chain":"eth","value_usd":"$12345.67","pnl_pct":"+12.34%"}'
+            '],"total_usd":"$12345.67","pnl":"N/A","pnl_pct":"N/A"}}'
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_PORTFOLIO
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
+
+int main(void)
+{{
+    screen_portfolio_show("{display_json_c}");
+
+    if (!s_row_val[0] || s_row_val[0]->width < 70) {{
+        fprintf(stderr, "value column width too small: %d\\n", s_row_val[0] ? s_row_val[0]->width : -1);
+        return 2;
+    }}
+    if (s_row_val[0]->text_align != LV_TEXT_ALIGN_RIGHT) {{
+        fprintf(stderr, "value column not right aligned: %d\\n", s_row_val[0]->text_align);
+        return 3;
+    }}
+    if (!s_row_pnl[0] || s_row_pnl[0]->width < 44) {{
+        fprintf(stderr, "pnl column width too small: %d\\n", s_row_pnl[0] ? s_row_pnl[0]->width : -1);
+        return 4;
+    }}
+    if (s_row_pnl[0]->text_align != LV_TEXT_ALIGN_RIGHT) {{
+        fprintf(stderr, "pnl column not right aligned: %d\\n", s_row_pnl[0]->text_align);
+        return 5;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_portfolio_fixed_columns.c"
+            binary = tmpdir_path / "verify_portfolio_fixed_columns"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_screen_portfolio_skips_missing_symbol_rows_instead_of_rendering_placeholder(self):
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+
+        display_json = (
+            '{"screen":"portfolio","data":{"holdings":['
+            '{"addr":"0xabc","chain":"bsc","value_usd":"--","pnl_pct":"N/A"}'
+            '],"total_usd":"$0","pnl":"N/A","pnl_pct":"N/A"}}'
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_PORTFOLIO
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
+
+int main(void)
+{{
+    screen_portfolio_show("{display_json_c}");
+
+    if (s_row_sym[0] && s_row_sym[0]->text[0] != '\\0') {{
+        fprintf(stderr, "missing-symbol row should remain empty, got: %s\\n", s_row_sym[0]->text);
+        return 2;
+    }}
+    if (s_row_val[0] && s_row_val[0]->text[0] != '\\0') {{
+        fprintf(stderr, "missing-symbol row value should remain empty, got: %s\\n", s_row_val[0]->text);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_portfolio_skip_missing_symbol.c"
+            binary = tmpdir_path / "verify_portfolio_skip_missing_symbol"
             source_path.write_text(harness_source, encoding="utf-8")
 
             compile_result = subprocess.run(
@@ -410,22 +768,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -556,22 +899,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -695,22 +1023,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -835,22 +1148,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -972,22 +1270,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1104,22 +1387,7 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
-const lv_font_t *ave_font_cjk_14(void)
-{{
-    return &lv_font_montserrat_14;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{

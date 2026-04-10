@@ -4,8 +4,8 @@
  *
  * Layout (320×240 landscape):
  *   y=  0..22   top bar: "PORTFOLIO  $1,247  +4.1%"
- *   y= 22..32   header row (Symbol / Value / P&L)
- *   y= 32..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
+ *   y= 22..38   header row (Symbol / Value / P&L)
+ *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
  *   y=215..240  bottom bar: [B] BACK  [A] DETAIL  [X] SELL  [Y] PORTFOLIO
  */
@@ -24,6 +24,22 @@
 
 #define MAX_HOLDINGS  20
 #define ROW_H         28
+#define HEADER_Y      22
+#define HEADER_H      16
+#define ROWS_Y        (HEADER_Y + HEADER_H)
+#define SUMMARY_DIV_Y 202
+#define SUMMARY_Y     205
+#define BOTTOM_DIV_Y  217
+#define BOTTOM_Y      217
+
+#define COL_SYM_X     6
+#define COL_SYM_W     102
+#define COL_VAL_X     118
+#define COL_VAL_W     88
+#define COL_PNL_X     220
+#define COL_PNL_W     52
+#define COL_TEXT_Y    2
+#define ROW_TEXT_Y    7
 
 typedef struct {
     char symbol[24];
@@ -366,7 +382,11 @@ static void _parse(const char *json) {
         /* accept either "balance_raw" or "amount_raw", but fail closed on truncation */
         if (!_machine_raw_exact(obj, "balance_raw", h->balance_raw, sizeof(h->balance_raw)))
             _machine_raw_exact(obj, "amount_raw", h->balance_raw, sizeof(h->balance_raw));
-        if (h->symbol[0] == 0) strcpy(h->symbol, "???");
+
+        if (h->symbol[0] == 0) {
+            free(obj);
+            continue;
+        }
 
         free(obj);
         s_holding_count++;
@@ -473,25 +493,42 @@ static void _build(void) {
 
     /* Column header row */
     lv_obj_t *hdr = lv_obj_create(s_screen);
-    lv_obj_set_size(hdr, 320, 10);
-    lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 0, 22);
+    lv_obj_set_size(hdr, 320, HEADER_H);
+    lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 0, HEADER_Y);
     lv_obj_set_style_bg_color(hdr, COLOR_HDR, 0);
     lv_obj_set_style_border_width(hdr, 0, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
 
-    const char *col_names[] = {"Symbol", "Value", "P&L"};
-    int col_x[] = {6, 86, 210};
-    for (int c = 0; c < 3; c++) {
-        lv_obj_t *h = lv_label_create(hdr);
-        lv_obj_set_pos(h, col_x[c], 0);
-        lv_label_set_text(h, col_names[c]);
-        lv_obj_set_style_text_color(h, COLOR_GRAY, 0);
-        lv_obj_set_style_text_font(h, &lv_font_montserrat_12, 0);
-    }
+    lv_obj_t *hdr_sym = lv_label_create(hdr);
+    lv_obj_set_pos(hdr_sym, COL_SYM_X, COL_TEXT_Y);
+    lv_obj_set_width(hdr_sym, COL_SYM_W);
+    lv_label_set_long_mode(hdr_sym, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(hdr_sym, "Symbol");
+    lv_obj_set_style_text_color(hdr_sym, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(hdr_sym, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hdr_sym, LV_TEXT_ALIGN_LEFT, 0);
+
+    lv_obj_t *hdr_val = lv_label_create(hdr);
+    lv_obj_set_pos(hdr_val, COL_VAL_X, COL_TEXT_Y);
+    lv_obj_set_width(hdr_val, COL_VAL_W);
+    lv_label_set_long_mode(hdr_val, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(hdr_val, "Value");
+    lv_obj_set_style_text_color(hdr_val, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(hdr_val, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hdr_val, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *hdr_pnl = lv_label_create(hdr);
+    lv_obj_set_pos(hdr_pnl, COL_PNL_X, COL_TEXT_Y);
+    lv_obj_set_width(hdr_pnl, COL_PNL_W);
+    lv_label_set_long_mode(hdr_pnl, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(hdr_pnl, "P&L");
+    lv_obj_set_style_text_color(hdr_pnl, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(hdr_pnl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hdr_pnl, LV_TEXT_ALIGN_RIGHT, 0);
 
     /* Holding rows */
     for (int i = 0; i < VISIBLE_ROWS; i++) {
-        int y = 32 + i * ROW_H;
+        int y = ROWS_Y + i * ROW_H;
         lv_color_t bg = (i % 2 == 0) ? COLOR_BG : COLOR_ROW_ALT;
 
         s_row_bg[i] = lv_obj_create(s_screen);
@@ -502,29 +539,38 @@ static void _build(void) {
         lv_obj_set_style_pad_all(s_row_bg[i], 0, 0);
 
         s_row_sym[i] = lv_label_create(s_row_bg[i]);
-        lv_obj_set_pos(s_row_sym[i], col_x[0], 7);
+        lv_obj_set_pos(s_row_sym[i], COL_SYM_X, ROW_TEXT_Y);
+        lv_obj_set_width(s_row_sym[i], COL_SYM_W);
+        lv_label_set_long_mode(s_row_sym[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_color(s_row_sym[i], COLOR_WHITE, 0);
         lv_obj_set_style_text_font(s_row_sym[i], ave_font_cjk_14(), 0);
+        lv_obj_set_style_text_align(s_row_sym[i], LV_TEXT_ALIGN_LEFT, 0);
 
         s_row_val[i] = lv_label_create(s_row_bg[i]);
-        lv_obj_set_pos(s_row_val[i], col_x[1], 7);
+        lv_obj_set_pos(s_row_val[i], COL_VAL_X, ROW_TEXT_Y);
+        lv_obj_set_width(s_row_val[i], COL_VAL_W);
+        lv_label_set_long_mode(s_row_val[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_color(s_row_val[i], COLOR_WHITE, 0);
         lv_obj_set_style_text_font(s_row_val[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(s_row_val[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         s_row_pnl[i] = lv_label_create(s_row_bg[i]);
-        lv_obj_set_pos(s_row_pnl[i], col_x[2], 7);
+        lv_obj_set_pos(s_row_pnl[i], COL_PNL_X, ROW_TEXT_Y);
+        lv_obj_set_width(s_row_pnl[i], COL_PNL_W);
+        lv_label_set_long_mode(s_row_pnl[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(s_row_pnl[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(s_row_pnl[i], LV_TEXT_ALIGN_RIGHT, 0);
     }
 
     /* Summary bar */
     lv_obj_t *div = lv_obj_create(s_screen);
     lv_obj_set_size(div, 320, 1);
-    lv_obj_align(div, LV_ALIGN_TOP_LEFT, 0, 200);
+    lv_obj_align(div, LV_ALIGN_TOP_LEFT, 0, SUMMARY_DIV_Y);
     lv_obj_set_style_bg_color(div, COLOR_DIVIDER, 0);
     lv_obj_set_style_border_width(div, 0, 0);
 
     s_lbl_summary = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_summary, LV_ALIGN_TOP_LEFT, 6, 203);
+    lv_obj_align(s_lbl_summary, LV_ALIGN_TOP_LEFT, 6, SUMMARY_Y);
     lv_obj_set_width(s_lbl_summary, 308);
     lv_label_set_long_mode(s_lbl_summary, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_summary, COLOR_GRAY, 0);
@@ -533,14 +579,14 @@ static void _build(void) {
     /* Bottom divider */
     lv_obj_t *div2 = lv_obj_create(s_screen);
     lv_obj_set_size(div2, 320, 1);
-    lv_obj_align(div2, LV_ALIGN_TOP_LEFT, 0, 215);
+    lv_obj_align(div2, LV_ALIGN_TOP_LEFT, 0, BOTTOM_DIV_Y);
     lv_obj_set_style_bg_color(div2, COLOR_DIVIDER, 0);
     lv_obj_set_style_border_width(div2, 0, 0);
 
     /* ── Bottom bar affordances (Task 5) ─────────────────────────────── */
     lv_obj_t *bot = lv_obj_create(s_screen);
-    lv_obj_set_size(bot, 320, 240 - 215);
-    lv_obj_set_pos(bot, 0, 215);
+    lv_obj_set_size(bot, 320, 240 - BOTTOM_Y);
+    lv_obj_set_pos(bot, 0, BOTTOM_Y);
     lv_obj_set_style_bg_opa(bot, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(bot, 0, 0);
     lv_obj_set_style_pad_all(bot, 0, 0);
@@ -548,7 +594,7 @@ static void _build(void) {
 
     /* Keep key positions consistent with SPOTLIGHT: B / X / A / Y. */
     lv_obj_t *slot_b = lv_obj_create(bot);
-    lv_obj_set_size(slot_b, 64, 240 - 215);
+    lv_obj_set_size(slot_b, 64, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_b, 0, 0);
     lv_obj_set_style_bg_opa(slot_b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_b, 0, 0);
@@ -556,7 +602,7 @@ static void _build(void) {
     lv_obj_clear_flag(slot_b, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_x = lv_obj_create(bot);
-    lv_obj_set_size(slot_x, 64, 240 - 215);
+    lv_obj_set_size(slot_x, 64, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_x, 64, 0);
     lv_obj_set_style_bg_opa(slot_x, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_x, 0, 0);
@@ -564,7 +610,7 @@ static void _build(void) {
     lv_obj_clear_flag(slot_x, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_a = lv_obj_create(bot);
-    lv_obj_set_size(slot_a, 64, 240 - 215);
+    lv_obj_set_size(slot_a, 64, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_a, 128, 0);
     lv_obj_set_style_bg_opa(slot_a, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_a, 0, 0);
@@ -572,7 +618,7 @@ static void _build(void) {
     lv_obj_clear_flag(slot_a, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_y = lv_obj_create(bot);
-    lv_obj_set_size(slot_y, 128, 240 - 215);
+    lv_obj_set_size(slot_y, 128, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_y, 192, 0);
     lv_obj_set_style_bg_opa(slot_y, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_y, 0, 0);
@@ -638,12 +684,11 @@ void screen_portfolio_show(const char *json_data)
 
     /* Update top bar */
     char total[24] = {0}, pnl[20] = {0}, pnl_pct[16] = {0};
-    char pnl_reason[48] = {0}, wallet_source_label[32] = {0};
+    char pnl_reason[48] = {0};
     _str_portfolio_top_level(json_data, "total_usd", total, sizeof(total));
     _str_portfolio_top_level(json_data, "pnl",       pnl,   sizeof(pnl));
     _str_portfolio_top_level(json_data, "pnl_pct",   pnl_pct, sizeof(pnl_pct));
     _str_portfolio_top_level(json_data, "pnl_reason", pnl_reason, sizeof(pnl_reason));
-    _str_portfolio_top_level(json_data, "wallet_source_label", wallet_source_label, sizeof(wallet_source_label));
 
     lv_label_set_text(s_lbl_total, total[0] ? total : "--");
 
@@ -663,15 +708,11 @@ void screen_portfolio_show(const char *json_data)
     /* Summary */
     char sum_buf[128];
     if (pnl_reason[0]) {
-        if (wallet_source_label[0]) {
-            snprintf(sum_buf, sizeof(sum_buf), "%s · %s", wallet_source_label, pnl_reason);
+        if (strcmp(pnl_reason, "Cost basis unavailable") == 0) {
+            snprintf(sum_buf, sizeof(sum_buf), "P&L summary unavailable");
         } else {
             snprintf(sum_buf, sizeof(sum_buf), "%s", pnl_reason);
         }
-    } else if (wallet_source_label[0]) {
-        snprintf(sum_buf, sizeof(sum_buf), "P&L: %s (%s) · %s",
-                 pnl[0] ? pnl : "N/A", pnl_pct[0] ? pnl_pct : "N/A",
-                 wallet_source_label);
     } else {
         snprintf(sum_buf, sizeof(sum_buf), "P&L: %s (%s)",
                  pnl[0] ? pnl : "N/A", pnl_pct[0] ? pnl_pct : "N/A");
