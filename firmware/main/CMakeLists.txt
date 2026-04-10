@@ -37,6 +37,8 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_machine.cc"
             "assets.cc"
             "main.cc"
+            "${PROJECT_DIR}/../shared/ave_screens/ave_font_provider.c"
+            "${PROJECT_DIR}/../shared/ave_screens/ave_json_utils.c"
             "${PROJECT_DIR}/../shared/ave_screens/ave_price_fmt.c"
             "${PROJECT_DIR}/../shared/ave_screens/ave_screen_manager.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_confirm.c"
@@ -782,9 +784,9 @@ elseif(CONFIG_BOARD_TYPE_Freenove_ESP32S3_DISPLAY_2_8_LCD)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
 elseif(CONFIG_BOARD_TYPE_SCRATCH_ARCADE)
     set(BOARD_TYPE "scratch-arcade")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)
 endif()
 
 if(MANUFACTURER)

@@ -666,7 +666,7 @@ export default {
 
   // Home page text
   'home.addAgent': 'Thêm tác nhân',
-  'home.greeting': 'Xin chào XiaoZhi',
+  'home.greeting': 'Xin chào Ava',
   'home.wish': 'Chúc bạn một ngày tuyệt vời!',
   'home.languageModel': 'LLM',
   'home.voiceModel': 'TTS',

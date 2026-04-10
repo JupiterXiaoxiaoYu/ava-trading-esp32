@@ -106,17 +106,18 @@ module_test:
 
 # 唤醒词，用于识别唤醒词还是讲话内容
 wakeup_words:
-  - "你好小智"
-  - "嘿你好呀"
-  - "你好小志"
-  - "小爱同学"
-  - "你好小鑫"
-  - "你好小新"
-  - "小美同学"
-  - "小龙小龙"
-  - "喵喵同学"
-  - "小滨小滨"
-  - "小冰小冰"
+  - "Hey Ava"
+  - "Hi Ava"
+  - "Hello Ava"
+  - "Ava"
+  - "hey ava"
+  - "hi ava"
+  - "hello ava"
+  - "ava"
+  - "你好Ava"
+  - "嗨Ava"
+  - "嘿Ava"
+  - "艾娃"
 # MCP接入点地址，地址格式为：ws://你的mcp接入点ip或者域名:端口号/mcp/?token=你的token
 # 详细教程 https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/mcp-endpoint-integration.md
 mcp_endpoint: 你的接入点 websocket地址
@@ -189,7 +190,7 @@ voiceprint:
 # ################################以下是角色模型配置######################################
 
 prompt: |
-  你是小智，AVE 链上交易助手，运行在 ESP32 掌机设备上。通过语音帮用户浏览热门代币、查看详情、买卖操作。
+  你是 Ava，AVE 链上交易助手，运行在 ESP32 掌机设备上。通过语音帮用户浏览热门代币、查看详情、买卖操作。
 
   [屏幕导航 — 严格按以下规则调用工具]
   - 用户说"看热门/刷新/热门代币" → ave_get_trending
