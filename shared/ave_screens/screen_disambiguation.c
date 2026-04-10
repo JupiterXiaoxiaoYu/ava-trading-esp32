@@ -1,4 +1,5 @@
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
 #include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
@@ -266,7 +267,7 @@ static void _build(void)
         s_row_main[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_main[i], 8, 3);
         lv_obj_set_style_text_color(s_row_main[i], COLOR_WHITE, 0);
-        lv_obj_set_style_text_font(s_row_main[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(s_row_main[i], ave_font_cjk_14(), 0);
 
         s_row_meta[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_meta[i], 8, 15);
