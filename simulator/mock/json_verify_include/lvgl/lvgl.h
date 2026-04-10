@@ -11,6 +11,11 @@ extern "C" {
 
 typedef struct lv_obj_t {
     char text[256];
+    int width;
+    int height;
+    int x;
+    int y;
+    int text_align;
 } lv_obj_t;
 
 typedef struct lv_chart_series_t {
@@ -35,6 +40,9 @@ typedef struct lv_font_t {
 typedef struct lv_color_t {
     uint32_t full;
 } lv_color_t;
+
+typedef int lv_text_align_t;
+typedef int lv_style_selector_t;
 
 extern const lv_font_t lv_font_montserrat_12;
 extern const lv_font_t lv_font_montserrat_14;
@@ -84,17 +92,25 @@ void lv_obj_set_style_radius(lv_obj_t *obj, int radius, int part);
 void lv_obj_set_style_size(lv_obj_t *obj, int width, int height, int part);
 void lv_obj_set_style_text_color(lv_obj_t *obj, lv_color_t color, int part);
 void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part);
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part);
+void lv_obj_set_style_text_align(
+    lv_obj_t *obj,
+    lv_text_align_t align,
+    lv_style_selector_t selector
+);
 void lv_obj_set_width(lv_obj_t *obj, int width);
 void lv_obj_set_size(lv_obj_t *obj, int width, int height);
 void lv_obj_set_pos(lv_obj_t *obj, int x, int y);
 void lv_obj_align(lv_obj_t *obj, int align, int x_ofs, int y_ofs);
-int lv_font_get_line_height(const lv_font_t *font);
+int32_t lv_font_get_line_height(const lv_font_t *font);
 
 lv_obj_t *lv_label_create(lv_obj_t *parent);
 void lv_label_set_long_mode(lv_obj_t *obj, int mode);
 void lv_label_set_text(lv_obj_t *obj, const char *text);
 void lv_label_set_text_fmt(lv_obj_t *obj, const char *fmt, ...);
+
+lv_obj_t *lv_bar_create(lv_obj_t *parent);
+void lv_bar_set_range(lv_obj_t *obj, int min, int max);
+void lv_bar_set_value(lv_obj_t *obj, int value, int anim);
 
 lv_obj_t *lv_chart_create(lv_obj_t *parent);
 void lv_chart_set_type(lv_obj_t *obj, int type);

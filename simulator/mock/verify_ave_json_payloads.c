@@ -116,11 +116,15 @@ void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part)
     (void)part;
 }
 
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+AVE_HARNESS_WEAK void lv_obj_set_style_text_align(
+    lv_obj_t *obj,
+    lv_text_align_t align,
+    lv_style_selector_t selector
+)
 {
     if (!obj) return;
     obj->text_align = align;
-    (void)part;
+    (void)selector;
 }
 
 void lv_obj_set_width(lv_obj_t *obj, int width)
@@ -194,6 +198,25 @@ void lv_label_set_text_fmt(lv_obj_t *obj, const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(obj->text, sizeof(obj->text), fmt, args);
     va_end(args);
+}
+
+AVE_HARNESS_WEAK lv_obj_t *lv_bar_create(lv_obj_t *parent)
+{
+    return lv_obj_create(parent);
+}
+
+AVE_HARNESS_WEAK void lv_bar_set_range(lv_obj_t *obj, int min, int max)
+{
+    (void)obj;
+    (void)min;
+    (void)max;
+}
+
+AVE_HARNESS_WEAK void lv_bar_set_value(lv_obj_t *obj, int value, int anim)
+{
+    (void)obj;
+    (void)value;
+    (void)anim;
 }
 
 lv_obj_t *lv_chart_create(lv_obj_t *parent)
@@ -385,7 +408,6 @@ AVE_HARNESS_WEAK void ave_sm_go_back_fallback(void)
 }
 #endif
 
-#if !defined(VERIFY_SPOTLIGHT)
 static void clear_last_json(void)
 {
     g_last_json[0] = '\0';
@@ -408,7 +430,6 @@ static int expect_not_contains(const char *needle, const char *label)
     }
     return 1;
 }
-#endif
 
 #if !defined(VERIFY_FEED)
 void screen_feed_show(const char *json_data) { (void)json_data; }

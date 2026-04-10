@@ -159,19 +159,6 @@ class SurfaceInputSyncTests(unittest.IsolatedAsyncioTestCase):
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -355,19 +342,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -467,19 +441,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -609,34 +570,6 @@ int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {verifier_prefix}
 {unrename_block}
 
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-
-lv_obj_t *lv_bar_create(lv_obj_t *parent)
-{{
-    return lv_obj_create(parent);
-}}
-
-void lv_bar_set_range(lv_obj_t *obj, int min, int max)
-{{
-    (void)obj;
-    (void)min;
-    (void)max;
-}}
-
-void lv_bar_set_value(lv_obj_t *obj, int value, int anim)
-{{
-    (void)obj;
-    (void)value;
-    (void)anim;
-}}
-
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 {other_context_stub}
 int screen_result_get_selected_context_json(char *out, size_t out_n)
@@ -1099,19 +1032,6 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1221,19 +1141,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1357,19 +1264,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1510,19 +1404,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1648,19 +1529,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
-const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
-const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1790,17 +1658,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1851,8 +1708,8 @@ int main(void)
         fprintf(stderr, "search guide title missing\\n");
         return 2;
     }}
-    if (!label_contains(s_rows[1].lbl_price, "FN")) {{
-        fprintf(stderr, "guided FN prompt missing\\n");
+    if (!label_contains(s_rows[1].lbl_price, "Say token")) {{
+        fprintf(stderr, "guided voice prompt missing\\n");
         return 3;
     }}
     if (!label_contains(s_rows[3].lbl_price, "PEPE")) {{
@@ -1867,6 +1724,93 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_search_guide_last_query",
+        )
+
+    def test_real_feed_search_guide_uses_wide_left_aligned_detail_column(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+static int label_contains(lv_obj_t *obj, const char *needle)
+{{
+    return obj && needle && strstr(obj->text, needle) != NULL;
+}}
+
+int main(void)
+{{
+    ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
+    screen_feed_key(AVE_KEY_B);
+    screen_feed_key(AVE_KEY_A);
+
+    if (!label_contains(s_rows[0].lbl_price, "Guided entry")) {{
+        fprintf(stderr, "search guide right column text missing\\n");
+        return 2;
+    }}
+    if (s_rows[0].lbl_price->text_align != LV_TEXT_ALIGN_LEFT) {{
+        fprintf(stderr, "search guide right column should be left aligned\\n");
+        return 3;
+    }}
+    if (s_rows[0].lbl_sym->x > 28) {{
+        fprintf(stderr, "search guide title column should shift left, x=%d\\n", s_rows[0].lbl_sym->x);
+        return 4;
+    }}
+    if (s_rows[0].lbl_price->x > 120) {{
+        fprintf(stderr, "search guide right column should shift left, x=%d\\n", s_rows[0].lbl_price->x);
+        return 5;
+    }}
+    if (s_rows[0].lbl_price->width < 190) {{
+        fprintf(stderr, "search guide right column should be widened to near the right edge\\n");
+        return 6;
+    }}
+    return 0;
+}}
+"""
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_search_guide_overlay_column_layout",
         )
 
     def test_real_feed_empty_reset_preserves_last_search_query_for_search_guide(self):
@@ -1885,17 +1829,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -1984,17 +1917,6 @@ int main(void)
 #ifndef LV_OPA_TRANSP
 #define LV_OPA_TRANSP 0
 #endif
-#ifndef LV_TEXT_ALIGN_LEFT
-#define LV_TEXT_ALIGN_LEFT 0
-#define LV_TEXT_ALIGN_CENTER 1
-#define LV_TEXT_ALIGN_RIGHT 2
-#endif
-void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
-{{
-    (void)obj;
-    (void)align;
-    (void)part;
-}}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{

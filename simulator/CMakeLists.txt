@@ -203,6 +203,8 @@ endif()
 add_executable(verify_p3_5_minimal
     mock/verify_p3_5_minimal.c
     ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_screen_manager.c
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_json_utils.c
+    mock/ave_screen_harness_support.c
 )
 target_include_directories(verify_p3_5_minimal PRIVATE
     ${PROJECT_SOURCE_DIR}

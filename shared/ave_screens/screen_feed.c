@@ -90,6 +90,10 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 #define COL_SYM_X     42
 #define COL_PRICE_X   154
 #define COL_CHG_X     252
+#define COL_OVERLAY_TITLE_X   24
+#define COL_OVERLAY_TITLE_W   84
+#define COL_OVERLAY_DETAIL_X  112
+#define COL_OVERLAY_DETAIL_W  200
 
 /* ─── Colors ──────────────────────────────────────────────────────────────── */
 #define COLOR_GREEN   lv_color_hex(0x00C853)
@@ -175,7 +179,7 @@ static void _update_rows(void);
 static void _close_feed_overlay(void);
 
 static const feed_explore_item_t EXPLORE_ITEMS[FEED_EXPLORE_ITEM_COUNT] = {
-    {FEED_EXPLORE_ITEM_SEARCH,  "Search",  "FN 说币名",                    FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
+    {FEED_EXPLORE_ITEM_SEARCH,  "Search",  "Say token",                   FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
     {FEED_EXPLORE_ITEM_ORDERS,  "Orders",  "Open current orders list",    FEED_SURFACE_STANDARD},
     {FEED_EXPLORE_ITEM_SOURCES, "Sources", "Choose topic or platform",    FEED_SURFACE_STANDARD},
 };
@@ -194,7 +198,7 @@ static const feed_source_entry_t SOURCE_MENU[] = {
 static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
     {FEED_SURFACE_STANDARD,             "^ v MOVE", " | < Refresh | X Change", "> Detail | Y Portfolio", 0},
     {FEED_SURFACE_EXPLORE_PANEL,        "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
-    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "FN 说币名", " | B CLOSE",              "> OFF | Y PORTFOLIO",    1},
+    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "Say token", " | B CLOSE",             "B Back | Y Port",        1},
     {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
 };
 
@@ -207,6 +211,9 @@ typedef struct {
 } feed_row_ui_t;
 
 static feed_row_ui_t s_rows[VISIBLE_ROWS];
+
+static void _apply_overlay_row_layout(feed_row_ui_t *ui);
+static void _apply_token_row_layout(feed_row_ui_t *ui);
 
 static int _center_text_y(const lv_font_t *font)
 {
@@ -604,6 +611,26 @@ static void _clear_row(feed_row_ui_t *ui)
     _set_row_text(ui, COLOR_BG, COLOR_GRAY, COLOR_GRAY, "", "", "", "");
 }
 
+static void _apply_overlay_row_layout(feed_row_ui_t *ui)
+{
+    if (!ui) return;
+    lv_obj_set_pos(ui->lbl_sym, COL_OVERLAY_TITLE_X, _center_text_y(ave_font_cjk_16()));
+    lv_obj_set_width(ui->lbl_sym, COL_OVERLAY_TITLE_W);
+    lv_obj_set_pos(ui->lbl_price, COL_OVERLAY_DETAIL_X, _center_text_y(&lv_font_montserrat_14));
+    lv_obj_set_width(ui->lbl_price, COL_OVERLAY_DETAIL_W);
+    lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_LEFT, 0);
+}
+
+static void _apply_token_row_layout(feed_row_ui_t *ui)
+{
+    if (!ui) return;
+    lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
+    lv_obj_set_width(ui->lbl_sym, 110);
+    lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
+    lv_obj_set_width(ui->lbl_price, 88);
+    lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
+}
+
 static void _update_overlay_rows(void)
 {
     int total = 0;
@@ -629,7 +656,7 @@ static void _update_overlay_rows(void)
 
     for (int r = 0; r < VISIBLE_ROWS; r++) {
         feed_row_ui_t *ui = &s_rows[r];
-
+        _apply_overlay_row_layout(ui);
         if (s_feed_surface == FEED_SURFACE_EXPLORE_PANEL) {
             if (r >= FEED_EXPLORE_ITEM_COUNT) {
                 _clear_row(ui);
@@ -665,7 +692,7 @@ static void _update_overlay_rows(void)
                      s_last_search_query[0] ? s_last_search_query : "No recent search");
             const char *guide_price[VISIBLE_ROWS] = {
                 "Guided entry",
-                "FN 说币名",
+                "Say token",
                 "BONK / PEPE / DOGE",
                 last_search_line,
                 "Y stays global",
@@ -712,7 +739,7 @@ static void _update_token_rows(void)
     for (int r = 0; r < VISIBLE_ROWS; r++) {
         int tok_idx = s_scroll_top + r;
         feed_row_ui_t *ui = &s_rows[r];
-
+        _apply_token_row_layout(ui);
         if (tok_idx >= s_token_count) {
             lv_obj_set_style_bg_color(ui->row, COLOR_BG, 0);
             lv_label_set_text(ui->lbl_chain, "");
