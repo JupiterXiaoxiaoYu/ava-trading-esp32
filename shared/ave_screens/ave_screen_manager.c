@@ -232,14 +232,29 @@ void ave_sm_handle_json(const char *json_str)
 
 void ave_sm_key_press(int key)
 {
+    int is_confirm_waiting_ack = 0;
+
     /* If NOTIFY overlay is visible, any key dismisses it first */
     if (screen_notify_is_visible()) {
         screen_notify_key(key);
         return;   /* consume the key — don't also navigate */
     }
 
+    if (s_current == AVE_SCREEN_CONFIRM || s_current == AVE_SCREEN_LIMIT_CONFIRM) {
+        char context_json[96] = {0};
+        int has_context = (s_current == AVE_SCREEN_CONFIRM)
+            ? screen_confirm_get_selected_context_json(context_json, sizeof(context_json))
+            : screen_limit_confirm_get_selected_context_json(context_json, sizeof(context_json));
+        if (has_context && strstr(context_json, "\"awaiting_ack\":true")) {
+            is_confirm_waiting_ack = 1;
+        }
+    }
+
     /* Global shortcut: Y button → portfolio (works from any screen) */
     if (key == AVE_KEY_Y) {
+        if (is_confirm_waiting_ack) {
+            return;
+        }
         if (s_current == AVE_SCREEN_CONFIRM || s_current == AVE_SCREEN_LIMIT_CONFIRM) {
             ave_send_json("{\"type\":\"key_action\",\"action\":\"cancel_trade\"}");
         }

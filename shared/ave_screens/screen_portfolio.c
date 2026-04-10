@@ -10,6 +10,7 @@
  *   y=215..240  bottom bar: [B] BACK  [A] DETAIL  [X] SELL  [Y] PORTFOLIO
  */
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
 #include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
@@ -83,13 +84,38 @@ static int _str(const char *o, const char *k, char *out, int n) {
     return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
-static int _str_exact(const char *o, const char *k, char *out, int n) {
-    char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
-    const char *p = strstr(o, nd); if (!p) return 0;
+/* Parse machine/raw amount as a plain quoted string and fail closed if it would
+ * overflow destination storage. JSON escapes are rejected intentionally here:
+ * sell quantities are machine fields and should arrive as plain decimals. */
+static int _machine_raw_exact(const char *o, const char *k, char *out, int n)
+{
+    char nd[64];
+    const char *p = NULL;
+    const char *q = NULL;
+    size_t len = 0;
+
+    if (!o || !k || !out || n <= 1) return 0;
+    snprintf(nd, sizeof(nd), "\"%s\"", k);
+    p = strstr(o, nd);
+    if (!p) return 0;
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
     if (*p != '"') return 0;
-    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
+
+    q = p + 1;
+    while (*q) {
+        if (*q == '\\') return 0;
+        if (*q == '"') break;
+        q++;
+    }
+    if (*q != '"') return 0;
+
+    len = (size_t)(q - (p + 1));
+    if (len == 0 || len >= (size_t)n) return 0;
+
+    memcpy(out, p + 1, len);
+    out[len] = '\0';
+    return 1;
 }
 
 /* Like _str(), but only matches keys at the shallow object level of the payload.
@@ -193,6 +219,79 @@ static int _str_portfolio_top_level(const char *json, const char *k, char *out, 
     return _str_shallow_object(scope_start, scope_end, k, out, n);
 }
 
+static int _int_shallow_object(const char *obj_start, const char *obj_end,
+                               const char *k, int *out)
+{
+    if (!obj_start || !obj_end || obj_end <= obj_start || !k || !out) return 0;
+    size_t klen = strlen(k);
+    int obj_depth = 0;
+    int arr_depth = 0;
+
+    for (const char *p = obj_start; p < obj_end && *p; ) {
+        char c = *p;
+        if (c == '"') {
+            if (obj_depth == 1 && arr_depth == 0) {
+                const char *key = p + 1;
+                if (key + klen + 1 < obj_end &&
+                    memcmp(key, k, klen) == 0 &&
+                    key[klen] == '"') {
+                    const char *q = key + klen + 1;
+                    while (q < obj_end && (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t')) q++;
+                    if (q < obj_end && *q == ':') {
+                        char *endptr = NULL;
+                        long parsed = 0;
+                        q++;
+                        while (q < obj_end && (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t')) q++;
+                        if (q >= obj_end) return 0;
+                        parsed = strtol(q, &endptr, 10);
+                        if (!endptr || endptr == q || endptr > obj_end) return 0;
+                        *out = (int)parsed;
+                        return 1;
+                    }
+                }
+            }
+
+            p++;
+            int esc = 0;
+            while (p < obj_end && *p) {
+                if (esc) { esc = 0; p++; continue; }
+                if (*p == '\\') { esc = 1; p++; continue; }
+                if (*p == '"') { p++; break; }
+                p++;
+            }
+            continue;
+        }
+
+        if (c == '{') obj_depth++;
+        else if (c == '}') obj_depth--;
+        else if (c == '[') arr_depth++;
+        else if (c == ']') arr_depth--;
+        p++;
+    }
+    return 0;
+}
+
+static int _int_portfolio_top_level(const char *json, const char *k, int *out)
+{
+    if (!json) return 0;
+    const char *end = json + strlen(json);
+
+    const char *scope_start = json;
+    const char *scope_end = end;
+    const char *data = strstr(json, "\"data\"");
+    if (data) {
+        const char *brace = strchr(data, '{');
+        if (brace) {
+            const char *brace_end = _match_brace(brace, end);
+            if (brace_end) {
+                scope_start = brace;
+                scope_end = brace_end;
+            }
+        }
+    }
+    return _int_shallow_object(scope_start, scope_end, k, out);
+}
+
 static int _bool(const char *o, const char *k, int def) {
     char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
     const char *p = strstr(o, nd); if (!p) return def;
@@ -265,8 +364,8 @@ static void _parse(const char *json) {
         _str(obj, "contract_tail", h->contract_tail, sizeof(h->contract_tail));
         _str(obj, "source_tag",  h->source_tag,  sizeof(h->source_tag));
         /* accept either "balance_raw" or "amount_raw", but fail closed on truncation */
-        if (!_str_exact(obj, "balance_raw", h->balance_raw, sizeof(h->balance_raw)))
-            _str_exact(obj, "amount_raw", h->balance_raw, sizeof(h->balance_raw));
+        if (!_machine_raw_exact(obj, "balance_raw", h->balance_raw, sizeof(h->balance_raw)))
+            _machine_raw_exact(obj, "amount_raw", h->balance_raw, sizeof(h->balance_raw));
         if (h->symbol[0] == 0) strcpy(h->symbol, "???");
 
         free(obj);
@@ -405,7 +504,7 @@ static void _build(void) {
         s_row_sym[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_sym[i], col_x[0], 7);
         lv_obj_set_style_text_color(s_row_sym[i], COLOR_WHITE, 0);
-        lv_obj_set_style_text_font(s_row_sym[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(s_row_sym[i], ave_font_cjk_14(), 0);
 
         s_row_val[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_val[i], col_x[1], 7);
@@ -526,8 +625,16 @@ void screen_portfolio_show(const char *json_data)
         return;
     }
 
-    /* NOTE: Selection resets to row 0 on full portfolio refresh payloads. */
     _parse(json_data);
+    if (s_holding_count > 0) {
+        int cursor = 0;
+        if (_int_portfolio_top_level(json_data, "cursor", &cursor)) {
+            if (cursor < 0) cursor = 0;
+            if (cursor >= s_holding_count) cursor = s_holding_count - 1;
+            s_sel_idx = cursor;
+            s_scroll_top = (s_sel_idx >= VISIBLE_ROWS) ? (s_sel_idx - VISIBLE_ROWS + 1) : 0;
+        }
+    }
 
     /* Update top bar */
     char total[24] = {0}, pnl[20] = {0}, pnl_pct[16] = {0};

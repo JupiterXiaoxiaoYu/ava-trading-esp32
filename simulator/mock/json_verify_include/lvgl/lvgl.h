@@ -39,6 +39,7 @@ typedef struct lv_color_t {
 extern const lv_font_t lv_font_montserrat_12;
 extern const lv_font_t lv_font_montserrat_14;
 
+#define LV_OPA_TRANSP 0
 #define LV_OPA_COVER 255
 #define LV_OBJ_FLAG_HIDDEN 0x1
 #define LV_OBJ_FLAG_SCROLLABLE 0x2
@@ -52,6 +53,10 @@ extern const lv_font_t lv_font_montserrat_14;
 #define LV_ALIGN_BOTTOM_LEFT 6
 #define LV_ALIGN_BOTTOM_MID 7
 #define LV_ALIGN_BOTTOM_RIGHT 8
+
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
 
 #define LV_LABEL_LONG_CLIP 0
 
@@ -79,10 +84,12 @@ void lv_obj_set_style_radius(lv_obj_t *obj, int radius, int part);
 void lv_obj_set_style_size(lv_obj_t *obj, int width, int height, int part);
 void lv_obj_set_style_text_color(lv_obj_t *obj, lv_color_t color, int part);
 void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part);
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part);
 void lv_obj_set_width(lv_obj_t *obj, int width);
 void lv_obj_set_size(lv_obj_t *obj, int width, int height);
 void lv_obj_set_pos(lv_obj_t *obj, int x, int y);
 void lv_obj_align(lv_obj_t *obj, int align, int x_ofs, int y_ofs);
+int lv_font_get_line_height(const lv_font_t *font);
 
 lv_obj_t *lv_label_create(lv_obj_t *parent);
 void lv_label_set_long_mode(lv_obj_t *obj, int mode);

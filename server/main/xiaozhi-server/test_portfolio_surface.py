@@ -172,6 +172,69 @@ class PortfolioSurfaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["pnl_pct"], "N/A")
             self.assertIsNone(row["pnl_positive"])
 
+    async def test_portfolio_refresh_restores_prior_selected_holding_cursor(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {
+            "screen": "spotlight",
+            "nav_from": "portfolio",
+            "portfolio_cursor": 1,
+            "current_token": {"addr": "token-b", "chain": "solana", "symbol": "BBB"},
+        }
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _env_get(key, default=None):
+            if key == "AVE_PROXY_WALLET_ID":
+                return "wallet-portfolio"
+            return default
+
+        def _fake_trade_get(path, params=None):
+            return {"data": [{"assetsId": "wallet-portfolio", "addressList": []}]}
+
+        def _fake_collect_portfolio_holdings(wallets):
+            return (
+                ["token-a-solana", "token-b-solana"],
+                {
+                    "token-a-solana": {
+                        "symbol": "AAA",
+                        "display_balance_decimal": 10.0,
+                        "chain": "solana",
+                        "addr": "token-a",
+                    },
+                    "token-b-solana": {
+                        "symbol": "BBB",
+                        "display_balance_decimal": 1.0,
+                        "chain": "solana",
+                        "addr": "token-b",
+                    },
+                },
+                ["getUserByAssetsId.addressList"],
+            )
+
+        def _fake_data_post(path, payload):
+            return {
+                "data": {
+                    "token-a-solana": {"current_price_usd": 2.0},
+                    "token-b-solana": {"current_price_usd": 1.0},
+                }
+            }
+
+        with patch("plugins_func.functions.ave_tools.os.environ.get", side_effect=_env_get), \
+             patch("plugins_func.functions.ave_tools._trade_get", side_effect=_fake_trade_get), \
+             patch("plugins_func.functions.ave_tools._collect_portfolio_holdings", side_effect=_fake_collect_portfolio_holdings), \
+             patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            resp = ave_tools.ave_portfolio(conn)
+            await asyncio.sleep(0)
+
+        self.assertEqual(resp.result, "portfolio:2tokens")
+        payload = sent[0][1]
+        self.assertEqual(payload.get("cursor"), 1)
+        self.assertEqual(conn.ave_state.get("portfolio_cursor"), 1)
+
     def test_screen_portfolio_explanation_summary_surfaces_reason_and_wallet_source(self):
         import os
         import subprocess
@@ -210,6 +273,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)obj;
     (void)align;
     (void)part;
+}}
+
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
 }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
@@ -285,6 +353,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],
@@ -351,6 +420,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)obj;
     (void)align;
     (void)part;
+}}
+
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
 }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
@@ -426,6 +500,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],
@@ -491,6 +566,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)obj;
     (void)align;
     (void)part;
+}}
+
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
 }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
@@ -562,6 +642,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],
@@ -624,6 +705,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)obj;
     (void)align;
     (void)part;
+}}
+
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
 }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
@@ -695,6 +781,145 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
+    def test_screen_portfolio_applies_payload_cursor_to_selected_context(self):
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        display_json = (
+            '{"screen":"portfolio","data":{"cursor":1,"holdings":['
+            '{"symbol":"AAA","addr":"token-a","chain":"solana","balance_raw":"1","value_usd":"$10"},'
+            '{"symbol":"BBB","addr":"token-b","chain":"solana","balance_raw":"2","value_usd":"$9"}'
+            '],"total_usd":"$19"}}'
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_PORTFOLIO
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
+}}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
+
+int main(void)
+{{
+    char ctx[256];
+    screen_portfolio_show("{display_json_c}");
+    if (!screen_portfolio_get_selected_context_json(ctx, sizeof(ctx))) {{
+        fprintf(stderr, "missing selected context\\n");
+        return 2;
+    }}
+    if (strstr(ctx, "\\"cursor\\":1") == NULL) {{
+        fprintf(stderr, "expected cursor 1 in context, got: %s\\n", ctx);
+        return 3;
+    }}
+    if (strstr(ctx, "\\"addr\\":\\"token-b\\"") == NULL) {{
+        fprintf(stderr, "expected token-b selected, got: %s\\n", ctx);
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / "verify_portfolio_cursor_restore.c"
+            binary = tmpdir_path / "verify_portfolio_cursor_restore"
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],
@@ -759,6 +984,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)part;
 }}
 
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
+}}
+
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
     (void)out;
@@ -819,6 +1049,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],
@@ -885,6 +1116,11 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)part;
 }}
 
+const lv_font_t *ave_font_cjk_14(void)
+{{
+    return &lv_font_montserrat_14;
+}}
+
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
     (void)out;
@@ -945,6 +1181,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    str(repo_root / "shared/ave_screens/ave_json_utils.c"),
                     "-o",
                     str(binary),
                 ],

@@ -54,10 +54,22 @@ static char s_source_tag[24] = {0};
 static bool s_loading = false;
 static uint32_t s_loading_started_ms = 0;
 static lv_timer_t *s_loading_timer = NULL;
+static int s_loading_reason = 0;
+static char s_loading_origin_token_id[120] = {0};
+static char s_loading_origin_chain[20] = {0};
+static int s_loading_expected_interval_idx = -1;
+static int s_loading_origin_cursor = -1;
+static int s_loading_origin_total = 0;
+static int s_loading_nav_delta = 0;
 #define SPOTLIGHT_LOADING_TIMEOUT_MS 2500
+#define SPOTLIGHT_LOADING_REASON_NONE 0
+#define SPOTLIGHT_LOADING_REASON_FEED_NAV 1
+#define SPOTLIGHT_LOADING_REASON_INTERVAL 2
 
 /* Back fallback timer — cancelled when server responds, fires locally if not */
 static lv_timer_t *s_back_timer = NULL;
+static int s_feed_cursor = -1;
+static int s_feed_total = 0;
 
 void screen_spotlight_cancel_back_timer(void)
 {
@@ -71,6 +83,13 @@ static void _clear_loading_guard(void)
 {
     s_loading = false;
     s_loading_started_ms = 0;
+    s_loading_reason = SPOTLIGHT_LOADING_REASON_NONE;
+    s_loading_origin_token_id[0] = '\0';
+    s_loading_origin_chain[0] = '\0';
+    s_loading_expected_interval_idx = -1;
+    s_loading_origin_cursor = -1;
+    s_loading_origin_total = 0;
+    s_loading_nav_delta = 0;
     if (s_loading_timer) {
         lv_timer_del(s_loading_timer);
         s_loading_timer = NULL;
@@ -83,6 +102,13 @@ static void _loading_timeout_cb(lv_timer_t *t)
     s_loading_timer = NULL;
     s_loading = false;
     s_loading_started_ms = 0;
+    s_loading_reason = SPOTLIGHT_LOADING_REASON_NONE;
+    s_loading_origin_token_id[0] = '\0';
+    s_loading_origin_chain[0] = '\0';
+    s_loading_expected_interval_idx = -1;
+    s_loading_origin_cursor = -1;
+    s_loading_origin_total = 0;
+    s_loading_nav_delta = 0;
     printf("[SPOTLIGHT] loading timeout released\n");
 }
 
@@ -93,16 +119,67 @@ static void _refresh_loading_guard(void)
     _clear_loading_guard();
 }
 
-static void _arm_loading_guard(void)
+static void _arm_loading_guard(
+    int reason,
+    const char *token_id,
+    const char *chain,
+    int expected_interval_idx,
+    int nav_delta
+)
 {
     s_loading = true;
     s_loading_started_ms = lv_tick_get();
+    s_loading_reason = reason;
+    s_loading_expected_interval_idx = expected_interval_idx;
+    snprintf(s_loading_origin_token_id, sizeof(s_loading_origin_token_id), "%s", token_id ? token_id : "");
+    snprintf(s_loading_origin_chain, sizeof(s_loading_origin_chain), "%s", chain ? chain : "");
+    s_loading_origin_cursor = (reason == SPOTLIGHT_LOADING_REASON_FEED_NAV) ? s_feed_cursor : -1;
+    s_loading_origin_total = (reason == SPOTLIGHT_LOADING_REASON_FEED_NAV) ? s_feed_total : 0;
+    s_loading_nav_delta = (reason == SPOTLIGHT_LOADING_REASON_FEED_NAV) ? nav_delta : 0;
     if (s_loading_timer) {
         lv_timer_del(s_loading_timer);
         s_loading_timer = NULL;
     }
     s_loading_timer = lv_timer_create(_loading_timeout_cb, SPOTLIGHT_LOADING_TIMEOUT_MS, NULL);
     if (s_loading_timer) lv_timer_set_repeat_count(s_loading_timer, 1);
+}
+
+static int _incoming_spotlight_releases_loading_guard(
+    int is_live,
+    const char *incoming_token_id,
+    const char *incoming_chain,
+    int incoming_interval_idx,
+    int incoming_cursor,
+    int incoming_total
+)
+{
+    if (!s_loading) return 0;
+    if (is_live) return 0;
+    if (!incoming_token_id || !incoming_token_id[0]) return 0;
+    if (!incoming_chain || !incoming_chain[0]) return 0;
+
+    if (s_loading_reason == SPOTLIGHT_LOADING_REASON_FEED_NAV) {
+        if (!s_loading_origin_token_id[0] || !s_loading_origin_chain[0]) return 1;
+        if ((strcmp(incoming_token_id, s_loading_origin_token_id) != 0) ||
+            (strcmp(incoming_chain, s_loading_origin_chain) != 0)) {
+            return 1;
+        }
+        if (s_loading_origin_cursor < 0 || s_loading_nav_delta == 0) return 0;
+        if (incoming_cursor < 0 || incoming_total <= 0) return 0;
+        if (s_loading_origin_total > 0 && incoming_total != s_loading_origin_total) {
+            return (incoming_cursor != s_loading_origin_cursor);
+        }
+        return ((incoming_cursor - s_loading_origin_cursor) * s_loading_nav_delta) > 0;
+    }
+
+    if (s_loading_reason == SPOTLIGHT_LOADING_REASON_INTERVAL) {
+        if (strcmp(incoming_token_id, s_loading_origin_token_id) != 0) return 0;
+        if (strcmp(incoming_chain, s_loading_origin_chain) != 0) return 0;
+        if (s_loading_expected_interval_idx < 0) return 1;
+        return incoming_interval_idx == s_loading_expected_interval_idx;
+    }
+
+    return 1;
 }
 
 /* K-line timeframe cycling */
@@ -428,20 +505,35 @@ static void _build(void) {
 
 void screen_spotlight_show(const char *json_data)
 {
-    if (!s_screen) _build();
-
-    /* Cancel back fallback timer — server responded successfully */
-    screen_spotlight_cancel_back_timer();
-
-    /* Clear navigation loading guard — new data has arrived */
-    _clear_loading_guard();
-
     int is_live = _bool(json_data, "live", 0);
+    char incoming_token_id[120] = {0};
+    char incoming_chain[20] = {0};
     char interval_value[16] = {0};
     int interval_idx = -1;
+    int cursor = -1;
+    int total = 0;
+    int should_release_loading = 0;
+
+    _str(json_data, "token_id", incoming_token_id, sizeof(incoming_token_id));
+    _str(json_data, "chain", incoming_chain, sizeof(incoming_chain));
     if (_str(json_data, "interval", interval_value, sizeof(interval_value))) {
         interval_idx = _interval_index_from_value(interval_value);
     }
+    cursor = _int(json_data, "cursor", -1);
+    total = _int(json_data, "total", 0);
+    should_release_loading = _incoming_spotlight_releases_loading_guard(
+        is_live,
+        incoming_token_id,
+        incoming_chain,
+        interval_idx,
+        cursor,
+        total
+    );
+
+    if (!s_screen) _build();
+
+    if (should_release_loading) _clear_loading_guard();
+
     if (interval_idx >= 0) {
         s_interval_idx = interval_idx;
     } else if (!is_live) {
@@ -520,8 +612,8 @@ void screen_spotlight_show(const char *json_data)
     _str(json_data, "chart_t_start", ct_start, sizeof(ct_start));
     _str(json_data, "chart_t_mid",   ct_mid,   sizeof(ct_mid));
     _str(json_data, "chart_t_end",   ct_end,   sizeof(ct_end));
-    if (ct_start[0]) lv_label_set_text(s_lbl_t_start, ct_start);
-    if (ct_mid[0])   lv_label_set_text(s_lbl_t_mid,   ct_mid);
+    lv_label_set_text(s_lbl_t_start, ct_start[0] ? ct_start : "");
+    lv_label_set_text(s_lbl_t_mid,   ct_mid[0] ? ct_mid : "");
     lv_label_set_text(s_lbl_t_end, ct_end[0] ? ct_end : "now");
 
     /* Risk badges */
@@ -552,8 +644,8 @@ void screen_spotlight_show(const char *json_data)
     lv_label_set_text(s_lbl_liq,     lbuf);
 
     /* Feed position indicator (present only when navigating feed list) */
-    int cursor = _int(json_data, "cursor", -1);
-    int total  = _int(json_data, "total",   0);
+    s_feed_cursor = cursor;
+    s_feed_total = total;
     if (cursor >= 0 && total > 1) {
         lv_label_set_text_fmt(s_lbl_pos, "< %d/%d >", cursor + 1, total);
     } else {
@@ -569,11 +661,11 @@ void screen_spotlight_key(int key)
         s_back_timer = lv_timer_create(_back_timeout_cb, 3000, NULL);
         lv_timer_set_repeat_count(s_back_timer, 1);
     } else if (key == AVE_KEY_LEFT) {
-        _arm_loading_guard();
+        _arm_loading_guard(SPOTLIGHT_LOADING_REASON_FEED_NAV, s_token_id, s_chain, -1, -1);
         ave_send_json("{\"type\":\"key_action\",\"action\":\"feed_prev\"}");
         printf("[SPOTLIGHT] feed_prev\n");
     } else if (key == AVE_KEY_RIGHT) {
-        _arm_loading_guard();
+        _arm_loading_guard(SPOTLIGHT_LOADING_REASON_FEED_NAV, s_token_id, s_chain, -1, 1);
         ave_send_json("{\"type\":\"key_action\",\"action\":\"feed_next\"}");
         printf("[SPOTLIGHT] feed_next\n");
     } else if (key == AVE_KEY_A) {
@@ -591,8 +683,14 @@ void screen_spotlight_key(int key)
         printf("[SPOTLIGHT] BUY -> token=%s chain=%s\n", s_token_id, s_chain);
     } else if (key == AVE_KEY_UP) {
         if (!s_token_id[0] || !s_chain[0]) return;
-        _arm_loading_guard();
         s_interval_idx = (s_interval_idx + 1) % N_INTERVALS;
+        _arm_loading_guard(
+            SPOTLIGHT_LOADING_REASON_INTERVAL,
+            s_token_id,
+            s_chain,
+            s_interval_idx,
+            0
+        );
         if (s_lbl_tf) lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
         char cmd[512];
         ave_sm_json_field_t fields[] = {
@@ -605,8 +703,14 @@ void screen_spotlight_key(int key)
         printf("[SPOTLIGHT] TF -> %s\n", INTERVAL_LBLS[s_interval_idx]);
     } else if (key == AVE_KEY_DOWN) {
         if (!s_token_id[0] || !s_chain[0]) return;
-        _arm_loading_guard();
         s_interval_idx = (s_interval_idx - 1 + N_INTERVALS) % N_INTERVALS;
+        _arm_loading_guard(
+            SPOTLIGHT_LOADING_REASON_INTERVAL,
+            s_token_id,
+            s_chain,
+            s_interval_idx,
+            0
+        );
         if (s_lbl_tf) lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
         char cmd2[512];
         ave_sm_json_field_t fields[] = {

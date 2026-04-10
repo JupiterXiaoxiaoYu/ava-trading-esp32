@@ -11,6 +11,7 @@
  *   y=215..240   divider + bottom bar: "< CANCEL"  "CONFIRM >"
  */
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
 #include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
@@ -51,6 +52,7 @@ static int         s_remaining_ms = 0;
 static int         s_timeout_ms   = 10000;
 static char        s_trade_id[80] = {0};
 static uint32_t    s_show_ts      = 0;
+static int         s_submitted    = 0;
 
 void screen_confirm_cancel_timers(void)
 {
@@ -62,6 +64,7 @@ void screen_confirm_cancel_timers(void)
         lv_timer_del(s_ack_timer);
         s_ack_timer = NULL;
     }
+    s_submitted = 0;
 }
 
 /* ─── Simple JSON helpers ───────────────────────────────────────────────── */
@@ -183,6 +186,7 @@ static void _ack_timeout_cb(lv_timer_t *t)
 {
     (void)t;
     s_ack_timer = NULL;
+    s_submitted = 0;
     _show_ack_timeout_notice();
 }
 
@@ -196,6 +200,7 @@ static void _countdown_cb(lv_timer_t *t)
     if (s_remaining_ms <= 0) {
         s_remaining_ms = 0;
         if (s_timer) { lv_timer_del(s_timer); s_timer = NULL; }
+        s_submitted = 0;
         printf("[CONFIRM] TIMEOUT trade_id=%s\n", s_trade_id);
         _show_confirm_timeout_result();
         return;
@@ -236,7 +241,7 @@ static void _build_screen(void)
     s_lbl_top = lv_label_create(top_bar);
     lv_obj_align(s_lbl_top, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_color(s_lbl_top, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(s_lbl_top, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_top, ave_font_cjk_14(), 0);
 
     /* ── TP / SL / Slippage row ─────────────────────────────────────────── */
     s_lbl_params = lv_label_create(s_screen);
@@ -296,6 +301,7 @@ void screen_confirm_show(const char *json_data)
 
     /* Stop any existing timers */
     screen_confirm_cancel_timers();
+    s_submitted = 0;
 
     /* Parse fields */
     char action[16] = {0}, symbol[24] = {0};
@@ -389,6 +395,10 @@ void screen_confirm_show(const char *json_data)
 
 void screen_confirm_key(int key)
 {
+    if (s_submitted && (key == AVE_KEY_A || key == AVE_KEY_B || key == AVE_KEY_Y)) {
+        return;
+    }
+
     if (key == AVE_KEY_B) {
         /* Cancel — notify server */
         screen_confirm_cancel_timers();
@@ -413,6 +423,7 @@ void screen_confirm_key(int key)
             ave_send_json(msg);
             printf("[CONFIRM] CONFIRMED trade_id=%s\n", s_trade_id);
         }
+        s_submitted = 1;
         /* Arm 15-second watchdog; fires if server never responds */
         if (s_ack_timer) { lv_timer_del(s_ack_timer); s_ack_timer = NULL; }
         s_ack_timer = lv_timer_create(_ack_timeout_cb, 15000, NULL);
@@ -426,6 +437,13 @@ int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 
     if (!out || out_n == 0) return 0;
 
-    n = snprintf(out, out_n, "%s", "{\"screen\":\"confirm\"}");
+    n = snprintf(
+        out,
+        out_n,
+        "%s",
+        s_submitted
+            ? "{\"screen\":\"confirm\",\"awaiting_ack\":true}"
+            : "{\"screen\":\"confirm\"}"
+    );
     return (n > 0 && (size_t)n < out_n) ? 1 : 0;
 }

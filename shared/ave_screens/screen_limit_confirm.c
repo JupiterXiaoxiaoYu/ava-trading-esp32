@@ -12,6 +12,7 @@
  *   y=215..240  divider + bottom key labels
  */
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
 #include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
@@ -120,6 +121,7 @@ static int         s_seconds     = 10;
 static int         s_total       = 10;
 static char        s_trade_id[80] = {0};
 static uint32_t    s_show_ts     = 0;
+static int         s_submitted   = 0;
 
 void screen_limit_confirm_cancel_timers(void)
 {
@@ -131,6 +133,7 @@ void screen_limit_confirm_cancel_timers(void)
         lv_timer_del(s_ack_timer);
         s_ack_timer = NULL;
     }
+    s_submitted = 0;
 }
 
 /* ---- Ack watchdog callback --------------------------------------------- */
@@ -138,6 +141,7 @@ static void _ack_timeout_cb(lv_timer_t *t)
 {
     (void)t;
     s_ack_timer = NULL;
+    s_submitted = 0;
     _show_ack_timeout_notice();
 }
 
@@ -168,6 +172,7 @@ static void _tick_cb(lv_timer_t *t)
         lv_timer_del(s_timer);
         s_timer = NULL;
         if (s_ack_timer) { lv_timer_del(s_ack_timer); s_ack_timer = NULL; }
+        s_submitted = 0;
         printf("[LIMIT_CONFIRM] TIMEOUT trade_id=%s\n", s_trade_id);
         _show_confirm_timeout_result();
         return;
@@ -193,7 +198,7 @@ static void _build_screen(void)
     s_lbl_top = lv_label_create(bar);
     lv_obj_align(s_lbl_top, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_color(s_lbl_top, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(s_lbl_top, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_top, ave_font_cjk_14(), 0);
 
     /* Target price */
     s_lbl_target = lv_label_create(s_screen);
@@ -257,6 +262,7 @@ void screen_limit_confirm_show(const char *json_data)
 
     /* Stop previous timers */
     screen_limit_confirm_cancel_timers();
+    s_submitted = 0;
 
     /* Parse fields */
     char action[32] = {0}, symbol[24] = {0}, limit_price[32] = {0};
@@ -324,6 +330,10 @@ void screen_limit_confirm_show(const char *json_data)
 
 void screen_limit_confirm_key(int key)
 {
+    if (s_submitted && (key == AVE_KEY_A || key == AVE_KEY_B || key == AVE_KEY_Y)) {
+        return;
+    }
+
     if (key == AVE_KEY_B) {
         screen_limit_confirm_cancel_timers();
         {
@@ -346,6 +356,7 @@ void screen_limit_confirm_key(int key)
             ave_send_json(msg);
             printf("[LIMIT_CONFIRM] Order set -> trade_id=%s\n", s_trade_id);
         }
+        s_submitted = 1;
         /* Arm 15-second watchdog; fires if server never responds */
         if (s_ack_timer) { lv_timer_del(s_ack_timer); s_ack_timer = NULL; }
         s_ack_timer = lv_timer_create(_ack_timeout_cb, 15000, NULL);
@@ -359,6 +370,13 @@ int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
 
     if (!out || out_n == 0) return 0;
 
-    n = snprintf(out, out_n, "%s", "{\"screen\":\"limit_confirm\"}");
+    n = snprintf(
+        out,
+        out_n,
+        "%s",
+        s_submitted
+            ? "{\"screen\":\"limit_confirm\",\"awaiting_ack\":true}"
+            : "{\"screen\":\"limit_confirm\"}"
+    );
     return (n > 0 && (size_t)n < out_n) ? 1 : 0;
 }

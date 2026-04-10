@@ -123,6 +123,8 @@ static char s_feed_source_label[24] = "TRENDING";
 static char s_active_source_label[24] = "TRENDING";
 static char s_last_search_query[24] = "";
 static int s_has_special_source_label = 0;
+static int s_feed_session_id = 0;
+static int s_feed_session_valid = 0;
 
 typedef enum {
     FEED_SURFACE_STANDARD = 0,
@@ -915,6 +917,8 @@ void screen_feed_show(const char *json_data)
 
     int has_tokens = (json_data && strstr(json_data, "\"tokens\"") != NULL);
     int is_live_push = _get_json_int_field(json_data, "live", 0);
+    int incoming_feed_session = _get_json_int_field(json_data, "feed_session", -1);
+    int has_feed_session = (incoming_feed_session >= 0);
     char source_label[24] = {0};
     char search_query[24] = {0};
     char mode[16] = {0};
@@ -923,6 +927,20 @@ void screen_feed_show(const char *json_data)
     int has_search_query = _get_json_str_field(json_data, "search_query", search_query, sizeof(search_query));
     int has_mode = _get_json_str_field(json_data, "mode", mode, sizeof(mode));
     int prev_orders_mode = s_is_orders_mode;
+
+    if (is_live_push) {
+        /* Live pushes are only valid for the current feed session. */
+        if (s_feed_session_valid) {
+            if (!has_feed_session) return;
+            if (incoming_feed_session != s_feed_session_id) return;
+        }
+    } else if (has_tokens && has_feed_session) {
+        s_feed_session_id = incoming_feed_session;
+        s_feed_session_valid = 1;
+    } else if (has_tokens) {
+        s_feed_session_id = 0;
+        s_feed_session_valid = 0;
+    }
 
     snprintf(prev_label, sizeof(prev_label), "%s", s_active_source_label);
 

@@ -108,6 +108,13 @@ int main(void)
     return harness_source, include_dir, manager_src, tuple(extra_sources), tuple(extra_ldflags)
 
 class SurfaceInputSyncTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _common_screen_sources(repo_root: Path):
+        return (
+            repo_root / "shared/ave_screens/ave_json_utils.c",
+            repo_root / "simulator/mock/ave_screen_harness_support.c",
+        )
+
     def _build_listen_conn(self, ave_state=None):
         conn = SimpleNamespace()
         conn.logger = _FakeLogger()
@@ -136,6 +143,7 @@ class SurfaceInputSyncTests(unittest.IsolatedAsyncioTestCase):
         verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        common_sources = self._common_screen_sources(repo_root)
         verifier_prefix = verifier.read_text(encoding="utf-8").split(
             "#if defined(VERIFY_FEED)", 1
         )[0]
@@ -162,6 +170,8 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)align;
     (void)part;
 }}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -230,6 +240,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     *[str(source) for source in extra_sources],
                     *extra_ldflags,
                     "-o",
@@ -268,6 +279,7 @@ int main(void)
         binary_name="verify_feed_explore_overlay",
     ):
         repo_root = Path(__file__).resolve().parents[3]
+        common_sources = self._common_screen_sources(repo_root)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -283,6 +295,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     *[str(source) for source in extra_sources],
                     *extra_ldflags,
                     "-o",
@@ -353,6 +366,8 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)align;
     (void)part;
 }}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -463,6 +478,8 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)align;
     (void)part;
 }}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -518,6 +535,176 @@ int main(void)
             include_dir,
             manager_src,
             binary_name=binary_name,
+        )
+
+    def _assert_real_confirm_screen_locks_inputs_after_first_submit(
+        self,
+        *,
+        screen_id,
+        screen_source,
+        first_trade_id,
+        second_trade_id,
+        binary_name,
+        rename_stub_macros=(),
+        extra_ldflags=(),
+        data_fields,
+    ):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+
+        rename_block = "\n".join(
+            f"#define {macro} {macro}__stub"
+            for macro in rename_stub_macros
+        )
+        unrename_block = "\n".join(
+            f"#undef {macro}"
+            for macro in rename_stub_macros
+        )
+
+        first_display_json = (
+            '{"type":"display","screen":"'
+            + screen_id
+            + '","data":{"trade_id":"'
+            + first_trade_id
+            + '",'
+            + data_fields
+            + "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        second_display_json = (
+            '{"type":"display","screen":"'
+            + screen_id
+            + '","data":{"trade_id":"'
+            + second_trade_id
+            + '",'
+            + data_fields
+            + "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        if screen_id == "confirm":
+            other_context_stub = """
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+        else:
+            other_context_stub = """
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+
+        harness_source = f"""
+{rename_block}
+{verifier_prefix}
+{unrename_block}
+
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+
+lv_obj_t *lv_bar_create(lv_obj_t *parent)
+{{
+    return lv_obj_create(parent);
+}}
+
+void lv_bar_set_range(lv_obj_t *obj, int min, int max)
+{{
+    (void)obj;
+    (void)min;
+    (void)max;
+}}
+
+void lv_bar_set_value(lv_obj_t *obj, int value, int anim)
+{{
+    (void)obj;
+    (void)value;
+    (void)anim;
+}}
+
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+
+{other_context_stub}
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int main(void)
+{{
+    int ok = 1;
+
+    ave_sm_handle_json("{first_display_json}");
+    lv_tick_inc(600);
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    ok &= expect_contains("\\"action\\":\\"confirm\\"", "first confirm submit");
+    ok &= expect_contains("\\"trade_id\\":\\"{first_trade_id}\\"", "first confirm trade id");
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "duplicate A should be ignored after submit: %s\\n", g_last_json);
+        ok = 0;
+    }}
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_B);
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "B should be ignored while awaiting ack: %s\\n", g_last_json);
+        ok = 0;
+    }}
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_Y);
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "Y should be ignored while awaiting ack: %s\\n", g_last_json);
+        ok = 0;
+    }}
+
+    ave_sm_handle_json("{second_display_json}");
+    lv_tick_inc(600);
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    ok &= expect_contains("\\"trade_id\\":\\"{second_trade_id}\\"", "lock resets on new screen");
+
+    return ok ? 0 : 1;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name=binary_name,
+            extra_sources=(screen_source,),
+            extra_ldflags=("-DLV_ANIM_OFF=0", *extra_ldflags),
         )
 
     async def test_feed_mixed_input_watch_and_buy_use_explicit_selection_payload(self):
@@ -682,11 +869,59 @@ int main(void)
             symbol="REAL",
         )
 
+    def test_real_confirm_screen_blocks_repeat_a_b_y_until_new_screen(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_confirm_screen_locks_inputs_after_first_submit(
+            screen_id="confirm",
+            screen_source=repo_root / "shared/ave_screens/screen_confirm.c",
+            first_trade_id="confirm-trade-1",
+            second_trade_id="confirm-trade-2",
+            binary_name="verify_confirm_submit_lock",
+            rename_stub_macros=(
+                "screen_confirm_show",
+                "screen_confirm_key",
+                "screen_confirm_cancel_timers",
+            ),
+            data_fields=(
+                '"action":"BUY",'
+                '"symbol":"BONK",'
+                '"amount_native":"0.10 SOL",'
+                '"amount_usd":"$10.00",'
+                '"timeout_sec":10'
+            ),
+        )
+
+    def test_real_limit_confirm_screen_blocks_repeat_a_b_y_until_new_screen(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        self._assert_real_confirm_screen_locks_inputs_after_first_submit(
+            screen_id="limit_confirm",
+            screen_source=repo_root / "shared/ave_screens/screen_limit_confirm.c",
+            first_trade_id="limit-trade-1",
+            second_trade_id="limit-trade-2",
+            binary_name="verify_limit_confirm_submit_lock",
+            rename_stub_macros=(
+                "screen_limit_confirm_show",
+                "screen_limit_confirm_key",
+                "screen_limit_confirm_cancel_timers",
+            ),
+            extra_ldflags=("-Dlv_font_montserrat_16=lv_font_montserrat_14",),
+            data_fields=(
+                '"action":"LIMIT BUY",'
+                '"symbol":"BONK",'
+                '"amount_native":"0.10 SOL",'
+                '"limit_price":"0.0001",'
+                '"current_price":"0.0002",'
+                '"distance":"-50%",'
+                '"timeout_sec":10'
+            ),
+        )
+
     def test_touched_c_key_action_payloads_escape_dynamic_values(self):
         repo_root = Path(__file__).resolve().parents[3]
         verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        common_sources = self._common_screen_sources(repo_root)
         price_fmt_src = repo_root / "shared/ave_screens/ave_price_fmt.c"
         selection_stub_source = """
 #include <stddef.h>
@@ -749,6 +984,7 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
                     f"-D{macro}",
                     str(verifier),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     str(selection_stub),
                     str(price_fmt_src),
                     "-lm",
@@ -874,6 +1110,8 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
     (void)align;
     (void)part;
 }}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {{
@@ -928,6 +1166,563 @@ int main(void)
             binary_name="verify_spotlight_stale_identity",
             extra_sources=(
                 repo_root / "shared/ave_screens/screen_spotlight.c",
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+            ),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+        )
+
+    def test_real_spotlight_loading_payload_clears_stale_x_axis_labels(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        full_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"spot-1",'
+            '"chain":"solana",'
+            '"symbol":"PEPE",'
+            '"price":"$1",'
+            '"change_24h":"+1%",'
+            '"chart":[1,2],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2",'
+            '"chart_t_start":"03/01 00:00",'
+            '"chart_t_mid":"03/01 12:00",'
+            '"chart_t_end":"03/01 23:59"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        loading_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"spot-1",'
+            '"chain":"solana",'
+            '"symbol":"PEPE",'
+            '"price":"--",'
+            '"change_24h":"Loading",'
+            '"chart":[500,500],'
+            '"chart_min":"--",'
+            '"chart_max":"--",'
+            '"chart_t_end":"now"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
+
+int main(void)
+{{
+    ave_sm_handle_json("{full_json}");
+    ave_sm_handle_json("{loading_json}");
+    if (s_lbl_t_start->text[0] != '\\0' || s_lbl_t_mid->text[0] != '\\0') {{
+        fprintf(stderr, "stale x-axis label: start='%s' mid='%s' end='%s'\\n",
+                s_lbl_t_start->text, s_lbl_t_mid->text, s_lbl_t_end->text);
+        return 3;
+    }}
+    if (strcmp(s_lbl_t_end->text, "now") != 0) {{
+        fprintf(stderr, "unexpected end label: %s\\n", s_lbl_t_end->text);
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_spotlight_loading_clears_xaxis",
+            extra_sources=(
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+            ),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+        )
+
+    def test_real_spotlight_stale_payload_does_not_release_feed_navigation_guard(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        old_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"old-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"OLD",'
+            '"price":"$1",'
+            '"change_24h":"+1%",'
+            '"interval":"60",'
+            '"chart":[1,2],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        stale_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"old-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"OLD",'
+            '"price":"$1.01",'
+            '"change_24h":"+1.1%",'
+            '"interval":"60",'
+            '"chart":[2,3],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        fresh_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"new-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"NEW",'
+            '"price":"$9",'
+            '"change_24h":"+9%",'
+            '"interval":"60",'
+            '"chart":[9,10],'
+            '"chart_min":"$9",'
+            '"chart_max":"$10"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
+
+int main(void)
+{{
+    ave_sm_handle_json("{old_json}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_RIGHT);
+    if (!expect_contains("\\"action\\":\\"feed_next\\"", "feed_next")) {{
+        return 2;
+    }}
+    if (!s_loading) {{
+        fprintf(stderr, "feed_next did not arm loading guard\\n");
+        return 3;
+    }}
+
+    clear_last_json();
+    ave_sm_handle_json("{stale_json}");
+    if (!s_loading) {{
+        fprintf(stderr, "stale spotlight payload released loading guard\\n");
+        return 4;
+    }}
+    ave_sm_key_press(AVE_KEY_A);
+    if (g_last_json[0] != '\\0') {{
+        fprintf(stderr, "buy should stay blocked while stale payload arrives: %s\\n", g_last_json);
+        return 5;
+    }}
+
+    ave_sm_handle_json("{fresh_json}");
+    if (s_loading) {{
+        fprintf(stderr, "fresh spotlight payload did not release loading guard\\n");
+        return 6;
+    }}
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    if (!expect_contains("\\"action\\":\\"buy\\"", "buy action")) {{
+        return 7;
+    }}
+    if (!expect_contains("\\"token_id\\":\\"new-token-solana\\"", "new token id")) {{
+        return 8;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_spotlight_stale_payload_keeps_loading_guard",
+            extra_sources=(
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+            ),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+        )
+
+    def test_real_spotlight_same_identity_navigation_payload_releases_feed_guard(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        old_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"same-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"SAME",'
+            '"price":"$1",'
+            '"change_24h":"+1%",'
+            '"interval":"60",'
+            '"cursor":0,'
+            '"total":2,'
+            '"chart":[1,2],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        nav_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"same-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"SAME",'
+            '"price":"$1.25",'
+            '"change_24h":"+1.5%",'
+            '"interval":"60",'
+            '"cursor":1,'
+            '"total":2,'
+            '"chart":[2,3],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
+
+int main(void)
+{{
+    ave_sm_handle_json("{old_json}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_RIGHT);
+    if (!expect_contains("\\"action\\":\\"feed_next\\"", "feed_next")) {{
+        return 2;
+    }}
+    if (!s_loading) {{
+        fprintf(stderr, "feed_next did not arm loading guard\\n");
+        return 3;
+    }}
+
+    ave_sm_handle_json("{nav_json}");
+    if (s_loading) {{
+        fprintf(stderr, "same-identity spotlight navigation payload did not release loading guard\\n");
+        return 4;
+    }}
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    if (!expect_contains("\\"action\\":\\"buy\\"", "buy action")) {{
+        return 5;
+    }}
+    if (!expect_contains("\\"token_id\\":\\"same-token-solana\\"", "same token id")) {{
+        return 6;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_spotlight_same_identity_nav_releases_guard",
+            extra_sources=(
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+            ),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+        )
+
+    def test_real_spotlight_live_payload_does_not_cancel_back_timer(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        old_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"old-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"OLD",'
+            '"price":"$1",'
+            '"change_24h":"+1%",'
+            '"interval":"60",'
+            '"chart":[1,2],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+        live_json = (
+            '{"screen":"spotlight","data":{'
+            '"token_id":"old-token-solana",'
+            '"chain":"solana",'
+            '"symbol":"OLD",'
+            '"price":"$1.11",'
+            '"change_24h":"+1.2%",'
+            '"interval":"60",'
+            '"chart":[2,3],'
+            '"chart_min":"$1",'
+            '"chart_max":"$2",'
+            '"live":true'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
+
+int main(void)
+{{
+    ave_sm_handle_json("{old_json}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_B);
+    if (!expect_contains("\\"action\\":\\"back\\"", "back action")) {{
+        return 2;
+    }}
+    if (!s_back_timer) {{
+        fprintf(stderr, "back key did not arm fallback timer\\n");
+        return 3;
+    }}
+
+    ave_sm_handle_json("{live_json}");
+    if (!s_back_timer) {{
+        fprintf(stderr, "live spotlight payload cancelled back timer\\n");
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_spotlight_live_payload_keeps_back_timer",
+            extra_sources=(
                 repo_root / "shared/ave_screens/ave_price_fmt.c",
             ),
             extra_ldflags=(
@@ -1170,6 +1965,7 @@ int main(void)
         verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        common_sources = self._common_screen_sources(repo_root)
         verifier_prefix = verifier.read_text(encoding="utf-8").split(
             "#if defined(VERIFY_FEED)", 1
         )[0]
@@ -1264,6 +2060,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     "-o",
                     str(binary),
                 ],
@@ -1325,6 +2122,7 @@ int main(void)
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        common_sources = self._common_screen_sources(repo_root)
         harness_source = r"""
 #include <stdio.h>
 #include <string.h>
@@ -1455,6 +2253,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     "-o",
                     str(binary),
                 ],
@@ -1484,6 +2283,7 @@ int main(void)
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        common_sources = self._common_screen_sources(repo_root)
         harness_source = r"""
 #include <stdio.h>
 #include <string.h>
@@ -1611,6 +2411,7 @@ int main(void)
                     f"-I{repo_root / 'shared/ave_screens'}",
                     str(source_path),
                     str(manager_src),
+                    *[str(source) for source in common_sources],
                     "-o",
                     str(binary),
                 ],

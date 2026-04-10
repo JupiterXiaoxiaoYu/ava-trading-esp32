@@ -341,8 +341,8 @@ class _TradeMgr:
                 from plugins_func.functions.ave_tools import (
                     _build_trade_state_result_payload,
                     _clear_pending_trade,
-                    _ensure_ave_state,
                     _get_pending_trade,
+                    _present_trade_result_or_defer,
                 )
                 pending = _get_pending_trade(conn) or {
                     "trade_id": tid,
@@ -350,8 +350,13 @@ class _TradeMgr:
                     "symbol": "",
                 }
                 payload = _build_trade_state_result_payload("confirm_timeout", pending=pending)
+                await _present_trade_result_or_defer(
+                    conn,
+                    payload,
+                    current_trade_id=tid,
+                )
                 _clear_pending_trade(conn, tid)
-                _ensure_ave_state(conn)["screen"] = "result"
+                return
             except Exception:
                 payload = {
                     "success": False,

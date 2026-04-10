@@ -343,6 +343,279 @@ def _ensure_ave_state(conn: "ConnectionHandler") -> dict:
     return conn.ave_state
 
 
+def _resolve_spotlight_symbol(state: dict, addr: str, chain: str, symbol: str = "", cursor=None) -> str:
+    resolved_symbol = str(symbol or "").strip()
+    if resolved_symbol:
+        return resolved_symbol
+
+    current_token = state.get("current_token")
+    if isinstance(current_token, dict):
+        cur_addr, cur_chain = _split_token_reference(
+            current_token.get("addr", ""),
+            current_token.get("chain", chain),
+        )
+        if cur_addr == addr and cur_chain == chain:
+            resolved_symbol = str(current_token.get("symbol") or "").strip()
+            if resolved_symbol:
+                return resolved_symbol
+
+    feed_list = state.get("feed_token_list", [])
+    if isinstance(feed_list, list):
+        if cursor is not None:
+            try:
+                idx = int(cursor)
+            except (TypeError, ValueError):
+                idx = -1
+            if 0 <= idx < len(feed_list):
+                item = feed_list[idx]
+                if isinstance(item, dict):
+                    item_addr, item_chain = _split_token_reference(
+                        item.get("addr", ""),
+                        item.get("chain", chain),
+                    )
+                    if item_addr == addr and item_chain == chain:
+                        resolved_symbol = str(item.get("symbol") or "").strip()
+                        if resolved_symbol:
+                            return resolved_symbol
+
+        for item in feed_list:
+            if not isinstance(item, dict):
+                continue
+            item_addr, item_chain = _split_token_reference(
+                item.get("addr", ""),
+                item.get("chain", chain),
+            )
+            if item_addr == addr and item_chain == chain:
+                resolved_symbol = str(item.get("symbol") or "").strip()
+                if resolved_symbol:
+                    return resolved_symbol
+
+    return addr[:8] if addr else "?"
+
+
+def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
+                                     interval: str = "60", feed_cursor=None, feed_total=None) -> dict:
+    resolved_symbol = str(symbol or "").strip() or (addr[:8] if addr else "?")
+    identity = _asset_identity_fields(
+        {
+            "addr": addr,
+            "chain": chain,
+            "symbol": resolved_symbol,
+            "token_id": f"{addr}-{chain}",
+        }
+    )
+    spotlight_data = {
+        **identity,
+        "addr": addr,
+        "interval": str(interval or "60"),
+        "pair": f"{resolved_symbol} / USDC",
+        "price": "--",
+        "price_raw": 0,
+        "change_24h": "Loading",
+        "change_positive": True,
+        "holders": "--",
+        "liquidity": "--",
+        "chart": [500] * 12,
+        "chart_min": "--",
+        "chart_max": "--",
+        "chart_min_y": "--",
+        "chart_max_y": "--",
+        "chart_t_start": "",
+        "chart_t_mid": "",
+        "chart_t_end": "now",
+        "is_honeypot": False,
+        "is_mintable": False,
+        "is_freezable": False,
+        "risk_level": "LOADING",
+    }
+    if feed_cursor is not None and feed_total is not None:
+        spotlight_data["cursor"] = feed_cursor
+        spotlight_data["total"] = feed_total
+    return spotlight_data
+
+
+def _is_same_spotlight_token(state: dict, addr: str, chain: str) -> bool:
+    if str(state.get("screen") or "") != "spotlight":
+        return False
+    current_token = state.get("current_token")
+    if not isinstance(current_token, dict):
+        return False
+    cur_addr, cur_chain = _split_token_reference(
+        current_token.get("addr", ""),
+        current_token.get("chain", chain),
+    )
+    return cur_addr == addr and cur_chain == chain
+
+
+def _spotlight_request_is_current(state: dict, request_seq: int) -> bool:
+    return int(state.get("spotlight_request_seq", 0) or 0) == int(request_seq or 0)
+
+
+def _normalized_interval_value(interval: str) -> str:
+    value = str(interval or "").strip().lower()
+    if value.startswith("k"):
+        return value[1:]
+    return value
+
+
+async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain: str, symbol: str = "",
+                                  interval: str = "60", feed_cursor=None, feed_total=None,
+                                  request_seq: int = 0):
+    try:
+        interval = str(interval or "60").strip().lower() or "60"
+        is_live_second = interval == "s1"
+        kline_limit = _kline_limit_for_interval(interval)
+
+        token_task = asyncio.to_thread(_data_get, f"/tokens/{addr}-{chain}")
+        risk_task = asyncio.to_thread(_data_get, f"/contracts/{addr}-{chain}")
+        if is_live_second:
+            token_resp, risk_resp = await asyncio.gather(token_task, risk_task)
+            kline_resp = {"data": {"points": []}}
+        else:
+            kline_task = asyncio.to_thread(
+                _data_get,
+                f"/klines/token/{addr}-{chain}",
+                {"interval": interval, "limit": kline_limit},
+            )
+            token_resp, kline_resp, risk_resp = await asyncio.gather(
+                token_task,
+                kline_task,
+                risk_task,
+            )
+
+        token_data = token_resp.get("data", token_resp)
+        token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
+        if isinstance(token, list) and token:
+            token = token[0]
+
+        kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
+        raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
+        raw_times = [int(p.get("time", p.get("t", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
+        price_now = float(token.get("current_price_usd", token.get("price", 0)) or 0)
+        if is_live_second:
+            token_id = f"{addr}-{chain}"
+            seeded_closes = []
+            seeded_times = []
+            if hasattr(conn, "ave_wss"):
+                wss = conn.ave_wss
+                raw_owner_token_id = str(getattr(wss, "_spotlight_raw_owner_token_id", "") or "")
+                raw_owner_chain = str(getattr(wss, "_spotlight_raw_owner_chain", "") or "").strip().lower()
+                raw_owner_interval = _normalized_interval_value(
+                    getattr(wss, "_spotlight_raw_owner_interval", "")
+                )
+                owner_token_matches = (not raw_owner_token_id) or (raw_owner_token_id == token_id)
+                owner_chain_matches = (not raw_owner_chain) or (raw_owner_chain == chain)
+                owner_interval_matches = (not raw_owner_interval) or (raw_owner_interval == "s1")
+                if (
+                    getattr(wss, "_spotlight_id", "") == token_id
+                    and owner_token_matches
+                    and owner_chain_matches
+                    and owner_interval_matches
+                ):
+                    seeded_closes = list(getattr(wss, "_spotlight_raw_closes", []) or [])
+                    seeded_times = list(getattr(wss, "_spotlight_raw_times", []) or [])
+            raw_closes = [float(v) for v in seeded_closes if v is not None and float(v) > 0][-kline_limit:]
+            raw_times = [int(v) for v in seeded_times if v][-kline_limit:]
+            if not raw_closes and price_now > 0:
+                raw_closes = [price_now] * 12
+            kline_points = [
+                {"close": value, "time": raw_times[idx] if idx < len(raw_times) else 0}
+                for idx, value in enumerate(raw_closes)
+            ]
+        chart_values = _normalize_kline(kline_points)
+        if is_live_second and raw_closes and len(set(raw_closes)) == 1:
+            chart_values = [500] * len(raw_closes)
+        price_min = min(raw_closes) if raw_closes else 0
+        price_max = max(raw_closes) if raw_closes else 0
+        n_pts = len(raw_times)
+        t_start = raw_times[0] if n_pts > 0 else 0
+        t_mid = raw_times[n_pts // 2] if n_pts > 0 else 0
+
+        flags = _risk_flags(risk_resp)
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+
+        identity = _asset_identity_fields(
+            {
+                **(token if isinstance(token, dict) else {}),
+                "addr": addr,
+                "chain": chain,
+                "symbol": token.get("symbol", symbol or "???"),
+                "token_id": f"{addr}-{chain}",
+            }
+        )
+        spotlight_data = {
+            **identity,
+            "addr": addr,
+            "interval": str(interval or "60"),
+            "pair": f"{token.get('symbol', symbol or '???')} / USDC",
+            "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
+            "price_raw": price_now,
+            "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
+            "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
+            "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
+            "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
+            "chart": chart_values,
+            "chart_min": _fmt_price(price_min),
+            "chart_max": _fmt_price(price_max),
+            "chart_min_y": _fmt_y_label(price_min),
+            "chart_max_y": _fmt_y_label(price_max),
+            "chart_t_start": _fmt_chart_time(t_start),
+            "chart_t_mid": _fmt_chart_time(t_mid),
+            "chart_t_end": "now",
+            "is_honeypot": flags["is_honeypot"],
+            "is_mintable": flags["is_mintable"],
+            "is_freezable": flags["is_freezable"],
+            "risk_level": flags["risk_level"],
+        }
+        if feed_cursor is not None and feed_total is not None:
+            spotlight_data["cursor"] = feed_cursor
+            spotlight_data["total"] = feed_total
+
+        await _send_display(conn, "spotlight", spotlight_data)
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+
+        if hasattr(conn, "ave_wss"):
+            wss_interval = _to_wss_kline_interval(interval)
+            conn.ave_wss.set_spotlight(
+                addr,
+                chain,
+                spotlight_data,
+                raw_closes,
+                raw_times,
+                interval=wss_interval,
+            )
+
+        sym = token.get("symbol", symbol or "???")
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+        state["screen"] = "spotlight"
+        state["current_token"] = {
+            "addr": addr,
+            "chain": chain,
+            "symbol": sym,
+            "token_id": identity.get("token_id", f"{addr}-{chain}"),
+            "contract_tail": identity.get("contract_tail", ""),
+            "source_tag": identity.get("source_tag", ""),
+        }
+        if "nav_from" not in state:
+            state["nav_from"] = "feed"
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"ave_token_detail error: {e}")
+        try:
+            state = _ensure_ave_state(conn)
+            if _spotlight_request_is_current(state, request_seq):
+                await _send_display(conn, "notify", {
+                    "level": "error", "title": "查询失败", "body": str(e)[:60],
+                })
+        except Exception:
+            pass
+
+
 def _normalize_search_session_items(items) -> list[dict]:
     normalized_items = []
     for item in items or []:
@@ -362,6 +635,80 @@ def _clear_search_state(state: dict) -> None:
         "disambiguation_cursor",
     ):
         state.pop(key, None)
+
+
+def _next_feed_session(state: dict) -> int:
+    try:
+        current = int(state.get("feed_session", 0) or 0)
+    except (TypeError, ValueError):
+        current = 0
+    if current < 0:
+        current = 0
+    session = current + 1
+    state["feed_session"] = session
+    return session
+
+
+def _current_feed_session(state: dict) -> int:
+    try:
+        session = int(state.get("feed_session", 0) or 0)
+    except (TypeError, ValueError):
+        session = 0
+    if session <= 0:
+        session = _next_feed_session(state)
+    else:
+        state["feed_session"] = session
+    return session
+
+
+def _invalidate_live_feed_session(
+    conn: "ConnectionHandler",
+    *,
+    session: int = None,
+    chain: str = None,
+    clear_tokens: bool = True,
+) -> int:
+    state = _ensure_ave_state(conn)
+    if session is None:
+        session = _next_feed_session(state)
+    else:
+        try:
+            session = int(session)
+        except (TypeError, ValueError):
+            session = _next_feed_session(state)
+        else:
+            state["feed_session"] = session
+
+    wss = getattr(conn, "ave_wss", None)
+    if wss is not None:
+        try:
+            wss.invalidate_feed_session(
+                session=session,
+                chain=chain,
+                clear_tokens=clear_tokens,
+            )
+        except Exception:
+            pass
+    return session
+
+
+def _reset_to_standard_feed_state(state: dict) -> None:
+    state["screen"] = "feed"
+    state["feed_mode"] = "standard"
+    state.pop("nav_from", None)
+    state.pop("order_list", None)
+    _clear_search_state(state)
+
+
+def _refresh_home_feed(conn: "ConnectionHandler") -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    remembered_source = str(state.get("feed_source", "trending") or "trending").strip().lower() or "trending"
+    remembered_platform = str(state.get("feed_platform", "") or "").strip()
+    _invalidate_live_feed_session(conn)
+    _reset_to_standard_feed_state(state)
+    if remembered_platform:
+        return ave_get_trending(conn, topic="", platform=remembered_platform)
+    return ave_get_trending(conn, topic=remembered_source)
 
 
 def _save_search_session(
@@ -531,6 +878,7 @@ def _restore_search_session_payload(state: dict) -> dict | None:
     state["search_cursor"] = cursor
     state["search_results"] = list(session.get("items", []))
     _set_feed_navigation_state(state, session.get("items", []), cursor=cursor)
+    feed_session = _next_feed_session(state)
 
     return {
         "tokens": tokens,
@@ -539,6 +887,7 @@ def _restore_search_session_payload(state: dict) -> dict | None:
         "mode": "search",
         "search_query": state["search_query"],
         "cursor": cursor,
+        "feed_session": feed_session,
     }
 
 
@@ -627,6 +976,17 @@ def _queue_deferred_result_payload(conn: "ConnectionHandler", payload: dict) -> 
     queued_payload = dict(payload or {})
     queued_payload.setdefault("explain_state", "deferred_result")
     queue.append(queued_payload)
+    _schedule_deferred_result_flush(conn)
+
+
+def _can_present_trade_result_now(state: dict) -> bool:
+    screen = str(state.get("screen", "") or "").strip().lower()
+    return screen in {"", "feed"}
+
+
+def _is_active_trade_flow_screen(state: dict) -> bool:
+    screen = str(state.get("screen", "") or "").strip().lower()
+    return screen in {"confirm", "limit_confirm"}
 
 
 async def _flush_deferred_result_queue(conn: "ConnectionHandler") -> None:
@@ -642,7 +1002,7 @@ async def _flush_deferred_result_queue(conn: "ConnectionHandler") -> None:
             pending = state.get("pending_trade")
             if isinstance(pending, dict) and pending.get("trade_id"):
                 return
-            if state.get("screen") in {"confirm", "limit_confirm", "result"}:
+            if not _can_present_trade_result_now(state):
                 await asyncio.sleep(_DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC)
                 continue
             queue = state.get("deferred_result_queue")
@@ -747,15 +1107,24 @@ async def _present_trade_result_or_defer(
     *,
     current_trade_id: str = "",
 ) -> None:
+    state = _ensure_ave_state(conn)
     current_pending = _get_pending_trade(conn)
     active_trade_id = str(current_pending.get("trade_id", "") or "")
+    current_trade_id = str(current_trade_id or "")
     if active_trade_id and active_trade_id != str(current_trade_id or ""):
         _queue_deferred_result_payload(conn, payload)
         await _send_display(conn, "notify", _build_trade_state_notify_payload("deferred_result"))
         return
+    if active_trade_id and active_trade_id == current_trade_id and _is_active_trade_flow_screen(state):
+        await _send_display(conn, "result", payload)
+        state["screen"] = "result"
+        return
+    if not _can_present_trade_result_now(state):
+        _queue_deferred_result_payload(conn, payload)
+        return
 
     await _send_display(conn, "result", payload)
-    _ensure_ave_state(conn)["screen"] = "result"
+    state["screen"] = "result"
 
 
 async def _reconcile_submitted_trade(conn: "ConnectionHandler", submitted: dict) -> None:
@@ -1064,6 +1433,30 @@ def _collect_portfolio_holdings(wallets) -> tuple[list, dict, list]:
     return token_ids, holdings_map, sorted(holding_sources)
 
 
+def _portfolio_holding_index(holdings: list, addr: str, chain: str) -> int:
+    target_addr, target_chain = _split_token_reference(addr, chain)
+    if not target_addr:
+        return -1
+
+    for idx, row in enumerate(holdings or []):
+        if not isinstance(row, dict):
+            continue
+        row_addr, row_chain = _split_token_reference(row.get("addr", ""), row.get("chain", ""))
+        if row_addr == target_addr and row_chain == target_chain:
+            return idx
+    return -1
+
+
+def _coerce_portfolio_cursor(value, total: int) -> int:
+    try:
+        cursor = int(value)
+    except (TypeError, ValueError):
+        cursor = 0
+    if total <= 0:
+        return 0
+    return max(0, min(cursor, total - 1))
+
+
 def _trim_result_tx_id(value) -> str:
     if not value:
         return ""
@@ -1243,7 +1636,8 @@ async def _push_submit_ack_transition(conn: "ConnectionHandler", result: dict, p
     _clear_pending_trade(conn, pending.get("trade_id", ""))
     state = _ensure_ave_state(conn)
     state["screen"] = "feed"
-    await _send_display(conn, "feed", {"reason": "trade_submitted"})
+    state.pop("nav_from", None)
+    await _send_display(conn, "feed", {"reason": "trade_submitted", "feed_session": _current_feed_session(state)})
     _schedule_submitted_trade_reconcile(conn, submitted)
 
 
@@ -1574,11 +1968,6 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
             lst = raw if isinstance(raw, list) else []
             tokens = _build_token_list(lst[:20], chain if chain != "all" else "???")
-            conn.loop.create_task(_send_display(conn, "feed", {"tokens": tokens, "chain": chain}))
-            logger.bind(tag=TAG).info(f"ave_get_trending: platform={platform} → {len(tokens)} tokens")
-            if hasattr(conn, "ave_wss"):
-                conn.ave_wss.set_feed_tokens(tokens, chain)
-
             state = _ensure_ave_state(conn)
             state["screen"] = "feed"
             state["feed_source"] = "trending"
@@ -1587,6 +1976,22 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             state.pop("nav_from", None)
             _clear_search_state(state)
             _set_feed_navigation_state(state, tokens, cursor=0)
+            feed_session = _next_feed_session(state)
+
+            conn.loop.create_task(
+                _send_display(
+                    conn,
+                    "feed",
+                    {
+                        "tokens": tokens,
+                        "chain": chain,
+                        "feed_session": feed_session,
+                    },
+                )
+            )
+            logger.bind(tag=TAG).info(f"ave_get_trending: platform={platform} → {len(tokens)} tokens")
+            if hasattr(conn, "ave_wss"):
+                conn.ave_wss.set_feed_tokens(tokens, chain)
             return ActionResponse(action=Action.NONE, result=f"Showing {len(tokens)} tokens from {platform}", response="")
         except Exception as e:
             logger.bind(tag=TAG).error(f"ave_get_trending platform error: {e}")
@@ -1655,15 +2060,6 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
 
         tokens = _build_token_list(raw_all[:20], chain if chain != "all" else "???")
 
-        conn.loop.create_task(_send_display(conn, "feed", {
-            "tokens": tokens,
-            "chain":  chain,
-        }))
-        logger.bind(tag=TAG).info(f"ave_get_trending: sent {len(tokens)} tokens to FEED")
-
-        if hasattr(conn, "ave_wss"):
-            conn.ave_wss.set_feed_tokens(tokens, chain)
-
         # Track state so LLM can reference tokens by symbol in follow-up commands
         state = _ensure_ave_state(conn)
         state["screen"] = "feed"
@@ -1673,6 +2069,17 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
         state.pop("nav_from", None)
         _clear_search_state(state)
         _set_feed_navigation_state(state, tokens, cursor=0)
+        feed_session = _next_feed_session(state)
+
+        conn.loop.create_task(_send_display(conn, "feed", {
+            "tokens": tokens,
+            "chain": chain,
+            "feed_session": feed_session,
+        }))
+        logger.bind(tag=TAG).info(f"ave_get_trending: sent {len(tokens)} tokens to FEED")
+
+        if hasattr(conn, "ave_wss"):
+            conn.ave_wss.set_feed_tokens(tokens, chain)
 
         # Include compact token listing in result so LLM knows what's on screen
         summary = ", ".join(f"{t['symbol']}({t['chain'][:3].upper()})" for t in tokens[:8])
@@ -1738,30 +2145,30 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
             token for token in tokens
             if normalized_keyword and str(token.get("symbol") or "").strip().upper() == normalized_keyword
         ]
-        search_items = list(disambiguation_items or tokens)
-        _save_search_session(
-            conn,
-            query=keyword,
-            chain=chain,
-            items=search_items,
-            cursor=0,
-        )
         state["feed_mode"] = "search"
         state.pop("nav_from", None)
 
         if len(disambiguation_items) > 1:
             payload = _build_disambiguation_payload(disambiguation_items)
+            visible_items = list(payload.get("items", []))
+            _save_search_session(
+                conn,
+                query=keyword,
+                chain=chain,
+                items=visible_items,
+                cursor=payload.get("cursor", 0),
+            )
             conn.loop.create_task(_send_display(conn, "disambiguation", payload))
             logger.bind(tag=TAG).info(
                 f"ave_search_token: '{keyword}' -> disambiguation ({len(disambiguation_items)} matches)"
             )
             state["screen"] = "disambiguation"
             state["nav_from"] = payload.get("nav_from", "feed")
-            state["disambiguation_items"] = list(payload.get("items", []))
+            state["disambiguation_items"] = visible_items
             state["disambiguation_cursor"] = payload.get("cursor", 0)
             _set_feed_navigation_state(
                 state,
-                payload.get("items", []),
+                visible_items,
                 cursor=payload.get("cursor", 0),
             )
             return ActionResponse(
@@ -1770,6 +2177,14 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
                 response="",
             )
 
+        _save_search_session(
+            conn,
+            query=keyword,
+            chain=chain,
+            items=tokens,
+            cursor=0,
+        )
+        feed_session = _next_feed_session(state)
         conn.loop.create_task(_send_display(conn, "feed", {
             "tokens": tokens,
             "chain": chain,
@@ -1777,6 +2192,7 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
             "mode": "search",
             "search_query": state.get("search_query", ""),
             "cursor": state.get("search_cursor", 0),
+            "feed_session": feed_session,
         }))
         logger.bind(tag=TAG).info(f"ave_search_token: '{keyword}' \u2192 {len(tokens)} results")
 
@@ -1854,14 +2270,22 @@ def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
             "change_positive": True,
             "source": "orders",
         }]
+        state = _ensure_ave_state(conn)
+        feed_session = _next_feed_session(state)
+        _invalidate_live_feed_session(
+            conn,
+            session=feed_session,
+            chain=chain,
+            clear_tokens=True,
+        )
         conn.loop.create_task(_send_display(conn, "feed", {
             "tokens": display_rows,
             "chain": chain,
             "mode": "orders",
             "source_label": "ORDERS",
+            "feed_session": feed_session,
         }))
 
-        state = _ensure_ave_state(conn)
         state["screen"] = "feed"
         state["feed_mode"] = "orders"
         state.pop("nav_from", None)
@@ -2038,129 +2462,88 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请告诉我你想查看哪个代币的地址或名称")
 
-        interval = str(interval or "60").strip().lower() or "60"
-        is_live_second = interval == "s1"
-        kline_limit = _kline_limit_for_interval(interval)
-
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            token_resp = pool.submit(_data_get, f"/tokens/{addr}-{chain}").result()
-            if not is_live_second:
-                kline_resp = pool.submit(
-                    _data_get,
-                    f"/klines/token/{addr}-{chain}",
-                    {"interval": interval, "limit": kline_limit},
-                ).result()
-            else:
-                kline_resp = {"data": {"points": []}}
-            risk_resp = pool.submit(_data_get, f"/contracts/{addr}-{chain}").result()
-
-        token_data = token_resp.get("data", token_resp)
-        token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
-        if isinstance(token, list) and token:
-            token = token[0]
-
-        kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
-
-        # Get price min/max and timestamps from raw kline data.
-        raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
-        raw_times  = [int(p.get("time",  p.get("t",  0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
-        price_now = float(token.get("current_price_usd", token.get("price", 0)) or 0)
-        if is_live_second:
-            # "Live 1s" does not fetch token klines from REST.
-            # Seed chart from existing live buffer when staying on same token; otherwise
-            # use current price as a visible flat seed line until live ticks arrive.
-            token_id = f"{addr}-{chain}"
-            seeded_closes = []
-            seeded_times = []
-            if hasattr(conn, "ave_wss"):
-                wss = conn.ave_wss
-                if getattr(wss, "_spotlight_id", "") == token_id:
-                    seeded_closes = list(getattr(wss, "_spotlight_raw_closes", []) or [])
-                    seeded_times = list(getattr(wss, "_spotlight_raw_times", []) or [])
-            raw_closes = [float(v) for v in seeded_closes if v is not None and float(v) > 0][-kline_limit:]
-            raw_times = [int(v) for v in seeded_times if v][-kline_limit:]
-            if not raw_closes and price_now > 0:
-                raw_closes = [price_now] * 12
-            kline_points = [
-                {"close": value, "time": raw_times[idx] if idx < len(raw_times) else 0}
-                for idx, value in enumerate(raw_closes)
-            ]
-        chart_values = _normalize_kline(kline_points)
-        if is_live_second and raw_closes and len(set(raw_closes)) == 1:
-            # Constant-value seeds normalize to zeros; render a visible flat line instead.
-            chart_values = [500] * len(raw_closes)
-        price_min = min(raw_closes) if raw_closes else 0
-        price_max = max(raw_closes) if raw_closes else 0
-        n_pts = len(raw_times)
-        t_start = raw_times[0]          if n_pts > 0 else 0
-        t_mid   = raw_times[n_pts // 2] if n_pts > 0 else 0
-
-        flags = _risk_flags(risk_resp)
-
-        identity = _asset_identity_fields(
-            {
-                **(token if isinstance(token, dict) else {}),
-                "addr": addr,
-                "chain": chain,
-                "symbol": token.get("symbol", "???"),
-                "token_id": f"{addr}-{chain}",
-            }
-        )
-        spotlight_data = {
-            **identity,
-            "addr": addr,
-            "interval": str(interval or "60"),
-            "pair": f"{token.get('symbol', '???')} / USDC",
-            "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
-            "price_raw": price_now,
-            "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
-            "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
-            "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
-            "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
-            "chart": chart_values,
-            "chart_min": _fmt_price(price_min),
-            "chart_max": _fmt_price(price_max),
-            "chart_min_y": _fmt_y_label(price_min),
-            "chart_max_y": _fmt_y_label(price_max),
-            "chart_t_start": _fmt_chart_time(t_start),
-            "chart_t_mid":   _fmt_chart_time(t_mid),
-            "chart_t_end":   "now",
-            "is_honeypot": flags["is_honeypot"],
-            "is_mintable": flags["is_mintable"],
-            "is_freezable": flags["is_freezable"],
-            "risk_level": flags["risk_level"],
-        }
-        if feed_cursor is not None and feed_total is not None:
-            spotlight_data["cursor"] = feed_cursor
-            spotlight_data["total"] = feed_total
-        conn.loop.create_task(_send_display(conn, "spotlight", spotlight_data))
-
-        # Update WSS kline subscription — use addr as pair_addr (server resolves to main pair)
-        # Map UI interval to WSS kline interval format (e.g. "60" → "k60", "s1" → "s1")
-        if hasattr(conn, "ave_wss"):
-            wss_interval = _to_wss_kline_interval(interval)
-            conn.ave_wss.set_spotlight(addr, chain, spotlight_data, raw_closes, raw_times,
-                                       interval=wss_interval)
-
-        # Track state for follow-up voice commands ("买这个", "卖出" etc.)
-        sym = token.get("symbol", "???")
         state = _ensure_ave_state(conn)
+        previous_screen = str(state.get("screen") or "")
+        if previous_screen == "portfolio":
+            state["portfolio_selected_token"] = {"addr": addr, "chain": chain}
+            state["portfolio_cursor"] = _coerce_portfolio_cursor(
+                _portfolio_holding_index(state.get("portfolio_holdings", []), addr, chain),
+                len(state.get("portfolio_holdings", [])) if isinstance(state.get("portfolio_holdings"), list) else 0,
+            )
+        interval = str(interval or "60").strip().lower() or "60"
+        resolved_symbol = _resolve_spotlight_symbol(state, addr, chain, symbol, feed_cursor)
+        is_refreshing_current_spotlight = _is_same_spotlight_token(state, addr, chain)
+        request_seq = int(state.get("spotlight_request_seq", 0) or 0) + 1
+        state["spotlight_request_seq"] = request_seq
         state["screen"] = "spotlight"
         state["current_token"] = {
             "addr": addr,
             "chain": chain,
-            "symbol": sym,
-            "token_id": identity.get("token_id", f"{addr}-{chain}"),
-            "contract_tail": identity.get("contract_tail", ""),
-            "source_tag": identity.get("source_tag", ""),
+            "symbol": resolved_symbol,
+            "token_id": f"{addr}-{chain}",
+            "contract_tail": addr[-4:] if len(addr) >= 4 else addr,
+            "source_tag": "",
         }
-        # Set default nav_from so B key returns to FEED when entering via voice
         if "nav_from" not in state:
             state["nav_from"] = "feed"
+        loading_payload = _build_spotlight_loading_payload(
+            addr,
+            chain,
+            symbol=resolved_symbol,
+            interval=interval,
+            feed_cursor=feed_cursor,
+            feed_total=feed_total,
+        )
+        if is_refreshing_current_spotlight and hasattr(conn, "ave_wss"):
+            transition_payload = {
+                "addr": addr,
+                "chain": chain,
+                "token_id": f"{addr}-{chain}",
+                "symbol": resolved_symbol,
+                "interval": interval,
+            }
+            if feed_cursor is not None and feed_total is not None:
+                transition_payload["cursor"] = feed_cursor
+                transition_payload["total"] = feed_total
+            try:
+                wss_interval = _to_wss_kline_interval(interval)
+                conn.ave_wss.begin_spotlight_transition(
+                    addr,
+                    chain,
+                    transition_payload,
+                    interval=wss_interval,
+                )
+            except Exception:
+                pass
+        elif previous_screen == "spotlight" and hasattr(conn, "ave_wss"):
+            try:
+                wss_interval = _to_wss_kline_interval(interval)
+                conn.ave_wss.begin_spotlight_transition(
+                    addr,
+                    chain,
+                    loading_payload,
+                    interval=wss_interval,
+                )
+            except Exception:
+                pass
+            conn.loop.create_task(_send_display(conn, "spotlight", loading_payload))
+        else:
+            conn.loop.create_task(_send_display(conn, "spotlight", loading_payload))
+        conn.loop.create_task(
+            _ave_token_detail_async(
+                conn,
+                addr=addr,
+                chain=chain,
+                symbol=resolved_symbol,
+                interval=interval,
+                feed_cursor=feed_cursor,
+                feed_total=feed_total,
+                request_seq=request_seq,
+            )
+        )
 
         return ActionResponse(action=Action.NONE,
-            result=f"已展示{sym}详情 [addr={addr}, chain={chain}]", response=None)
+            result=f"已展示{resolved_symbol}详情 [addr={addr}, chain={chain}]", response=None)
 
     except Exception as e:
         logger.bind(tag=TAG).error(f"ave_token_detail error: {e}")
@@ -2663,19 +3046,21 @@ def ave_portfolio(conn: "ConnectionHandler"):
     try:
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
         state = _ensure_ave_state(conn)
+        selection_hint = state.pop("portfolio_selected_token", None)
         state["screen"] = "portfolio"
-        state["portfolio_cursor"] = 0
         state["portfolio_holdings"] = []
         if not assets_id:
             # No wallet configured: show empty portfolio in simulator
             explanation_fields = _portfolio_explanation_fields("N/A")
             conn.loop.create_task(_send_display(conn, "portfolio", {
                 "holdings": [],
+                "cursor": 0,
                 "total_usd": "$0",
                 "pnl": "N/A",
                 "pnl_pct": "N/A",
                 **explanation_fields,
             }))
+            state["portfolio_cursor"] = 0
             return ActionResponse(action=Action.NONE, result="no_wallet_sim", response=None)
 
         # Get wallet info (chain addresses)
@@ -2690,6 +3075,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
             explanation_fields = _portfolio_explanation_fields("N/A")
             conn.loop.create_task(_send_display(conn, "portfolio", {
                 "holdings": [],
+                "cursor": 0,
                 "wallets": portfolio_wallets,
                 "holding_source": "getUserByAssetsId",
                 "total_usd": "$0",
@@ -2698,6 +3084,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
                 **explanation_fields,
             }))
             state["portfolio_holding_source"] = "getUserByAssetsId"
+            state["portfolio_cursor"] = 0
             return ActionResponse(action=Action.NONE, result="empty_portfolio", response=None)
 
         token_ids, holdings_map, holding_sources = _collect_portfolio_holdings(wallets)
@@ -2753,10 +3140,20 @@ def ave_portfolio(conn: "ConnectionHandler"):
 
         # Sort by value descending using raw float to avoid suffix parsing errors
         holdings.sort(key=lambda h: h.get("_value_raw", 0), reverse=True)
+        cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
+        if isinstance(selection_hint, dict):
+            selected_idx = _portfolio_holding_index(
+                holdings,
+                selection_hint.get("addr", ""),
+                selection_hint.get("chain", ""),
+            )
+            if selected_idx >= 0:
+                cursor = selected_idx
 
         explanation_fields = _portfolio_explanation_fields("N/A")
         conn.loop.create_task(_send_display(conn, "portfolio", {
             "holdings": holdings,
+            "cursor": cursor,
             "wallets": portfolio_wallets,
             "holding_source": holding_source,
             "total_usd": _fmt_volume(total_usd),
@@ -2773,7 +3170,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
             for row in holdings
             if row.get("addr")
         ]
-        state["portfolio_cursor"] = 0
+        state["portfolio_cursor"] = cursor
 
         return ActionResponse(action=Action.NONE, result=f"portfolio:{len(holdings)}tokens", response=None)
 
@@ -2819,10 +3216,12 @@ def ave_confirm_trade(conn: "ConnectionHandler"):
             await _push_submit_ack_transition(conn, result, pending=pending)
             return
         payload = _build_result_payload(result, pending=pending)
-        await _send_display(conn, "result", payload)
+        await _present_trade_result_or_defer(
+            conn,
+            payload,
+            current_trade_id=trade_id,
+        )
         _clear_pending_trade(conn, trade_id)
-        state = _ensure_ave_state(conn)
-        state["screen"] = "result"
 
     conn.loop.create_task(_do())
     return ActionResponse(action=Action.NONE,
@@ -2853,9 +3252,9 @@ def ave_cancel_trade(conn: "ConnectionHandler"):
     if trade_id:
         trade_mgr.cancel(trade_id)
     _clear_pending_trade(conn, trade_id)
-    state = _ensure_ave_state(conn)
-    state["screen"] = "feed"
-    conn.loop.create_task(_send_display(conn, "feed", {"reason": "user_cancel"}))
+    refresh_resp = _refresh_home_feed(conn)
+    if isinstance(refresh_resp, ActionResponse) and refresh_resp.action != Action.NONE:
+        return refresh_resp
     return ActionResponse(action=Action.NONE,
         result=f"已取消{_label_trade_action(trade_type)}{symbol}，返回热门列表", response=None)
 
@@ -2882,6 +3281,7 @@ def ave_back_to_feed(conn: "ConnectionHandler"):
     if pending.get("trade_id") and state.get("screen") in {"confirm", "limit_confirm"}:
         return ave_cancel_trade(conn)
 
-    state["screen"] = "feed"
-    conn.loop.create_task(_send_display(conn, "feed", {"reason": "navigate_back"}))
+    refresh_resp = _refresh_home_feed(conn)
+    if isinstance(refresh_resp, ActionResponse) and refresh_resp.action != Action.NONE:
+        return refresh_resp
     return ActionResponse(action=Action.NONE, result="已返回热门列表", response=None)

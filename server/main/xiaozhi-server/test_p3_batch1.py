@@ -1,6 +1,11 @@
 import asyncio
 import json
+import os
+import subprocess
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from core.handle.textHandler.keyActionHandler import KeyActionHandler
@@ -10,9 +15,34 @@ from plugins_func.functions import ave_tools, ave_wss
 class _FakeWss:
     def __init__(self):
         self.calls = []
+        self.transitions = []
+        self._spotlight_data = {}
+        self._spotlight_id = ""
+        self._spotlight_pair = ""
+        self._spotlight_chain = ""
+        self._spotlight_interval = "k60"
 
     def set_spotlight(self, *args, **kwargs):
         self.calls.append((args, kwargs))
+
+    def begin_spotlight_transition(self, pair_addr, chain, display_data, *, interval="k60"):
+        self.transitions.append(
+            {
+                "pair_addr": pair_addr,
+                "chain": chain,
+                "interval": interval,
+                "display_data": dict(display_data),
+            }
+        )
+        self._spotlight_pair = pair_addr
+        self._spotlight_chain = chain
+        self._spotlight_interval = interval
+        next_payload = dict(self._spotlight_data or {})
+        next_payload.update(dict(display_data or {}))
+        if "interval" in next_payload:
+            next_payload["interval"] = str(display_data.get("interval", next_payload["interval"]))
+        self._spotlight_data = next_payload
+        self._spotlight_id = next_payload.get("token_id", self._spotlight_id)
 
     def set_feed_tokens(self, *args, **kwargs):
         self.calls.append(("feed_tokens", args, kwargs))
@@ -154,6 +184,50 @@ async def dispatch_key(conn, key, *, selection_candidates=None, cursor=0, payloa
 
 
 class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
+    def _compile_and_run_feed_c_harness(self, harness_source: str, binary_name: str):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        json_utils_src = repo_root / "shared/ave_screens/ave_json_utils.c"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            source_path = tmpdir_path / f"{binary_name}.c"
+            binary = tmpdir_path / binary_name
+            source_path.write_text(harness_source, encoding="utf-8")
+
+            compile_result = subprocess.run(
+                [
+                    os.environ.get("CC", "cc"),
+                    "-std=c99",
+                    f"-I{include_dir}",
+                    f"-I{repo_root / 'shared/ave_screens'}",
+                    str(source_path),
+                    str(json_utils_src),
+                    "-o",
+                    str(binary),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                msg=compile_result.stdout + compile_result.stderr,
+            )
+
+            run_result = subprocess.run(
+                [str(binary)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                run_result.returncode,
+                0,
+                msg=run_result.stdout + run_result.stderr,
+            )
+
     def test_build_disambiguation_payload_reports_overflow_explicitly(self):
         items = [
             {
@@ -221,7 +295,10 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
              }), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="240")
-            await asyncio.sleep(0)
+            for _ in range(20):
+                if any(path.startswith("/klines/token/") for path, _ in requests) and conn.ave_wss.calls:
+                    break
+                await asyncio.sleep(0.01)
 
         kline_requests = [item for item in requests if item[0].startswith("/klines/token/")]
         self.assertEqual(len(kline_requests), 1)
@@ -274,14 +351,153 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
              }), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="5")
-            await asyncio.sleep(0)
+            for _ in range(20):
+                if len(sent) >= 2 and conn.ave_wss.calls:
+                    break
+                await asyncio.sleep(0.01)
 
-        payload = sent[0][1]
+        payload = sent[-1][1]
         self.assertEqual(len(payload["chart"]), 48)
         args, _ = conn.ave_wss.calls[0]
         self.assertEqual(len(args[2]["chart"]), 48)
         self.assertEqual(args[3][0], 254.0)
         self.assertEqual(args[3][-1], 301.0)
+
+    async def test_ave_token_detail_async_skips_stale_state_commit_after_display_await(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {
+            "spotlight_request_seq": 1,
+            "screen": "spotlight",
+            "current_token": {
+                "addr": "fresh-token",
+                "chain": "solana",
+                "symbol": "FRESH",
+                "token_id": "fresh-token-solana",
+            },
+        }
+        sent = []
+
+        def _fake_data_get(path, params=None):
+            del params
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "STALE",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 0.12,
+                            "holders": 1234,
+                            "main_pair_tvl": 45678,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.1, "time": 1710000000},
+                            {"close": 1.2, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+            # Simulate a newer spotlight request being issued while the stale
+            # request is awaiting display transport.
+            conn.ave_state["spotlight_request_seq"] = 2
+            conn.ave_state["current_token"] = {
+                "addr": "fresh-token",
+                "chain": "solana",
+                "symbol": "FRESH",
+                "token_id": "fresh-token-solana",
+            }
+            await asyncio.sleep(0)
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                 "is_honeypot": False,
+                 "is_mintable": False,
+                 "is_freezable": False,
+                 "risk_level": "LOW",
+             }), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._ave_token_detail_async(
+                conn,
+                addr="stale-token",
+                chain="solana",
+                symbol="STALE",
+                interval="60",
+                request_seq=1,
+            )
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(conn.ave_state["current_token"]["addr"], "fresh-token")
+        self.assertEqual(conn.ave_state["current_token"]["token_id"], "fresh-token-solana")
+        self.assertEqual(conn.ave_wss.calls, [])
+
+    async def test_ave_token_detail_async_s1_ignores_raw_buffer_from_mismatched_owner(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {"spotlight_request_seq": 7}
+        conn.ave_wss._spotlight_id = "new-token-solana"
+        conn.ave_wss._spotlight_raw_closes = [9.0, 8.0]
+        conn.ave_wss._spotlight_raw_times = [1710000000, 1710000060]
+        conn.ave_wss._spotlight_raw_owner_token_id = "old-token-solana"
+        conn.ave_wss._spotlight_raw_owner_chain = "solana"
+        conn.ave_wss._spotlight_raw_owner_interval = "k1"
+        sent = []
+
+        def _fake_data_get(path, params=None):
+            del params
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "NEW",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 0.01,
+                            "holders": 123,
+                            "main_pair_tvl": 55555,
+                        }
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                 "is_honeypot": False,
+                 "is_mintable": False,
+                 "is_freezable": False,
+                 "risk_level": "LOW",
+             }), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._ave_token_detail_async(
+                conn,
+                addr="new-token",
+                chain="solana",
+                symbol="NEW",
+                interval="s1",
+                request_seq=7,
+            )
+
+        self.assertTrue(sent)
+        spotlight_payload = sent[-1][1]
+        self.assertEqual(spotlight_payload["chart_min"], "$1.2300")
+        self.assertEqual(spotlight_payload["chart_max"], "$1.2300")
+        self.assertEqual(len(conn.ave_wss.calls), 1)
+        raw_closes = conn.ave_wss.calls[0][0][3]
+        self.assertTrue(raw_closes)
+        self.assertTrue(all(abs(value - 1.23) < 1e-9 for value in raw_closes))
 
     async def test_data_subscribe_uses_jsonrpc_frames_with_documented_param_shapes(self):
         loop = asyncio.get_running_loop()
@@ -363,6 +579,151 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager._feed_display["token-1-solana"]["change_24h"], "+4.20%")
         self.assertEqual(sent[0][0], "feed")
         self.assertTrue(sent[0][1]["live"])
+
+    async def test_data_event_price_batch_live_feed_includes_feed_session_identity(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        manager = ave_wss.AveWssManager(conn)
+        conn.ave_state["feed_session"] = 17
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        manager.set_feed_tokens(
+            [
+                {
+                    "token_id": "token-1-solana",
+                    "chain": "solana",
+                    "symbol": "BONK",
+                    "price": "$1.0000",
+                    "price_raw": 1.0,
+                    "change_24h": "+0.00%",
+                    "change_positive": True,
+                }
+            ],
+            chain="solana",
+        )
+
+        raw = json.dumps(
+            {
+                "result": {
+                    "prices": [
+                        {
+                            "token_id": "token-1",
+                            "chain": "solana",
+                            "is_main_pair": True,
+                            "price": "2.5",
+                            "price_change_1h": "4.2",
+                        }
+                    ]
+                }
+            }
+        )
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+            await manager._handle_data_event(raw)
+
+        self.assertTrue(sent)
+        self.assertEqual(sent[0][0], "feed")
+        self.assertEqual(sent[0][1].get("feed_session"), 17)
+        self.assertTrue(sent[0][1]["live"])
+
+    def test_feed_surface_ignores_stale_live_payload_when_feed_session_mismatches(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+#ifndef LV_TEXT_ALIGN_LEFT
+#define LV_TEXT_ALIGN_LEFT 0
+#define LV_TEXT_ALIGN_CENTER 1
+#define LV_TEXT_ALIGN_RIGHT 2
+#endif
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{{
+    (void)obj;
+    (void)align;
+    (void)part;
+}}
+int lv_font_get_line_height(const lv_font_t *font)
+{{
+    (void)font;
+    return 14;
+}}
+void ave_fmt_price_text(char *out, size_t out_n, const char *price)
+{{
+    if (!out || out_n == 0) return;
+    snprintf(out, out_n, "%s", price ? price : "");
+}}
+const lv_font_t *ave_font_cjk_14(void) {{ return &lv_font_montserrat_14; }}
+const lv_font_t *ave_font_cjk_16(void) {{ return &lv_font_montserrat_14; }}
+void ave_sm_go_to_feed(void) {{ }}
+int ave_sm_json_escape_string(const char *src, char *out, size_t out_n)
+{{
+    if (!out || out_n == 0) return 0;
+    snprintf(out, out_n, "%s", src ? src : "");
+    return 1;
+}}
+int ave_sm_build_key_action_json(
+    const char *action,
+    const ave_sm_json_field_t *fields,
+    size_t field_count,
+    char *out,
+    size_t out_n
+)
+{{
+    (void)fields;
+    (void)field_count;
+    if (!out || out_n == 0) return 0;
+    snprintf(out, out_n, "{{\\\"type\\\":\\\"key_action\\\",\\\"action\\\":\\\"%s\\\"}}", action ? action : "");
+    return 1;
+}}
+
+#include "{screen_source}"
+
+int main(void)
+{{
+    screen_feed_show(
+        "{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"feed_session\\":11,\\"mode\\":\\"search\\","
+        "\\"source_label\\":\\"SEARCH\\",\\"tokens\\":[{{\\"token_id\\":\\"token-old-solana\\","
+        "\\"chain\\":\\"solana\\",\\"symbol\\":\\"OLD\\",\\"price\\":\\"$1\\"}}]}}}}"
+    );
+    screen_feed_show(
+        "{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"feed_session\\":12,\\"source_label\\":\\"TRENDING\\","
+        "\\"tokens\\":[{{\\"token_id\\":\\"token-new-solana\\",\\"chain\\":\\"solana\\","
+        "\\"symbol\\":\\"NEW\\",\\"price\\":\\"$2\\"}}]}}}}"
+    );
+    screen_feed_show(
+        "{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"feed_session\\":11,\\"live\\":true,\\"tokens\\":["
+        "{{\\"token_id\\":\\"token-old-solana\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"OLD\\","
+        "\\"price\\":\\"$9\\"}}]}}}}"
+    );
+
+    if (strcmp(s_tokens[0].token_id, "token-new-solana") != 0) {{
+        fprintf(stderr, "stale live payload replaced newer feed context: %s\\n", s_tokens[0].token_id);
+        return 2;
+    }}
+    if (s_is_search_mode != 0) {{
+        fprintf(stderr, "stale live payload resurrected search mode\\n");
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_feed_c_harness(
+            harness_source,
+            "verify_feed_session_blocks_stale_live_payload",
+        )
 
     async def test_data_event_kline_result_format_buffers_live_points_without_replacing_spotlight_chart(self):
         loop = asyncio.get_running_loop()
@@ -560,6 +921,73 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(sent[0][1]["chart"], [0, 0, 0])
         self.assertEqual(sent[0][1]["chart_t_end"], "now")
 
+    async def test_spotlight_poll_loop_drops_results_if_identity_changes_after_token_await(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        manager = ave_wss.AveWssManager(conn)
+        sent = []
+        requests = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        async def _fake_sleep(_seconds):
+            return None
+
+        manager._spotlight_data = {
+            "addr": "token-1",
+            "chain": "solana",
+            "interval": "1",
+            "holders": "BASE-HOLDERS",
+            "liquidity": "BASE-LIQ",
+            "chart": [9, 9, 9],
+            "chart_t_end": "base-old",
+        }
+
+        def _fake_data_get(path, params=None):
+            requests.append((path, params))
+            if path == "/tokens/token-1-solana":
+                # Simulate user switching to same addr on another chain while
+                # this poll request is in flight.
+                manager._spotlight_data.update(
+                    {
+                        "chain": "base",
+                        "holders": "BASE-HOLDERS",
+                        "liquidity": "BASE-LIQ",
+                        "chart": [9, 9, 9],
+                        "chart_t_end": "base-old",
+                    }
+                )
+                manager._stopped = True
+                return {
+                    "data": {
+                        "token": {
+                            "holders": 4321,
+                            "main_pair_tvl": 2500000,
+                        }
+                    }
+                }
+            if path == "/klines/token/token-1-solana":
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.0, "time": 1710000000},
+                            {"close": 1.2, "time": 1710000060},
+                        ]
+                    }
+                }
+            raise AssertionError(f"unexpected path: {path}")
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("asyncio.sleep", side_effect=_fake_sleep):
+            await manager._spotlight_poll_loop("token-1", "solana")
+
+        self.assertEqual(sent, [])
+        self.assertEqual(requests, [("/tokens/token-1-solana", None)])
+        self.assertEqual(manager._spotlight_data.get("chain"), "base")
+        self.assertEqual(manager._spotlight_data.get("holders"), "BASE-HOLDERS")
+
     async def test_disambiguation_select_enters_spotlight_and_back_restores_search(self):
         conn = make_fake_conn_with_search_state()
         self.assertEqual(conn.ave_state["feed_mode"], "search")
@@ -653,6 +1081,51 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
             ["So111...", "0xabc..."],
         )
 
+    async def test_disambiguation_overflow_restore_keeps_visible_slice_consistent(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        disambiguation_pool = [
+            {
+                "token_id": f"token-{idx}-solana",
+                "chain": "solana",
+                "symbol": "PEPE",
+            }
+            for idx in range(15)
+        ]
+
+        def _fake_data_get(path, params=None):
+            if path == "/tokens":
+                return {"data": {"tokens": list(disambiguation_pool)}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, payload))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_search_token(conn, keyword="PEPE", chain="all")
+            await asyncio.sleep(0)
+
+        disambiguation_payload = next((payload for screen, payload in sent if screen == "disambiguation"), None)
+        self.assertIsNotNone(disambiguation_payload)
+        visible_items = list(disambiguation_payload.get("items", []))
+        self.assertEqual(len(visible_items), 12)
+        self.assertEqual(disambiguation_payload.get("total_candidates"), 15)
+        self.assertEqual(len(conn.ave_state.get("disambiguation_items", [])), 12)
+        self.assertEqual(len(conn.ave_state.get("search_session", {}).get("items", [])), 12)
+
+        await dispatch_key(conn, "right", selection_candidates=visible_items, cursor=11)
+        sent_back = await dispatch_key(conn, "back")
+
+        restored_payload = next((payload for screen, payload in sent_back if screen == "feed"), None)
+        self.assertIsNotNone(restored_payload)
+        self.assertEqual(restored_payload.get("cursor"), 11)
+        restored_ids = [item.get("token_id") for item in restored_payload.get("tokens", [])]
+        visible_ids = [item.get("token_id") for item in visible_items]
+        self.assertEqual(restored_ids, visible_ids)
+
     async def test_back_restore_search_feed_includes_cursor(self):
         conn = make_fake_conn_with_search_state()
         conn.ave_state.update(
@@ -706,6 +1179,282 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
             )
 
         mock_detail.assert_not_called()
+
+    async def test_watch_enters_spotlight_before_slow_detail_fetch_completes(self):
+        handler = KeyActionHandler()
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state.update(
+            {
+                "feed_token_list": [
+                    {"addr": "token-1", "chain": "solana", "symbol": "BONK"},
+                ],
+            }
+        )
+
+        release_fetch = threading.Event()
+        sent = []
+
+        def fake_data_get(path, params=None):
+            del params
+            release_fetch.wait(timeout=0.15)
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 4.56,
+                            "holders": 1234,
+                            "main_pair_tvl": 98765,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.0, "time": 1710000000},
+                            {"close": 2.0, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        timer = threading.Timer(0.05, release_fetch.set)
+        timer.start()
+        try:
+            with patch("plugins_func.functions.ave_tools._data_get", side_effect=fake_data_get), \
+                 patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                     "is_honeypot": False,
+                     "is_mintable": False,
+                     "is_freezable": False,
+                     "risk_level": "LOW",
+                 }), \
+                 patch("plugins_func.functions.ave_tools._send_display", side_effect=fake_send_display):
+                task = asyncio.create_task(
+                    handler.handle(
+                        conn,
+                        {
+                            "type": "key_action",
+                            "action": "watch",
+                            "token_id": "token-1",
+                            "chain": "solana",
+                            "cursor": "0",
+                        },
+                    )
+                )
+                await asyncio.sleep(0.01)
+                self.assertTrue(sent)
+                self.assertEqual(sent[0][0], "spotlight")
+                self.assertEqual(sent[0][1].get("symbol"), "BONK")
+                self.assertEqual(sent[0][1].get("price"), "--")
+                self.assertEqual(sent[0][1].get("chain"), "solana")
+                self.assertEqual(sent[0][1].get("token_id"), "token-1-solana")
+
+                await task
+                for _ in range(20):
+                    if len(sent) >= 2:
+                        break
+                    await asyncio.sleep(0.01)
+        finally:
+            release_fetch.set()
+            timer.cancel()
+
+        self.assertGreaterEqual(len(sent), 2)
+        self.assertEqual(sent[-1][0], "spotlight")
+        self.assertEqual(sent[-1][1].get("symbol"), "BONK")
+        self.assertEqual(sent[-1][1].get("price"), "$1.2300")
+
+    async def test_kline_interval_refresh_keeps_existing_spotlight_visible_until_new_data_arrives(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state.update(
+            {
+                "screen": "spotlight",
+                "current_token": {
+                    "addr": "token-1",
+                    "chain": "solana",
+                    "symbol": "BONK",
+                    "token_id": "token-1-solana",
+                },
+            }
+        )
+        conn.ave_wss._spotlight_data = {
+            "addr": "token-1",
+            "chain": "solana",
+            "token_id": "token-1-solana",
+            "symbol": "BONK",
+            "price": "$9.9900",
+            "interval": "60",
+            "chart": [100, 200, 300],
+            "chart_min": "$1",
+            "chart_max": "$3",
+            "chart_t_end": "now",
+        }
+
+        release_fetch = threading.Event()
+        sent = []
+
+        def fake_data_get(path, params=None):
+            del params
+            release_fetch.wait(timeout=0.15)
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 4.56,
+                            "holders": 1234,
+                            "main_pair_tvl": 98765,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 3.0, "time": 1710000000},
+                            {"close": 4.0, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=fake_data_get), \
+             patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                 "is_honeypot": False,
+                 "is_mintable": False,
+                 "is_freezable": False,
+                 "risk_level": "LOW",
+             }), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=fake_send_display):
+            ave_tools.ave_token_detail(conn, addr="token-1", chain="solana", interval="240")
+            await asyncio.sleep(0.01)
+
+            self.assertFalse(sent)
+            self.assertEqual(len(conn.ave_wss.transitions), 1)
+            self.assertEqual(conn.ave_wss.transitions[0]["interval"], "k240")
+            self.assertEqual(conn.ave_wss._spotlight_data.get("interval"), "240")
+            self.assertEqual(conn.ave_wss._spotlight_data.get("price"), "$9.9900")
+
+            release_fetch.set()
+            for _ in range(20):
+                if sent:
+                    break
+                await asyncio.sleep(0.01)
+
+        self.assertTrue(sent)
+        self.assertEqual(sent[-1][0], "spotlight")
+        self.assertEqual(sent[-1][1].get("interval"), "240")
+        self.assertEqual(sent[-1][1].get("price"), "$1.2300")
+
+    async def test_spotlight_next_switches_wss_identity_immediately_so_old_live_updates_do_not_revert_screen(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_wss = ave_wss.AveWssManager(conn)
+        conn.ave_state.update(
+            {
+                "screen": "spotlight",
+                "current_token": {
+                    "addr": "old-token",
+                    "chain": "solana",
+                    "symbol": "OLD",
+                    "token_id": "old-token-solana",
+                },
+            }
+        )
+        conn.ave_wss._spotlight_id = "old-token-solana"
+        conn.ave_wss._spotlight_pair = "old-token"
+        conn.ave_wss._spotlight_chain = "solana"
+        conn.ave_wss._spotlight_interval = "k60"
+        conn.ave_wss._spotlight_data = {
+            "addr": "old-token",
+            "chain": "solana",
+            "token_id": "old-token-solana",
+            "symbol": "OLD",
+            "price": "$9.9900",
+            "interval": "60",
+            "chart": [100, 200],
+        }
+
+        release_fetch = threading.Event()
+        sent = []
+
+        def fake_data_get(path, params=None):
+            del params
+            release_fetch.wait(timeout=0.15)
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "NEW",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 4.56,
+                            "holders": 1234,
+                            "main_pair_tvl": 98765,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 3.0, "time": 1710000000},
+                            {"close": 4.0, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {}}
+            raise AssertionError(f"unexpected path: {path}")
+
+        async def fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=fake_data_get), \
+             patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                 "is_honeypot": False,
+                 "is_mintable": False,
+                 "is_freezable": False,
+                 "risk_level": "LOW",
+             }), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=fake_send_display), \
+             patch("plugins_func.functions.ave_wss._send_display", side_effect=fake_send_display):
+            ave_tools.ave_token_detail(conn, addr="new-token", chain="solana")
+            await asyncio.sleep(0.01)
+
+            self.assertEqual(conn.ave_wss._spotlight_id, "new-token-solana")
+            self.assertEqual(conn.ave_wss._spotlight_data.get("token_id"), "new-token-solana")
+
+            await conn.ave_wss._on_price_event({
+                "token_id": "old-token",
+                "chain": "solana",
+                "price": "8.88",
+                "price_change_1h": "1.2",
+            })
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][1].get("token_id"), "new-token-solana")
+
+            release_fetch.set()
+            for _ in range(20):
+                if len(sent) >= 2:
+                    break
+                await asyncio.sleep(0.01)
+
+        self.assertEqual(sent[-1][1].get("token_id"), "new-token-solana")
+        self.assertEqual(sent[-1][1].get("price"), "$1.2300")
 
     async def test_portfolio_sell_missing_chain_fails_closed(self):
         handler = KeyActionHandler()
