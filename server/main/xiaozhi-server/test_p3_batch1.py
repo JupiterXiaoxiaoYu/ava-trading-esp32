@@ -499,6 +499,117 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(raw_closes)
         self.assertTrue(all(abs(value - 1.23) < 1e-9 for value in raw_closes))
 
+    async def test_ave_token_detail_async_includes_rich_spotlight_fields(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {"spotlight_request_seq": 3}
+        sent = []
+
+        def _fake_data_get(path, params=None):
+            del params
+            if path.startswith("/tokens/top100/"):
+                return {
+                    "data": [
+                        {"balance_ratio": 0.1},
+                        {"balance_ratio": "0.05"},
+                        {"balance_ratio": 0.1234},
+                    ]
+                }
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 4.56,
+                            "holders": 1234,
+                            "main_pair_tvl": 98765,
+                            "token_tx_volume_usd_24h": 7654321,
+                            "fdv": 223456789,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.0, "time": 1710000000},
+                            {"close": 2.0, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {"risk_score": 20}}
+            raise AssertionError(path)
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._ave_token_detail_async(
+                conn,
+                addr="0x1234567890abcdef",
+                chain="solana",
+                symbol="BONK",
+                interval="60",
+                request_seq=3,
+            )
+
+        payload = sent[-1][1]
+        self.assertEqual(payload["volume_24h"], "$7.7M")
+        self.assertEqual(payload["market_cap"], "$223.5M")
+        self.assertEqual(payload["top100_concentration"], "27.3%")
+        self.assertEqual(payload["contract_short"], "0x12...cdef")
+
+    async def test_ave_token_detail_async_falls_back_to_na_for_missing_rich_fields(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {"spotlight_request_seq": 4}
+        sent = []
+
+        def _fake_data_get(path, params=None):
+            del params
+            if path.startswith("/tokens/top100/"):
+                return {"data": {}}
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": 1.23,
+                            "token_price_change_24h": 0,
+                            "holders": 0,
+                            "main_pair_tvl": 0,
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {"data": {"points": [{"close": 1.23, "time": 1710000000}]}}
+            if path.startswith("/contracts/"):
+                return {"data": {"risk_score": 5}}
+            raise AssertionError(path)
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._ave_token_detail_async(
+                conn,
+                addr="0x1234567890abcdef",
+                chain="solana",
+                symbol="BONK",
+                interval="60",
+                request_seq=4,
+            )
+
+        payload = sent[-1][1]
+        self.assertEqual(payload["volume_24h"], "N/A")
+        self.assertEqual(payload["market_cap"], "N/A")
+        self.assertEqual(payload["top100_concentration"], "N/A")
+        self.assertEqual(payload["contract_short"], "0x12...cdef")
+
     async def test_data_subscribe_uses_jsonrpc_frames_with_documented_param_shapes(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
@@ -1635,6 +1746,230 @@ int main(void)
             )
 
         mock_detail.assert_not_called()
+
+    def test_risk_flags_normalize_numeric_and_string_sentinels(self):
+        numeric_sentinel_resp = {"data": {"is_honeypot": -1, "risk_score": 20}}
+        numeric_flags = ave_tools._risk_flags(numeric_sentinel_resp)
+        self.assertFalse(numeric_flags["is_honeypot"])
+        self.assertEqual(numeric_flags["risk_level"], "MEDIUM")
+
+        string_resp = {
+            "data": {
+                "is_honeypot": "1",
+                "has_mint_method": "1",
+                "has_black_method": "TRUE",
+            }
+        }
+        string_flags = ave_tools._risk_flags(string_resp)
+        self.assertTrue(string_flags["is_honeypot"])
+        self.assertTrue(string_flags["is_mintable"])
+        self.assertTrue(string_flags["is_freezable"])
+        self.assertEqual(string_flags["risk_level"], "CRITICAL")
+
+        false_string_resp = {"data": {"is_honeypot": "false"}}
+        false_string_flags = ave_tools._risk_flags(false_string_resp)
+        self.assertFalse(false_string_flags["is_honeypot"])
+        self.assertEqual(false_string_flags["risk_level"], "UNKNOWN")
+
+        rejected_truthy_forms = {
+            "data": {
+                "is_honeypot": 1.0,
+                "has_mint_method": 1.0,
+                "has_black_method": 1.0,
+            }
+        }
+        rejected_numeric_float_flags = ave_tools._risk_flags(rejected_truthy_forms)
+        self.assertFalse(rejected_numeric_float_flags["is_honeypot"])
+        self.assertFalse(rejected_numeric_float_flags["is_mintable"])
+        self.assertFalse(rejected_numeric_float_flags["is_freezable"])
+
+        rejected_truthy_strings = {
+            "data": {
+                "is_honeypot": "1.0",
+                "has_mint_method": "on",
+                "has_black_method": "t",
+            }
+        }
+        rejected_truthy_string_flags = ave_tools._risk_flags(rejected_truthy_strings)
+        self.assertFalse(rejected_truthy_string_flags["is_honeypot"])
+        self.assertFalse(rejected_truthy_string_flags["is_mintable"])
+        self.assertFalse(rejected_truthy_string_flags["is_freezable"])
+
+    def test_risk_flags_treat_missing_values_as_false(self):
+        flags = ave_tools._risk_flags({"data": {}})
+        self.assertFalse(flags["is_honeypot"])
+        self.assertFalse(flags["is_mintable"])
+        self.assertFalse(flags["is_freezable"])
+        self.assertEqual(flags["risk_level"], "UNKNOWN")
+
+        list_payload_flags = ave_tools._risk_flags({"data": [{"risk_score": None}]})
+        self.assertFalse(list_payload_flags["is_honeypot"])
+        self.assertFalse(list_payload_flags["is_mintable"])
+        self.assertFalse(list_payload_flags["is_freezable"])
+        self.assertEqual(list_payload_flags["risk_level"], "UNKNOWN")
+
+    def test_risk_flags_malformed_payloads_default_safe(self):
+        empty_list_flags = ave_tools._risk_flags({"data": []})
+        self.assertFalse(empty_list_flags["is_honeypot"])
+        self.assertFalse(empty_list_flags["is_mintable"])
+        self.assertFalse(empty_list_flags["is_freezable"])
+        self.assertEqual(empty_list_flags["risk_level"], "UNKNOWN")
+
+        bad_type_flags = ave_tools._risk_flags({"data": "bad"})
+        self.assertFalse(bad_type_flags["is_honeypot"])
+        self.assertFalse(bad_type_flags["is_mintable"])
+        self.assertFalse(bad_type_flags["is_freezable"])
+        self.assertEqual(bad_type_flags["risk_level"], "UNKNOWN")
+
+    def test_risk_level_malformed_score_falls_back_unknown(self):
+        for malformed_score in ("20.5", "N/A", "", "   "):
+            flags = ave_tools._risk_flags({"data": {"risk_score": malformed_score}})
+            self.assertEqual(flags["risk_level"], "UNKNOWN")
+
+    def test_risk_level_out_of_range_score_falls_back_unknown(self):
+        for out_of_range_score in (-1, 101):
+            flags = ave_tools._risk_flags({"data": {"risk_score": out_of_range_score}})
+            self.assertEqual(flags["risk_level"], "UNKNOWN")
+
+    def test_risk_helpers_non_dict_roots_fail_closed(self):
+        for root in (None, [], "bad"):
+            flags = ave_tools._risk_flags(root)
+            self.assertFalse(flags["is_honeypot"])
+            self.assertFalse(flags["is_mintable"])
+            self.assertFalse(flags["is_freezable"])
+            self.assertEqual(flags["risk_level"], "UNKNOWN")
+            self.assertEqual(ave_tools._risk_level_from_response(root), "UNKNOWN")
+
+    def test_extract_top100_concentration_sums_first_100_balance_ratio_entries(self):
+        top100_resp = {
+            "data": {
+                "items": [{"balance_ratio": 0.001}] * 100 + [{"balance_ratio": 0.5}]
+            }
+        }
+        self.assertEqual(
+            ave_tools._extract_top100_concentration(top100_resp),
+            "10.0%",
+        )
+
+    def test_extract_top100_concentration_accepts_percent_string(self):
+        top100_resp = {"data": {"top100_concentration": "2.6%"}}
+        self.assertEqual(
+            ave_tools._extract_top100_concentration(top100_resp),
+            "2.6%",
+        )
+        half_percent = {"data": {"top100_concentration": "0.5%"}}
+        self.assertEqual(
+            ave_tools._extract_top100_concentration(half_percent),
+            "0.5%",
+        )
+
+    def test_extract_top100_concentration_treats_balance_ratio_as_fraction_of_one(self):
+        top100_resp = {
+            "data": {
+                "items": [
+                    {"balance_ratio": 0.025928},
+                    {"balance_ratio": "0.334417"},
+                ]
+            }
+        }
+        self.assertEqual(
+            ave_tools._extract_top100_concentration(top100_resp),
+            "36.0%",
+        )
+
+    def test_extract_top100_concentration_skips_out_of_range_balance_ratios(self):
+        top100_resp = {
+            "data": {
+                "items": [
+                    {"balance_ratio": -0.01},
+                    {"balance_ratio": 0.5},
+                    {"balance_ratio": 120},
+                    {"balance_ratio": "abc"},
+                ]
+            }
+        }
+        self.assertEqual(
+            ave_tools._extract_top100_concentration(top100_resp),
+            "50.0%",
+        )
+
+    async def test_ave_token_detail_async_handles_stringy_volume_and_market_cap_fail_soft(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state = {"spotlight_request_seq": 9}
+        sent = []
+
+        def _fake_data_get(path, params=None):
+            del params
+            if path.startswith("/tokens/top100/"):
+                return {
+                    "data": [
+                        {"balance_ratio": "2.6%"},
+                        {"balance_ratio": "1.4%"},
+                    ]
+                }
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": "1.23",
+                            "token_price_change_24h": "0.5",
+                            "holders": 10,
+                            "main_pair_tvl": "1,234",
+                            "token_tx_volume_usd_24h": "",
+                            "market_cap": "",
+                            "fdv": "N/A",
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {"data": {"points": [{"close": 1.23, "time": 1710000000}]}}
+            if path.startswith("/contracts/"):
+                return {"data": {"risk_score": 5}}
+            raise AssertionError(path)
+
+        async def _fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._ave_token_detail_async(
+                conn,
+                addr="0x1234567890abcdef",
+                chain="solana",
+                symbol="BONK",
+                interval="60",
+                request_seq=9,
+            )
+
+        payload = sent[-1][1]
+        self.assertEqual(payload["volume_24h"], "N/A")
+        self.assertEqual(payload["market_cap"], "N/A")
+        self.assertEqual(payload["liquidity"], "$1.2K")
+        self.assertEqual(payload["top100_concentration"], "4.0%")
+
+    def test_safe_top100_summary_get_fails_soft_for_assertion_error(self):
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=AssertionError("fixture mismatch")):
+            self.assertEqual(
+                ave_tools._safe_top100_summary_get("token-1", "solana"),
+                {},
+            )
+
+    def test_safe_top100_summary_get_calls_expected_top100_endpoint(self):
+        with patch("plugins_func.functions.ave_tools._data_get", return_value={"data": []}) as mock_data_get:
+            self.assertEqual(
+                ave_tools._safe_top100_summary_get("token-1", "solana"),
+                {"data": []},
+            )
+        mock_data_get.assert_called_once_with("/tokens/top100/token-1-solana")
+
+    def test_safe_top100_summary_get_fails_soft_for_runtime_errors(self):
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=RuntimeError("network down")):
+            self.assertEqual(
+                ave_tools._safe_top100_summary_get("token-1", "solana"),
+                {},
+            )
 
 
 if __name__ == "__main__":

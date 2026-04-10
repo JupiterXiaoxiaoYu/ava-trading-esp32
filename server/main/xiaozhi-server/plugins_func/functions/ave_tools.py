@@ -181,12 +181,157 @@ def _fmt_chart_time(ts: int) -> str:
 def _fmt_volume(vol) -> str:
     if vol is None:
         return "N/A"
-    vol = float(vol)
+    if isinstance(vol, str):
+        text = vol.strip().replace(",", "")
+        if not text or text.lower() in {"n/a", "na", "none", "null", "--"}:
+            return "N/A"
+        vol = text
+    try:
+        vol = float(vol)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not math.isfinite(vol):
+        return "N/A"
     if vol >= 1_000_000:
         return f"${vol/1_000_000:.1f}M"
     if vol >= 1_000:
         return f"${vol/1_000:.1f}K"
     return f"${vol:.0f}"
+
+
+def _parse_numeric_value(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if not math.isfinite(float(value)):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().replace(",", "")
+        if not text or text.lower() in {"n/a", "na", "none", "null", "--"}:
+            return None
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        try:
+            num = float(text)
+        except ValueError:
+            return None
+        if not math.isfinite(num):
+            return None
+        return num
+    return None
+
+
+def _coalesce_numeric_value(primary, fallback=None):
+    if _parse_numeric_value(primary) is not None:
+        return primary
+    if _parse_numeric_value(fallback) is not None:
+        return fallback
+    return None
+
+
+def _fmt_percent(value, *, normalize_fraction: bool = False) -> str:
+    if value in (None, ""):
+        return "N/A"
+    has_percent_suffix = isinstance(value, str) and "%" in value
+    pct = _parse_numeric_value(value)
+    if pct is None:
+        return "N/A"
+    if normalize_fraction and not has_percent_suffix and 0 <= pct <= 1:
+        pct *= 100
+    return f"{pct:.1f}%"
+
+
+def _contract_short(addr: str) -> str:
+    text = str(addr or "").strip()
+    if not text:
+        return "N/A"
+    if len(text) <= 8:
+        return text
+    return f"{text[:4]}...{text[-4:]}"
+
+
+def _balance_ratio_to_percent_points(raw_value):
+    """
+    Convert a top-holder share value into percent points.
+
+    /tokens/top100 balance_ratio is expected to be a fraction-of-1 value
+    (for example 0.334417 -> 33.4417%), while explicit percent strings
+    ("33.4%") are already percent points.
+    """
+    parsed = _parse_numeric_value(raw_value)
+    if parsed is None:
+        return None
+    if isinstance(raw_value, str) and "%" in raw_value:
+        pct = parsed
+    elif 0 <= parsed <= 1:
+        pct = parsed * 100
+    elif 0 <= parsed <= 100:
+        # Backward compatibility with payloads that already send percent points.
+        pct = parsed
+    else:
+        return None
+    if not math.isfinite(pct):
+        return None
+    return pct
+
+
+def _extract_top100_concentration(top100_resp: dict) -> str:
+    root = top100_resp if isinstance(top100_resp, dict) else top100_resp
+    payload = root.get("data", root) if isinstance(root, dict) else root
+    summary_nodes = []
+    top100_lists = []
+
+    if isinstance(payload, dict):
+        summary_nodes.append(payload)
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            summary_nodes.append(summary)
+        for key in ("top100", "holders", "items", "list", "data"):
+            entries = payload.get(key)
+            if isinstance(entries, list) and entries:
+                top100_lists.append(entries)
+    elif isinstance(payload, list):
+        top100_lists.append(payload)
+        for item in payload:
+            if isinstance(item, dict):
+                summary_nodes.append(item)
+
+    for node in summary_nodes:
+        if not isinstance(node, dict):
+            continue
+        for key in ("top100_concentration", "top_100_holding_rate", "top100_holding_rate", "top100_rate"):
+            if node.get(key) not in (None, ""):
+                return _fmt_percent(node.get(key), normalize_fraction=True)
+
+    for entries in top100_lists:
+        total = 0.0
+        seen = False
+        for top_holder in entries[:100]:
+            if not isinstance(top_holder, dict):
+                continue
+            share = top_holder.get(
+                "balance_ratio",
+                top_holder.get("holding_rate", top_holder.get("rate", top_holder.get("percentage"))),
+            )
+            percent_points = _balance_ratio_to_percent_points(share)
+            if percent_points is None:
+                continue
+            total += percent_points
+            seen = True
+        if seen:
+            return _fmt_percent(total)
+    return "N/A"
+
+
+def _safe_top100_summary_get(addr: str, chain: str) -> dict:
+    try:
+        return _data_get(f"/tokens/top100/{addr}-{chain}")
+    except Exception as exc:
+        logger.bind(tag=TAG).warning(
+            f"top100 lookup failed; returning empty summary token={addr} chain={chain} error={exc}"
+        )
+        return {}
 
 
 def _normalize_batch_price_token_id(token_id: str) -> str:
@@ -415,6 +560,10 @@ def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
         "change_positive": True,
         "holders": "--",
         "liquidity": "--",
+        "volume_24h": "--",
+        "market_cap": "--",
+        "top100_concentration": "--",
+        "contract_short": _contract_short(addr),
         "chart": [500] * 12,
         "chart_min": "--",
         "chart_max": "--",
@@ -468,8 +617,9 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
 
         token_task = asyncio.to_thread(_data_get, f"/tokens/{addr}-{chain}")
         risk_task = asyncio.to_thread(_data_get, f"/contracts/{addr}-{chain}")
+        top100_task = asyncio.to_thread(_safe_top100_summary_get, addr, chain)
         if is_live_second:
-            token_resp, risk_resp = await asyncio.gather(token_task, risk_task)
+            token_resp, risk_resp, top100_resp = await asyncio.gather(token_task, risk_task, top100_task)
             kline_resp = {"data": {"points": []}}
         else:
             kline_task = asyncio.to_thread(
@@ -477,10 +627,11 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
                 f"/klines/token/{addr}-{chain}",
                 {"interval": interval, "limit": kline_limit},
             )
-            token_resp, kline_resp, risk_resp = await asyncio.gather(
+            token_resp, kline_resp, risk_resp, top100_resp = await asyncio.gather(
                 token_task,
                 kline_task,
                 risk_task,
+                top100_task,
             )
 
         token_data = token_resp.get("data", token_resp)
@@ -556,6 +707,20 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
             "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
             "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
+            "volume_24h": _fmt_volume(
+                _coalesce_numeric_value(
+                    token.get("token_tx_volume_usd_24h"),
+                    token.get("tx_volume_u_24h"),
+                )
+            ),
+            "market_cap": _fmt_volume(
+                _coalesce_numeric_value(
+                    token.get("market_cap"),
+                    token.get("fdv"),
+                )
+            ),
+            "top100_concentration": _extract_top100_concentration(top100_resp),
+            "contract_short": _contract_short(addr),
             "chart": chart_values,
             "chart_min": _fmt_price(price_min),
             "chart_max": _fmt_price(price_max),
@@ -610,7 +775,7 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             state = _ensure_ave_state(conn)
             if _spotlight_request_is_current(state, request_seq):
                 await _send_display(conn, "notify", {
-                    "level": "error", "title": "查询失败", "body": str(e)[:60],
+                    "level": "error", "title": "Lookup Failed", "body": str(e)[:60],
                 })
         except Exception:
             pass
@@ -1752,6 +1917,43 @@ def _build_result_payload(result: dict, pending: dict = None) -> dict:
 # Risk check helper
 # ---------------------------------------------------------------------------
 
+def _normalize_ave_bool(value) -> bool:
+    """Normalize AVE risk booleans where sentinel values like -1 mean false."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return text in {"true", "1", "yes", "y"}
+    return False
+
+
+def _parse_risk_score(value):
+    """Parse contract risk score safely; return None for malformed values."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= 100 else None
+    if isinstance(value, float):
+        if value.is_integer():
+            score = int(value)
+            return score if 0 <= score <= 100 else None
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            score = int(text)
+            return score if 0 <= score <= 100 else None
+        except ValueError:
+            return None
+    return None
+
+
 def _risk_level_from_response(risk_data: dict) -> str:
     """Extract risk level from contracts API response.
 
@@ -1759,16 +1961,18 @@ def _risk_level_from_response(risk_data: dict) -> str:
     individual boolean flags like ``is_honeypot``.  We map the score to
     a human-readable level string.
     """
-    data = risk_data.get("data", risk_data)
+    root = risk_data if isinstance(risk_data, dict) else {}
+    data = root.get("data", root)
     if isinstance(data, list) and data:
         data = data[0]
+    if not isinstance(data, dict):
+        data = {}
     # Check for honeypot first — always CRITICAL
-    if data.get("is_honeypot"):
+    if _normalize_ave_bool(data.get("is_honeypot")):
         return "CRITICAL"
-    score = data.get("risk_score", data.get("ave_risk_level"))
+    score = _parse_risk_score(data.get("risk_score", data.get("ave_risk_level")))
     if score is None:
         return "UNKNOWN"
-    score = int(score)
     if score >= 80:
         return "CRITICAL"
     if score >= 50:
@@ -1780,13 +1984,16 @@ def _risk_level_from_response(risk_data: dict) -> str:
 
 def _risk_flags(risk_data: dict) -> dict:
     """Extract honeypot/mint/freeze flags."""
-    data = risk_data.get("data", risk_data)
+    root = risk_data if isinstance(risk_data, dict) else {}
+    data = root.get("data", root)
     if isinstance(data, list) and data:
         data = data[0]
+    if not isinstance(data, dict):
+        data = {}
     return {
-        "is_honeypot": bool(data.get("is_honeypot", False)),
-        "is_mintable": bool(data.get("has_mint_method", data.get("is_mintable", False))),
-        "is_freezable": bool(data.get("has_black_method", data.get("is_freezable", False))),
+        "is_honeypot": _normalize_ave_bool(data.get("is_honeypot")),
+        "is_mintable": _normalize_ave_bool(data.get("has_mint_method", data.get("is_mintable"))),
+        "is_freezable": _normalize_ave_bool(data.get("has_black_method", data.get("is_freezable"))),
         "risk_level": _risk_level_from_response(risk_data),
     }
 
@@ -1885,8 +2092,18 @@ def _build_token_list(tokens_raw, chain_fallback):
                 "price_raw": float(price_val or 0),
                 "change_24h": _fmt_change(change_val),
                 "change_positive": float(change_val or 0) >= 0,
-                "volume_24h": _fmt_volume(vol_val),
-                "market_cap": _fmt_volume(t.get("market_cap", t.get("fdv"))),
+                "volume_24h": _fmt_volume(
+                    _coalesce_numeric_value(
+                        vol_val,
+                        t.get("tx_volume_u_24h"),
+                    )
+                ),
+                "market_cap": _fmt_volume(
+                    _coalesce_numeric_value(
+                        t.get("market_cap"),
+                        t.get("fdv"),
+                    )
+                ),
                 "source": t.get("issue_platform", t.get("platform", "trending")),
                 "risk_level": "UNKNOWN",
             }
@@ -1998,7 +2215,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             try:
                 conn.loop.create_task(_send_display(conn, "notify", {
                     "level": "error",
-                    "title": "获取平台热门失败",
+                    "title": "Platform Feed Failed",
                     "body": str(e)[:60],
                 }))
             except Exception:
@@ -2091,7 +2308,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "获取热门失败",
+                "title": "Trending Feed Failed",
                 "body": str(e)[:60],
             }))
         except Exception:
@@ -2210,7 +2427,7 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "搜索失败",
+                "title": "Search Failed",
                 "body": str(e)[:60],
             }))
         except Exception:
@@ -2549,7 +2766,7 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
         logger.bind(tag=TAG).error(f"ave_token_detail error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "查询失败", "body": str(e)[:60],
+                "level": "error", "title": "Lookup Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass
@@ -2587,8 +2804,8 @@ def ave_risk_check(conn: "ConnectionHandler", addr: str, chain: str = "solana"):
         if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "⚠️ 危险代币已拦截",
-                "body": "蜜罐合约，无法卖出",
+                "title": "Dangerous Token Blocked",
+                "body": "Honeypot contract detected. Trade blocked.",
             }))
             return ActionResponse(
                 action=Action.RESPONSE,
@@ -2667,8 +2884,8 @@ def ave_buy_token(
         if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "⚠️ 危险代币已拦截",
-                "body": "蜜罐合约，交易已取消",
+                "title": "Dangerous Token Blocked",
+                "body": "Honeypot contract detected. Buy cancelled.",
             }))
             return ActionResponse(
                 action=Action.RESPONSE,
@@ -2794,7 +3011,7 @@ def ave_buy_token(
         logger.bind(tag=TAG).error(f"ave_buy_token error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "买入失败", "body": str(e)[:60],
+                "level": "error", "title": "Buy Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass
@@ -2847,8 +3064,8 @@ def ave_limit_order(
             if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
                 conn.loop.create_task(_send_display(conn, "notify", {
                     "level": "error",
-                    "title": "⚠️ 危险代币已拦截",
-                    "body": "蜜罐合约，挂单已取消",
+                    "title": "Dangerous Token Blocked",
+                    "body": "Honeypot contract detected. Limit order cancelled.",
                 }))
                 return ActionResponse(
                     action=Action.RESPONSE,
@@ -3178,7 +3395,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
         logger.bind(tag=TAG).error(f"ave_portfolio error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "查询持仓失败", "body": str(e)[:60],
+                "level": "error", "title": "Portfolio Lookup Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass

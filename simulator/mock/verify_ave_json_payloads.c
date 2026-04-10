@@ -7,8 +7,14 @@
 #include "ave_transport.h"
 #include "lvgl/lvgl.h"
 
-const lv_font_t lv_font_montserrat_12 = {0};
-const lv_font_t lv_font_montserrat_14 = {0};
+#if defined(__GNUC__)
+#define AVE_HARNESS_WEAK __attribute__((weak))
+#else
+#define AVE_HARNESS_WEAK
+#endif
+
+AVE_HARNESS_WEAK const lv_font_t lv_font_montserrat_12 = {0};
+AVE_HARNESS_WEAK const lv_font_t lv_font_montserrat_14 = {0};
 
 static char g_last_json[1024];
 static uint32_t g_tick = 0;
@@ -110,32 +116,57 @@ void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part)
     (void)part;
 }
 
+void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
+{
+    if (!obj) return;
+    obj->text_align = align;
+    (void)part;
+}
+
 void lv_obj_set_width(lv_obj_t *obj, int width)
 {
-    (void)obj;
-    (void)width;
+    if (!obj) return;
+    obj->width = width;
 }
 
 void lv_obj_set_size(lv_obj_t *obj, int width, int height)
 {
-    (void)obj;
-    (void)width;
-    (void)height;
+    if (!obj) return;
+    obj->width = width;
+    obj->height = height;
 }
 
 void lv_obj_set_pos(lv_obj_t *obj, int x, int y)
 {
-    (void)obj;
-    (void)x;
-    (void)y;
+    if (!obj) return;
+    obj->x = x;
+    obj->y = y;
 }
 
 void lv_obj_align(lv_obj_t *obj, int align, int x_ofs, int y_ofs)
 {
-    (void)obj;
-    (void)align;
-    (void)x_ofs;
-    (void)y_ofs;
+    const int root_w = 320;
+    const int root_h = 240;
+    int x = x_ofs;
+    int y = y_ofs;
+
+    if (!obj) return;
+
+    switch (align) {
+        case LV_ALIGN_TOP_LEFT: x = x_ofs; y = y_ofs; break;
+        case LV_ALIGN_TOP_MID: x = (root_w - obj->width) / 2 + x_ofs; y = y_ofs; break;
+        case LV_ALIGN_TOP_RIGHT: x = root_w - obj->width + x_ofs; y = y_ofs; break;
+        case LV_ALIGN_LEFT_MID: x = x_ofs; y = (root_h - obj->height) / 2 + y_ofs; break;
+        case LV_ALIGN_CENTER: x = (root_w - obj->width) / 2 + x_ofs; y = (root_h - obj->height) / 2 + y_ofs; break;
+        case LV_ALIGN_RIGHT_MID: x = root_w - obj->width + x_ofs; y = (root_h - obj->height) / 2 + y_ofs; break;
+        case LV_ALIGN_BOTTOM_LEFT: x = x_ofs; y = root_h - obj->height + y_ofs; break;
+        case LV_ALIGN_BOTTOM_MID: x = (root_w - obj->width) / 2 + x_ofs; y = root_h - obj->height + y_ofs; break;
+        case LV_ALIGN_BOTTOM_RIGHT: x = root_w - obj->width + x_ofs; y = root_h - obj->height + y_ofs; break;
+        default: break;
+    }
+
+    obj->x = x;
+    obj->y = y;
 }
 
 lv_obj_t *lv_label_create(lv_obj_t *parent)
@@ -263,11 +294,98 @@ uint32_t lv_tick_elaps(uint32_t prev_tick)
     return g_tick - prev_tick;
 }
 
+/* Link-only font provider stub used by spotlight/feed screen construction. */
+AVE_HARNESS_WEAK const lv_font_t *ave_font_cjk_14(void)
+{
+    return &lv_font_montserrat_14;
+}
+
+#if !defined(VERIFY_SPOTLIGHT)
+AVE_HARNESS_WEAK void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
+{
+    if (!buf || n == 0) return;
+    snprintf(buf, n, "%s", raw_price && raw_price[0] ? raw_price : "$0");
+}
+#endif
+
 void ave_send_json(const char *json)
 {
     snprintf(g_last_json, sizeof(g_last_json), "%s", json ? json : "");
 }
 
+#if !defined(VERIFY_SPOTLIGHT)
+AVE_HARNESS_WEAK int ave_sm_json_escape_string(const char *src, char *out, size_t out_n)
+{
+    size_t oi = 0;
+    size_t i = 0;
+
+    if (!src || !out || out_n == 0) return 0;
+    while (src[i] != '\0') {
+        const char *esc = NULL;
+        char ch = src[i++];
+        switch (ch) {
+            case '\"': esc = "\\\""; break;
+            case '\\': esc = "\\\\"; break;
+            case '\n': esc = "\\n"; break;
+            case '\r': esc = "\\r"; break;
+            case '\t': esc = "\\t"; break;
+            default: break;
+        }
+        if (esc) {
+            if (oi + 2 >= out_n) return 0;
+            out[oi++] = esc[0];
+            out[oi++] = esc[1];
+            continue;
+        }
+        if (oi + 1 >= out_n) return 0;
+        out[oi++] = ch;
+    }
+    out[oi] = '\0';
+    return 1;
+}
+
+AVE_HARNESS_WEAK int ave_sm_build_key_action_json(
+    const char *action,
+    const ave_sm_json_field_t *fields,
+    size_t field_count,
+    char *out,
+    size_t out_n
+)
+{
+    char action_esc[128];
+    size_t i;
+    int n;
+    int used = 0;
+
+    if (!action || !out || out_n == 0) return 0;
+    if (!ave_sm_json_escape_string(action, action_esc, sizeof(action_esc))) return 0;
+
+    n = snprintf(out, out_n, "{\"type\":\"key_action\",\"action\":\"%s\"", action_esc);
+    if (n <= 0 || (size_t)n >= out_n) return 0;
+    used = n;
+
+    for (i = 0; i < field_count; i++) {
+        char key_esc[128];
+        char val_esc[256];
+        if (!fields || !fields[i].key || !fields[i].value) continue;
+        if (!ave_sm_json_escape_string(fields[i].key, key_esc, sizeof(key_esc))) return 0;
+        if (!ave_sm_json_escape_string(fields[i].value, val_esc, sizeof(val_esc))) return 0;
+        n = snprintf(out + used, out_n - (size_t)used, ",\"%s\":\"%s\"", key_esc, val_esc);
+        if (n <= 0 || (size_t)n >= out_n - (size_t)used) return 0;
+        used += n;
+    }
+
+    n = snprintf(out + used, out_n - (size_t)used, "}");
+    if (n <= 0 || (size_t)n >= out_n - (size_t)used) return 0;
+    return 1;
+}
+
+AVE_HARNESS_WEAK void ave_sm_go_back_fallback(void)
+{
+}
+#endif
+
+#if !defined(VERIFY_SPOTLIGHT)
 static void clear_last_json(void)
 {
     g_last_json[0] = '\0';
@@ -290,6 +408,7 @@ static int expect_not_contains(const char *needle, const char *label)
     }
     return 1;
 }
+#endif
 
 #if !defined(VERIFY_FEED)
 void screen_feed_show(const char *json_data) { (void)json_data; }
@@ -395,6 +514,7 @@ int main(void)
     return ok ? 0 : 1;
 }
 #elif defined(VERIFY_SPOTLIGHT)
+#define AVE_SPOTLIGHT_SHOW_ONLY 1
 #include "../../shared/ave_screens/screen_spotlight.c"
 
 int main(void)
@@ -413,8 +533,77 @@ int main(void)
         "\"chart_min\":\"$1\","
         "\"chart_max\":\"$2\""
         "}";
+    const char *spotlight_rich_json =
+        "{"
+        "\"symbol\":\"BONK\","
+        "\"token_id\":\"spot-rich-token-sol\","
+        "\"contract\":\"0x2299f25A95A9539f25A95A9539f25A95A953C599\","
+        "\"chain\":\"sol\","
+        "\"cursor\":0,"
+        "\"total\":20,"
+        "\"interval\":\"60\","
+        "\"price\":\"$1.2300\","
+        "\"change_24h\":\"+4.56%\","
+        "\"change_positive\":true,"
+        "\"risk_level\":\"LOW\","
+        "\"is_honeypot\":false,"
+        "\"is_mintable\":false,"
+        "\"is_freezable\":false,"
+        "\"holders\":\"1,234\","
+        "\"liquidity\":\"$98.8K\","
+        "\"volume_24h\":\"$7.7M\","
+        "\"market_cap\":\"$123.5M\","
+        "\"top100_concentration\":\"27.3%\","
+        "\"contract_short\":\"0x22...C599\","
+        "\"chart\":[120,240,360,520,680,740,810,900],"
+        "\"chart_min\":\"$1.00\","
+        "\"chart_max\":\"$2.00\""
+        "}";
+    const char *spotlight_numeric_json =
+        "{"
+        "\"symbol\":\"NUM\","
+        "\"token_id\":\"spot-numeric-token-base\","
+        "\"mint\":\"0x9988aabbccddeeff112233445566778899008888\","
+        "\"chain\":\"eth\","
+        "\"interval\":\"60\","
+        "\"price\":\"$0.1\","
+        "\"change_24h\":\"-1%\","
+        "\"change_positive\":0,"
+        "\"risk_level\":\"LOW\","
+        "\"is_honeypot\":false,"
+        "\"is_mintable\":false,"
+        "\"is_freezable\":false,"
+        "\"holders\":1234,"
+        "\"liquidity\":98765,"
+        "\"volume_24h\":7654321,"
+        "\"market_cap\":123456789,"
+        "\"top100_concentration\":27.3,"
+        "\"contract_short\":\"0x99...8888\","
+        "\"chart\":[100,200],"
+        "\"chart_min\":\"$0.09\","
+        "\"chart_max\":\"$0.11\""
+        "}";
+    const char *spotlight_top10_only_json =
+        "{"
+        "\"symbol\":\"T10\","
+        "\"token_id\":\"top10-only\","
+        "\"chain\":\"eth\","
+        "\"interval\":\"60\","
+        "\"price\":\"$1\","
+        "\"change_24h\":\"+1%\","
+        "\"holders\":\"99\","
+        "\"top10_concentration\":\"12.3%\","
+        "\"chart\":[100,200],"
+        "\"chart_min\":\"$0.09\","
+        "\"chart_max\":\"$0.11\""
+        "}";
 
+    g_last_json[0] = '\0';
     screen_spotlight_show(spotlight_json);
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
     if (strcmp(s_lbl_sym->text, "PEPE") != 0) {
         fprintf(stderr,
                 "FAIL: spotlight top-bar symbol polluted identity: %s\n",
@@ -427,6 +616,18 @@ int main(void)
                 s_lbl_tf->text);
         ok = 0;
     }
+    if (s_lbl_pos->y >= 215) {
+        fprintf(stderr, "FAIL: spotlight position indicator overlaps divider/bottom bar (y=%d)\n", s_lbl_pos->y);
+        ok = 0;
+    }
+    if (s_lbl_pos->y != s_lbl_stats_row4->y) {
+        fprintf(stderr,
+                "FAIL: spotlight position indicator should share row-4 with CA (row4_y=%d pos_y=%d)\n",
+                s_lbl_stats_row4->y,
+                s_lbl_pos->y);
+        ok = 0;
+    }
+    g_last_json[0] = '\0';
     screen_spotlight_show(
         "{"
         "\"symbol\":\"PEPE\","
@@ -440,12 +641,17 @@ int main(void)
         "\"chart_max\":\"$2\""
         "}"
     );
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show(s1) unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
     if (strcmp(s_lbl_tf->text, "L1S") != 0) {
         fprintf(stderr,
                 "FAIL: spotlight timeframe label did not map s1 to L1S: %s\n",
                 s_lbl_tf->text);
         ok = 0;
     }
+    g_last_json[0] = '\0';
     screen_spotlight_show(
         "{"
         "\"symbol\":\"PEPE\","
@@ -459,6 +665,10 @@ int main(void)
         "\"chart_max\":\"$2\""
         "}"
     );
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show(1m) unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
     if (strcmp(s_lbl_tf->text, "L1M") != 0) {
         fprintf(stderr,
                 "FAIL: spotlight timeframe label did not map 1 to L1M: %s\n",
@@ -466,37 +676,114 @@ int main(void)
         ok = 0;
     }
 
-    s_loading = false;
-    snprintf(s_token_id, sizeof(s_token_id), "%s", "spot\"id\\line");
-    snprintf(s_chain, sizeof(s_chain), "%s", "ba\"se");
-    snprintf(s_symbol, sizeof(s_symbol), "%s", "MO\"ON");
-    s_interval_idx = 0;
+    g_last_json[0] = '\0';
+    screen_spotlight_show(spotlight_rich_json);
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show(rich) unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row1->text, "Risk:LOW") ||
+        !strstr(s_lbl_stats_row1->text, "Mint:NO") ||
+        !strstr(s_lbl_stats_row1->text, "Freeze:NO")) {
+        fprintf(stderr, "FAIL: spotlight row1 missing Risk/Mint/Freeze: %s\n", s_lbl_stats_row1->text);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row2->text, "Vol24h:$7.7M") ||
+        !strstr(s_lbl_stats_row2->text, "Liq:$98.8K") ||
+        !strstr(s_lbl_stats_row2->text, "Mcap:$123.5M")) {
+        fprintf(stderr, "FAIL: spotlight row2 missing Vol24h/Liq/Mcap: %s\n", s_lbl_stats_row2->text);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row3->text, "Holders:1,234") ||
+        !strstr(s_lbl_stats_row3->text, "Top100:27.3%")) {
+        fprintf(stderr, "FAIL: spotlight row3 missing Holders/Top100: %s\n", s_lbl_stats_row3->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_stats_row4->text, "CA:0x2299...53C599") != 0) {
+        fprintf(stderr, "FAIL: spotlight row4 missing compact CA (first6/last6): %s\n", s_lbl_stats_row4->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_pos->text, "<1/20>") != 0) {
+        fprintf(stderr, "FAIL: spotlight row4 missing page marker text: %s\n", s_lbl_pos->text);
+        ok = 0;
+    }
+    if (s_lbl_pos->width < 40) {
+        fprintf(stderr, "FAIL: spotlight page marker width should reserve a right column (w=%d)\n", s_lbl_pos->width);
+        ok = 0;
+    }
+    if ((s_lbl_pos->x + s_lbl_pos->width) != 316) {
+        fprintf(stderr,
+                "FAIL: spotlight page marker right edge drifted (x=%d w=%d)\n",
+                s_lbl_pos->x,
+                s_lbl_pos->width);
+        ok = 0;
+    }
+    if ((s_lbl_stats_row4->x + s_lbl_stats_row4->width) >= s_lbl_pos->x) {
+        fprintf(stderr,
+                "FAIL: spotlight row4 CA overlaps page marker (ca_right=%d pos_left=%d)\n",
+                s_lbl_stats_row4->x + s_lbl_stats_row4->width,
+                s_lbl_pos->x);
+        ok = 0;
+    }
 
-    clear_last_json();
+    g_last_json[0] = '\0';
+    screen_spotlight_show(spotlight_numeric_json);
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show(numeric) unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row2->text, "Vol24h:7654321") ||
+        !strstr(s_lbl_stats_row2->text, "Liq:98765") ||
+        !strstr(s_lbl_stats_row2->text, "Mcap:123456789")) {
+        fprintf(stderr, "FAIL: spotlight row2 numeric scalars not parsed: %s\n", s_lbl_stats_row2->text);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row3->text, "Holders:1234") ||
+        !strstr(s_lbl_stats_row3->text, "Top100:27.3")) {
+        fprintf(stderr, "FAIL: spotlight row3 numeric scalars not parsed: %s\n", s_lbl_stats_row3->text);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_change->text, "-1%")) {
+        fprintf(stderr, "FAIL: spotlight numeric change_positive payload regressed change label: %s\n", s_lbl_change->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_stats_row4->text, "CA:0x9988...008888") != 0) {
+        fprintf(stderr, "FAIL: spotlight mint-based compact CA regressed: %s\n", s_lbl_stats_row4->text);
+        ok = 0;
+    }
+
+    g_last_json[0] = '\0';
+    screen_spotlight_show(spotlight_top10_only_json);
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight show(top10-only) unexpectedly sent key_action JSON: %s\n", g_last_json);
+        ok = 0;
+    }
+    if (!strstr(s_lbl_stats_row3->text, "Top100:N/A")) {
+        fprintf(stderr, "FAIL: spotlight must not backfill Top100 from top10 field: %s\n", s_lbl_stats_row3->text);
+        ok = 0;
+    }
+    if (strstr(s_lbl_stats_row3->text, "12.3%")) {
+        fprintf(stderr, "FAIL: spotlight leaked top10_concentration into Top100 row: %s\n", s_lbl_stats_row3->text);
+        ok = 0;
+    }
+    if (s_lbl_pos->text[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight page marker should be empty without cursor/total: %s\n", s_lbl_pos->text);
+        ok = 0;
+    }
+    if (s_lbl_stats_row4->width != 312) {
+        fprintf(stderr, "FAIL: spotlight CA row should reclaim full width when page marker hidden: w=%d\n", s_lbl_stats_row4->width);
+        ok = 0;
+    }
+
+    g_last_json[0] = '\0';
     screen_spotlight_key(AVE_KEY_A);
-    ok &= expect_contains("\"action\":\"buy\"", "spotlight buy action");
-    ok &= expect_contains("spot\\\"id\\\\line", "spotlight buy token escaped");
-    ok &= expect_contains("MO\\\"ON", "spotlight buy symbol escaped");
-    ok &= expect_not_contains("spot\"id\\line", "spotlight raw buy token");
-
-    clear_last_json();
-    screen_spotlight_key(AVE_KEY_UP);
-    ok &= expect_contains("\"action\":\"kline_interval\"", "spotlight interval action");
-    ok &= expect_contains("\"interval\":\"1\"", "spotlight up interval should advance to live 1m");
-    ok &= expect_contains("spot\\\"id\\\\line", "spotlight interval token escaped");
-    ok &= expect_not_contains("spot\"id\\line", "spotlight raw interval token");
-
-    s_interval_idx = 5;
-    clear_last_json();
-    screen_spotlight_key(AVE_KEY_UP);
-    ok &= expect_contains("\"interval\":\"s1\"", "spotlight up interval should wrap to live 1s");
-
-    s_loading = false;
-    clear_last_json();
     screen_spotlight_key(AVE_KEY_X);
-    ok &= expect_contains("\"action\":\"quick_sell\"", "spotlight quick sell action");
-    ok &= expect_contains("MO\\\"ON", "spotlight quick sell symbol escaped");
-    ok &= expect_not_contains("MO\"ON", "spotlight raw quick sell symbol");
+    screen_spotlight_key(AVE_KEY_UP);
+    screen_spotlight_key(AVE_KEY_B);
+    if (g_last_json[0] != '\0') {
+        fprintf(stderr, "FAIL: AVE_SPOTLIGHT_SHOW_ONLY key path unexpectedly sent JSON: %s\n", g_last_json);
+        ok = 0;
+    }
 
     return ok ? 0 : 1;
 }

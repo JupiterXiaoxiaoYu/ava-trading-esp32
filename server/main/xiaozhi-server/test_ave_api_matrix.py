@@ -447,25 +447,39 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
                         "has_black_method": False,
                     }
                 }
+            if path == "/tokens/top100/token-123-solana":
+                return {
+                    "data": [{"balance_ratio": 0.2621}]
+                }
             raise AssertionError(f"unexpected path: {path}")
 
         with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="5")
-            await asyncio.sleep(0)
+            for _ in range(20):
+                if requests and conn.ave_wss.spotlight_calls:
+                    break
+                await asyncio.sleep(0.01)
 
-        self.assertEqual(
-            requests,
-            [
-                ("/tokens/token-123-solana", None),
-                ("/klines/token/token-123-solana", {"interval": "5", "limit": 48}),
-                ("/contracts/token-123-solana", None),
-            ],
-        )
-        self.assertEqual(sent[0][0], "spotlight")
-        self.assertEqual(sent[0][1]["interval"], "5")
-        self.assertEqual(sent[0][1]["risk_level"], "HIGH")
-        self.assertTrue(sent[0][1]["is_mintable"])
+        normalized_requests = [
+            (path, json.dumps(params, sort_keys=True) if params is not None else None)
+            for path, params in requests
+        ]
+        expected_requests = [
+            ("/tokens/token-123-solana", None),
+            ("/klines/token/token-123-solana", "{\"interval\": \"5\", \"limit\": 48}"),
+            ("/contracts/token-123-solana", None),
+            ("/tokens/top100/token-123-solana", None),
+        ]
+        self.assertCountEqual(normalized_requests, expected_requests)
+        self.assertEqual(sent[-1][0], "spotlight")
+        self.assertEqual(sent[-1][1]["interval"], "5")
+        self.assertEqual(sent[-1][1]["risk_level"], "HIGH")
+        self.assertTrue(sent[-1][1]["is_mintable"])
+        self.assertEqual(sent[-1][1]["volume_24h"], "N/A")
+        self.assertEqual(sent[-1][1]["market_cap"], "N/A")
+        self.assertEqual(sent[-1][1]["top100_concentration"], "26.2%")
+        self.assertEqual(sent[-1][1]["contract_short"], "toke...-123")
         self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "k5")
 
     async def test_ave_token_detail_interval_1_maps_to_rest_1m_and_wss_k1(self):
@@ -508,32 +522,46 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
                         "has_black_method": False,
                     }
                 }
+            if path == "/tokens/top100/token-123-solana":
+                return {"data": [{"balance_ratio": 21.4}]}
             raise AssertionError(f"unexpected path: {path}")
 
         with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="1")
-            await asyncio.sleep(0)
+            for _ in range(30):
+                if (
+                    any(path == "/tokens/top100/token-123-solana" for path, _ in requests)
+                    and sent
+                    and conn.ave_wss.spotlight_calls
+                ):
+                    break
+                await asyncio.sleep(0.01)
 
         normalized_requests = [
             (path, json.dumps(params, sort_keys=True) if params is not None else None)
             for path, params in requests
         ]
-        self.assertCountEqual(
-            normalized_requests,
-            [
-                ("/tokens/token-123-solana", None),
-                ("/klines/token/token-123-solana", "{\"interval\": \"1\", \"limit\": 48}"),
-                ("/contracts/token-123-solana", None),
-            ],
-        )
-        self.assertEqual(sent[0][0], "spotlight")
-        self.assertEqual(sent[0][1]["interval"], "1")
+        expected_requests = [
+            ("/tokens/token-123-solana", None),
+            ("/klines/token/token-123-solana", "{\"interval\": \"1\", \"limit\": 48}"),
+            ("/contracts/token-123-solana", None),
+            ("/tokens/top100/token-123-solana", None),
+        ]
+        self.assertCountEqual(normalized_requests, expected_requests)
+        self.assertEqual(sent[-1][0], "spotlight")
+        self.assertEqual(sent[-1][1]["interval"], "1")
         self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "k1")
 
     async def test_ave_token_detail_interval_s1_skips_rest_kline_and_seeds_live_chart(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
+        conn.ave_wss._spotlight_id = "token-123-solana"
+        conn.ave_wss._spotlight_raw_closes = [0.42, 0.43, 0.44]
+        conn.ave_wss._spotlight_raw_times = [1710000000, 1710000060, 1710000120]
+        conn.ave_wss._spotlight_raw_owner_token_id = "token-123-solana"
+        conn.ave_wss._spotlight_raw_owner_chain = "solana"
+        conn.ave_wss._spotlight_raw_owner_interval = "s1"
         requests = []
         sent = []
 
@@ -562,6 +590,8 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
                         "has_black_method": False,
                     }
                 }
+            if path == "/tokens/top100/token-123-solana":
+                return {"data": [{"balance_ratio": "31.2%"}]}
             if path.startswith("/klines/token/"):
                 raise AssertionError("interval=s1 must not call REST kline endpoint")
             raise AssertionError(f"unexpected path: {path}")
@@ -569,25 +599,33 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
         with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="s1")
-            await asyncio.sleep(0)
+            for _ in range(30):
+                if (
+                    any(path == "/tokens/top100/token-123-solana" for path, _ in requests)
+                    and sent
+                    and conn.ave_wss.spotlight_calls
+                ):
+                    break
+                await asyncio.sleep(0.01)
 
         normalized_requests = [
             (path, json.dumps(params, sort_keys=True) if params is not None else None)
             for path, params in requests
         ]
-        self.assertCountEqual(
-            normalized_requests,
-            [
-                ("/tokens/token-123-solana", None),
-                ("/contracts/token-123-solana", None),
-            ],
-        )
-        self.assertEqual(sent[0][0], "spotlight")
-        self.assertEqual(sent[0][1]["interval"], "s1")
-        self.assertGreaterEqual(len(sent[0][1]["chart"]), 8)
-        self.assertTrue(any(v > 0 for v in sent[0][1]["chart"]))
-        self.assertEqual(sent[0][1]["chart_t_end"], "now")
+        expected_requests = [
+            ("/tokens/token-123-solana", None),
+            ("/contracts/token-123-solana", None),
+            ("/tokens/top100/token-123-solana", None),
+        ]
+        self.assertCountEqual(normalized_requests, expected_requests)
+        self.assertEqual(sent[-1][0], "spotlight")
+        self.assertEqual(sent[-1][1]["interval"], "s1")
+        self.assertEqual(len(sent[-1][1]["chart"]), 3)
+        self.assertTrue(any(v > 0 for v in sent[-1][1]["chart"]))
+        self.assertEqual(sent[-1][1]["chart_t_end"], "now")
         self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "s1")
+        self.assertEqual(conn.ave_wss.spotlight_calls[0][0][3], [0.42, 0.43, 0.44])
+        self.assertEqual(conn.ave_wss.spotlight_calls[0][0][4], [1710000000, 1710000060, 1710000120])
 
     async def test_ave_buy_token_maps_contract_price_quote_and_trade_payloads(self):
         loop = asyncio.get_running_loop()
@@ -731,6 +769,35 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已拦截交易", resp.response)
         self.assertEqual(sent[0][0], "notify")
         self.assertEqual(sent[0][1]["level"], "error")
+        self.assertEqual(sent[0][1]["title"], "Dangerous Token Blocked")
+        self.assertEqual(sent[0][1]["body"], "Honeypot contract detected. Trade blocked.")
+
+    def test_notify_and_result_popup_copy_literals_are_english_only(self):
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parent / "plugins_func/functions/ave_tools.py").read_text(encoding="utf-8")
+        popup_lines = "\n".join(
+            line
+            for line in source.splitlines()
+            if any(key in line for key in ("\"title\"", "\"body\"", "\"subtitle\"", "'title'", "'body'", "'subtitle'"))
+        )
+        self.assertIn("Lookup Failed", popup_lines)
+        self.assertIn("Dangerous Token Blocked", popup_lines)
+        forbidden_popup_copy = {
+            "查询失败",
+            "获取平台热门失败",
+            "获取热门失败",
+            "搜索失败",
+            "买入失败",
+            "查询持仓失败",
+            "⚠️ 危险代币已拦截",
+            "蜜罐合约，无法卖出",
+            "蜜罐合约，交易已取消",
+            "蜜罐合约，挂单已取消",
+            "危险代币已拦截",
+        }
+        for text in forbidden_popup_copy:
+            self.assertNotIn(text, popup_lines)
 
     def test_ave_risk_check_non_critical_returns_pass_signal(self):
         loop = asyncio.new_event_loop()
@@ -756,6 +823,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
         sent = []
+        data_get_requests = []
 
         async def _fake_send_display(conn, screen, payload):
             sent.append((screen, payload))
@@ -765,7 +833,18 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
                 return "wallet-limit"
             return default
 
+        def _fake_data_get(path, params=None):
+            data_get_requests.append((path, params))
+            return {"data": {"risk_score": 5}}
+
         with patch("plugins_func.functions.ave_tools.trade_mgr.create", return_value="limit123") as mock_create, \
+             patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._risk_flags", return_value={
+                 "risk_level": "LOW",
+                 "is_honeypot": False,
+                 "is_mintable": False,
+                 "is_freezable": False,
+             }), \
              patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display), \
              patch("plugins_func.functions.ave_tools.os.environ.get", side_effect=_env_get):
             resp = ave_tools.ave_limit_order(
@@ -781,6 +860,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
 
         self.assertEqual(resp.result, "limit_pending:limit123")
+        self.assertEqual(data_get_requests, [("/contracts/token-limit-solana", None)])
         trade_type, trade_params, passed_conn = mock_create.call_args[0]
         self.assertEqual(trade_type, "limit_buy")
         self.assertIs(passed_conn, conn)
@@ -1027,7 +1107,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             },
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -1441,7 +1521,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             "txHash": "0123456789abcdef",
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -1466,7 +1546,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             "txHash": "abc12345def67890",
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -1490,7 +1570,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             "orderIds": ["ord-1", "ord-2"],
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -1514,7 +1594,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             "errorMsg": "already filled",
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -1598,7 +1678,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             asset_token_address="bonk-sol",
         )
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "failed",
@@ -1634,7 +1714,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             "asset_token_address": "bonk-sol",
         }]
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "cancelled",
@@ -1676,7 +1756,7 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             }
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await ave_wss.AveWssManager(conn)._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")

@@ -5,10 +5,13 @@
  * Layout (320×240 landscape):
  *   y=  0..22   top bar: symbol  price  change%
  *   y= 22..145  lv_chart K-line (320×123px)
- *   y=145..168  risk badges: [SAFE/DANGER] [MINT:NO] [FREEZE:NO]
- *   y=168..190  holders + liquidity
- *   y=190..215  divider
- *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] BUY  [Y] PORTFOLIO
+ *   y=145..214  4-line compact footer stats:
+ *               Risk|Mint|Freeze
+ *               Vol24h|Liq|Mcap
+ *               Holders|Top100
+ *               CA short + page marker
+ *   y=214..215  divider
+ *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] BUY
  */
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
@@ -23,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #define MAX_CHART_PTS 100
 
@@ -34,14 +38,53 @@ static lv_obj_t *s_chart       = NULL;
 static lv_chart_series_t *s_ser = NULL;
 static lv_obj_t *s_lbl_cmin    = NULL;
 static lv_obj_t *s_lbl_cmax    = NULL;
-static lv_obj_t *s_lbl_risk    = NULL;
-static lv_obj_t *s_lbl_mint    = NULL;
-static lv_obj_t *s_lbl_freeze  = NULL;
-static lv_obj_t *s_lbl_holders  = NULL;
-static lv_obj_t *s_lbl_liq      = NULL;
+static lv_obj_t *s_lbl_stats_row1 = NULL;
+static lv_obj_t *s_lbl_stats_row2 = NULL;
+static lv_obj_t *s_lbl_stats_row3 = NULL;
+static lv_obj_t *s_lbl_stats_row4 = NULL;
 static lv_obj_t *s_lbl_t_start  = NULL;
 static lv_obj_t *s_lbl_t_mid    = NULL;
 static lv_obj_t *s_lbl_t_end    = NULL;
+
+#define FOOTER_X 4
+#define FOOTER_W 312
+#define FOOTER_ROW4_Y 189
+#define FOOTER_PAGE_W 72
+#define FOOTER_ROW4_GAP 6
+
+static int _copy_contract_candidate(const char *src, char *out, size_t out_n)
+{
+    size_t len = 0;
+
+    if (!src || !src[0] || !out || out_n == 0) return 0;
+    if (strstr(src, "...")) return 0;
+    len = strlen(src);
+    if (len < 13) return 0;
+    snprintf(out, out_n, "%s", src);
+    return 1;
+}
+
+static void _format_contract_short(
+    const char *contract,
+    const char *mint,
+    const char *token_id,
+    char *out,
+    size_t out_n
+)
+{
+    char raw[160] = {0};
+    size_t len = 0;
+    if (!out || out_n == 0) return;
+    out[0] = '\0';
+    if (_copy_contract_candidate(contract, raw, sizeof(raw)) ||
+        _copy_contract_candidate(mint, raw, sizeof(raw)) ||
+        _copy_contract_candidate(token_id, raw, sizeof(raw))) {
+        len = strlen(raw);
+        snprintf(out, out_n, "%.*s...%s", 6, raw, raw + len - 6);
+        return;
+    }
+    snprintf(out, out_n, "N/A");
+}
 
 /* Cached for key handler */
 static char s_token_id[120] = {0};
@@ -66,11 +109,14 @@ static int s_loading_nav_delta = 0;
 #define SPOTLIGHT_LOADING_REASON_FEED_NAV 1
 #define SPOTLIGHT_LOADING_REASON_INTERVAL 2
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 /* Back fallback timer — cancelled when server responds, fires locally if not */
 static lv_timer_t *s_back_timer = NULL;
+#endif
 static int s_feed_cursor = -1;
 static int s_feed_total = 0;
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 void screen_spotlight_cancel_back_timer(void)
 {
     if (s_back_timer) {
@@ -78,6 +124,9 @@ void screen_spotlight_cancel_back_timer(void)
         s_back_timer = NULL;
     }
 }
+#else
+void screen_spotlight_cancel_back_timer(void) {}
+#endif
 
 static void _clear_loading_guard(void)
 {
@@ -96,6 +145,7 @@ static void _clear_loading_guard(void)
     }
 }
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 static void _loading_timeout_cb(lv_timer_t *t)
 {
     (void)t;
@@ -111,7 +161,9 @@ static void _loading_timeout_cb(lv_timer_t *t)
     s_loading_nav_delta = 0;
     printf("[SPOTLIGHT] loading timeout released\n");
 }
+#endif
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 static void _refresh_loading_guard(void)
 {
     if (!s_loading) return;
@@ -143,6 +195,7 @@ static void _arm_loading_guard(
     s_loading_timer = lv_timer_create(_loading_timeout_cb, SPOTLIGHT_LOADING_TIMEOUT_MS, NULL);
     if (s_loading_timer) lv_timer_set_repeat_count(s_loading_timer, 1);
 }
+#endif
 
 static int _incoming_spotlight_releases_loading_guard(
     int is_live,
@@ -200,25 +253,34 @@ static lv_obj_t *s_lbl_pos = NULL;
 #define COLOR_BAR     lv_color_hex(0x141414)
 #define COLOR_CHART   lv_color_hex(0x0D1B2A)
 #define COLOR_DIVIDER lv_color_hex(0x2A2A2A)
-#define COLOR_BADGE   lv_color_hex(0x1E1E1E)
 
 /* ─── JSON helpers ───────────────────────────────────────────────────────── */
 static int _str(const char *o, const char *k, char *out, int n) {
     char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
     const char *p = strstr(o, nd); if (!p) return 0;
     p += strlen(nd);
-    while (*p == ' ' || *p == ':') p++;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ':') p++;
     if (*p != '"') return 0;
     return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _bool(const char *o, const char *k, int def) {
+    char qbuf[16];
     char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
     const char *p = strstr(o, nd); if (!p) return def;
     p += strlen(nd);
-    while (*p == ' ' || *p == ':') p++;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ':') p++;
+    if (*p == '"') {
+        if (!ave_json_decode_quoted(p, qbuf, sizeof(qbuf), NULL)) return def;
+        if (!strcmp(qbuf, "1") || !strcmp(qbuf, "true") || !strcmp(qbuf, "TRUE")) return 1;
+        if (!strcmp(qbuf, "0") || !strcmp(qbuf, "false") || !strcmp(qbuf, "FALSE")) return 0;
+        return def;
+    }
     if (*p == 't') return 1;
     if (*p == 'f') return 0;
+    if (*p == '-' || isdigit((unsigned char)*p)) {
+        return (strtol(p, NULL, 10) != 0) ? 1 : 0;
+    }
     return def;
 }
 
@@ -226,9 +288,37 @@ static int _int(const char *o, const char *k, int def) {
     char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
     const char *p = strstr(o, nd); if (!p) return def;
     p += strlen(nd);
-    while (*p == ' ' || *p == ':') p++;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ':') p++;
     if (*p == '-' || (*p >= '0' && *p <= '9')) return atoi(p);
     return def;
+}
+
+static int _field_text(const char *o, const char *k, char *out, int n)
+{
+    char nd[64];
+    const char *p;
+    const char *start;
+    size_t len = 0;
+
+    if (_str(o, k, out, n)) return 1;
+    if (!out || n <= 0) return 0;
+
+    snprintf(nd, sizeof(nd), "\"%s\"", k);
+    p = strstr(o, nd);
+    if (!p) return 0;
+    p += strlen(nd);
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ':') p++;
+    if (!*p || *p == '{' || *p == '[' || *p == '"') return 0;
+
+    start = p;
+    while (*p && *p != ',' && *p != '}' && *p != ']') p++;
+    while (p > start && (p[-1] == ' ' || p[-1] == '\t' || p[-1] == '\n' || p[-1] == '\r')) p--;
+    len = (size_t)(p - start);
+    if (len == 0 || len >= (size_t)n) return 0;
+
+    memcpy(out, start, len);
+    out[len] = '\0';
+    return 1;
 }
 
 static int _parse_chart(const char *json, int16_t *out, int max) {
@@ -275,6 +365,7 @@ static void _identity_text(char *out, size_t out_n, const char *symbol, const ch
     snprintf(out, out_n, "%s", symbol && symbol[0] ? symbol : "???");
 }
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 /* ─── Back fallback ──────────────────────────────────────────────────────── */
 static void _back_timeout_cb(lv_timer_t *t)
 {
@@ -282,6 +373,7 @@ static void _back_timeout_cb(lv_timer_t *t)
     s_back_timer = NULL;
     ave_sm_go_back_fallback();  /* prefer context-aware fallback */
 }
+#endif
 
 /* ─── Build screen ───────────────────────────────────────────────────────── */
 static void _build(void) {
@@ -311,14 +403,6 @@ static void _build(void) {
     lv_obj_align(s_lbl_change, LV_ALIGN_RIGHT_MID, -6, 0);
     lv_obj_set_style_text_font(s_lbl_change, &lv_font_montserrat_12, 0);
 
-    s_lbl_tf = lv_label_create(top);
-    lv_obj_align(s_lbl_tf, LV_ALIGN_RIGHT_MID, -46, 0);
-    lv_obj_set_width(s_lbl_tf, 32);
-    lv_label_set_long_mode(s_lbl_tf, LV_LABEL_LONG_CLIP);
-    lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
-    lv_obj_set_style_text_color(s_lbl_tf, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_tf, &lv_font_montserrat_12, 0);
-
     /* ── K-line chart (276×110, x=44 leaving room for Y labels) ────────── */
     s_chart = lv_chart_create(s_screen);
     lv_obj_set_size(s_chart, 276, 110);
@@ -332,6 +416,15 @@ static void _build(void) {
 
     s_ser = lv_chart_add_series(s_chart, COLOR_GREEN, LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_point_count(s_chart, MAX_CHART_PTS);
+
+    /* Timeframe label stays on chart so top bar remains sym/price/change focused. */
+    s_lbl_tf = lv_label_create(s_chart);
+    lv_obj_align(s_lbl_tf, LV_ALIGN_TOP_RIGHT, -4, 2);
+    lv_obj_set_width(s_lbl_tf, 32);
+    lv_label_set_long_mode(s_lbl_tf, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
+    lv_obj_set_style_text_color(s_lbl_tf, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_tf, &lv_font_montserrat_12, 0);
 
     /* Hide dots (LVGL 9: width + height) */
     lv_obj_set_style_size(s_chart, 0, 0, LV_PART_INDICATOR);
@@ -370,53 +463,33 @@ static void _build(void) {
     lv_obj_set_style_text_color(s_lbl_t_end, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_t_end, &lv_font_montserrat_12, 0);
 
-    /* ── Risk badges row ─────────────────────────────────────────────── */
-    /* Risk level badge */
-    lv_obj_t *rb = lv_obj_create(s_screen);
-    lv_obj_set_size(rb, 90, 18);
-    lv_obj_set_pos(rb, 4, 149);
-    lv_obj_set_style_bg_color(rb, COLOR_BADGE, 0);
-    lv_obj_set_style_border_width(rb, 0, 0);
-    lv_obj_set_style_radius(rb, 4, 0);
-    lv_obj_set_style_pad_all(rb, 0, 0);
-    s_lbl_risk = lv_label_create(rb);
-    lv_obj_align(s_lbl_risk, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_font(s_lbl_risk, &lv_font_montserrat_12, 0);
+    /* ── Four-line compact footer stats ──────────────────────────────── */
+    s_lbl_stats_row1 = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_stats_row1, 4, 148);
+    lv_obj_set_width(s_lbl_stats_row1, 312);
+    lv_label_set_long_mode(s_lbl_stats_row1, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(s_lbl_stats_row1, &lv_font_montserrat_12, 0);
 
-    /* Mintable badge */
-    lv_obj_t *mb = lv_obj_create(s_screen);
-    lv_obj_set_size(mb, 90, 18);
-    lv_obj_set_pos(mb, 100, 149);
-    lv_obj_set_style_bg_color(mb, COLOR_BADGE, 0);
-    lv_obj_set_style_border_width(mb, 0, 0);
-    lv_obj_set_style_radius(mb, 4, 0);
-    lv_obj_set_style_pad_all(mb, 0, 0);
-    s_lbl_mint = lv_label_create(mb);
-    lv_obj_align(s_lbl_mint, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_font(s_lbl_mint, &lv_font_montserrat_12, 0);
+    s_lbl_stats_row2 = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_stats_row2, 4, 161);
+    lv_obj_set_width(s_lbl_stats_row2, 312);
+    lv_label_set_long_mode(s_lbl_stats_row2, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_stats_row2, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_stats_row2, &lv_font_montserrat_12, 0);
 
-    /* Freezable badge */
-    lv_obj_t *fb = lv_obj_create(s_screen);
-    lv_obj_set_size(fb, 90, 18);
-    lv_obj_set_pos(fb, 196, 149);
-    lv_obj_set_style_bg_color(fb, COLOR_BADGE, 0);
-    lv_obj_set_style_border_width(fb, 0, 0);
-    lv_obj_set_style_radius(fb, 4, 0);
-    lv_obj_set_style_pad_all(fb, 0, 0);
-    s_lbl_freeze = lv_label_create(fb);
-    lv_obj_align(s_lbl_freeze, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_text_font(s_lbl_freeze, &lv_font_montserrat_12, 0);
+    s_lbl_stats_row3 = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_stats_row3, 4, 175);
+    lv_obj_set_width(s_lbl_stats_row3, 312);
+    lv_label_set_long_mode(s_lbl_stats_row3, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_stats_row3, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_stats_row3, &lv_font_montserrat_12, 0);
 
-    /* ── Holders / Liquidity ─────────────────────────────────────────── */
-    s_lbl_holders = lv_label_create(s_screen);
-    lv_obj_set_pos(s_lbl_holders, 4, 172);
-    lv_obj_set_style_text_color(s_lbl_holders, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_holders, &lv_font_montserrat_12, 0);
-
-    s_lbl_liq = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_liq, LV_ALIGN_TOP_RIGHT, -4, 172);
-    lv_obj_set_style_text_color(s_lbl_liq, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_liq, &lv_font_montserrat_12, 0);
+    s_lbl_stats_row4 = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_stats_row4, FOOTER_X, FOOTER_ROW4_Y);
+    lv_obj_set_width(s_lbl_stats_row4, FOOTER_W);
+    lv_label_set_long_mode(s_lbl_stats_row4, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_stats_row4, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_stats_row4, &lv_font_montserrat_12, 0);
 
     /* ── Divider ─────────────────────────────────────────────────────── */
     lv_obj_t *div = lv_obj_create(s_screen);
@@ -425,10 +498,12 @@ static void _build(void) {
     lv_obj_set_style_bg_color(div, COLOR_DIVIDER, 0);
     lv_obj_set_style_border_width(div, 0, 0);
 
-    /* Position indicator: "< N/M >" — updated in screen_spotlight_show().
-     * Keep it above the bottom-bar affordances so the action keys remain unambiguous. */
+    /* Position indicator lives on row-4 and right-aligns against the footer edge. */
     s_lbl_pos = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_pos, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_set_pos(s_lbl_pos, FOOTER_X + FOOTER_W - FOOTER_PAGE_W, FOOTER_ROW4_Y);
+    lv_obj_set_width(s_lbl_pos, FOOTER_PAGE_W);
+    lv_label_set_long_mode(s_lbl_pos, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_lbl_pos, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(s_lbl_pos, "");
     lv_obj_set_style_text_color(s_lbl_pos, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_pos, &lv_font_montserrat_12, 0);
@@ -442,10 +517,9 @@ static void _build(void) {
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Uneven slots leave enough room for the long "PORTFOLIO" label while keeping
-     * trade actions visually distinct and non-overlapping on 320x240. */
+    /* Three visible action affordances only; no extra spotlight footer action state. */
     lv_obj_t *slot_b = lv_obj_create(bot);
-    lv_obj_set_size(slot_b, 64, 240 - 215);
+    lv_obj_set_size(slot_b, 106, 240 - 215);
     lv_obj_set_pos(slot_b, 0, 0);
     lv_obj_set_style_bg_opa(slot_b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_b, 0, 0);
@@ -453,28 +527,20 @@ static void _build(void) {
     lv_obj_clear_flag(slot_b, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_x = lv_obj_create(bot);
-    lv_obj_set_size(slot_x, 64, 240 - 215);
-    lv_obj_set_pos(slot_x, 64, 0);
+    lv_obj_set_size(slot_x, 106, 240 - 215);
+    lv_obj_set_pos(slot_x, 106, 0);
     lv_obj_set_style_bg_opa(slot_x, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_x, 0, 0);
     lv_obj_set_style_pad_all(slot_x, 0, 0);
     lv_obj_clear_flag(slot_x, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_a = lv_obj_create(bot);
-    lv_obj_set_size(slot_a, 64, 240 - 215);
-    lv_obj_set_pos(slot_a, 128, 0);
+    lv_obj_set_size(slot_a, 108, 240 - 215);
+    lv_obj_set_pos(slot_a, 212, 0);
     lv_obj_set_style_bg_opa(slot_a, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_a, 0, 0);
     lv_obj_set_style_pad_all(slot_a, 0, 0);
     lv_obj_clear_flag(slot_a, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *slot_y = lv_obj_create(bot);
-    lv_obj_set_size(slot_y, 128, 240 - 215);
-    lv_obj_set_pos(slot_y, 192, 0);
-    lv_obj_set_style_bg_opa(slot_y, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(slot_y, 0, 0);
-    lv_obj_set_style_pad_all(slot_y, 0, 0);
-    lv_obj_clear_flag(slot_y, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lbl_back = lv_label_create(slot_b);
     lv_obj_align(lbl_back, LV_ALIGN_CENTER, 0, 0);
@@ -493,12 +559,6 @@ static void _build(void) {
     lv_label_set_text(lbl_buy, "[A] BUY");
     lv_obj_set_style_text_color(lbl_buy, COLOR_GREEN, 0);
     lv_obj_set_style_text_font(lbl_buy, &lv_font_montserrat_12, 0);
-
-    lv_obj_t *lbl_portfolio = lv_label_create(slot_y);
-    lv_obj_align(lbl_portfolio, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(lbl_portfolio, "[Y] PORTFOLIO");
-    lv_obj_set_style_text_color(lbl_portfolio, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(lbl_portfolio, &lv_font_montserrat_12, 0);
 }
 
 /* ─── Public API ──────────────────────────────────────────────────────────── */
@@ -546,6 +606,8 @@ void screen_spotlight_show(const char *json_data)
     /* Parse basic fields */
     char sym[24]={0}, price[24]={0}, change[20]={0}, risk_lvl[12]={0};
     char holders[20]={0}, liq[20]={0}, cmin[16]={0}, cmax[16]={0};
+    char vol24h[20]={0}, mcap[20]={0}, top100[20]={0}, ca_compact[32]={0};
+    char contract_addr[160]={0}, mint_addr[160]={0};
     char identity_buf[64]={0};
     s_token_id[0] = '\0';
     s_chain[0] = '\0';
@@ -556,12 +618,21 @@ void screen_spotlight_show(const char *json_data)
     _str(json_data, "price",     price,   sizeof(price));
     _str(json_data, "change_24h",change,  sizeof(change));
     _str(json_data, "risk_level",risk_lvl,sizeof(risk_lvl));
-    _str(json_data, "holders",   holders, sizeof(holders));
-    _str(json_data, "liquidity", liq,     sizeof(liq));
+    _field_text(json_data, "holders",   holders, sizeof(holders));
+    _field_text(json_data, "liquidity", liq,     sizeof(liq));
+    _field_text(json_data, "volume_24h", vol24h, sizeof(vol24h));
+    _field_text(json_data, "market_cap", mcap,   sizeof(mcap));
+    _field_text(json_data, "top100_concentration", top100, sizeof(top100));
+    _field_text(json_data, "contract", contract_addr, sizeof(contract_addr));
+    if (!contract_addr[0]) {
+        _field_text(json_data, "contract_address", contract_addr, sizeof(contract_addr));
+    }
+    _field_text(json_data, "mint", mint_addr, sizeof(mint_addr));
     _str(json_data, "token_id",  s_token_id, sizeof(s_token_id));
     _str(json_data, "chain",     s_chain,    sizeof(s_chain));
     _str(json_data, "contract_tail", s_contract_tail, sizeof(s_contract_tail));
     _str(json_data, "source_tag", s_source_tag, sizeof(s_source_tag));
+    _format_contract_short(contract_addr, mint_addr, s_token_id, ca_compact, sizeof(ca_compact));
     snprintf(s_symbol, sizeof(s_symbol), "%s", sym);
     /* Compact Y-axis labels; fall back to full price strings */
     if (!_str(json_data, "chart_min_y", cmin, sizeof(cmin)))
@@ -578,9 +649,13 @@ void screen_spotlight_show(const char *json_data)
     _identity_text(identity_buf, sizeof(identity_buf), sym, s_chain, s_contract_tail);
     lv_label_set_text(s_lbl_sym,   identity_buf);
     {
+#if defined(AVE_SPOTLIGHT_SHOW_ONLY)
+        lv_label_set_text(s_lbl_price, price[0] ? price : "$0");
+#else
         char price_compact[32] = {0};
         ave_fmt_price_text(price_compact, sizeof(price_compact), price[0] ? price : "$0");
         lv_label_set_text(s_lbl_price, price_compact);
+#endif
     }
     lv_label_set_text(s_lbl_change,change[0] ? change : "N/A");
     lv_obj_set_style_text_color(s_lbl_change,
@@ -616,43 +691,66 @@ void screen_spotlight_show(const char *json_data)
     lv_label_set_text(s_lbl_t_mid,   ct_mid[0] ? ct_mid : "");
     lv_label_set_text(s_lbl_t_end, ct_end[0] ? ct_end : "now");
 
-    /* Risk badges */
+    /* Footer line 1: Risk | Mint | Freeze */
+    const char *risk_text = NULL;
+    lv_color_t risk_color = COLOR_GRAY;
     if (is_honeypot) {
-        lv_label_set_text(s_lbl_risk, "HONEYPOT");
-        lv_obj_set_style_text_color(s_lbl_risk, COLOR_RED, 0);
+        risk_text = "HONEYPOT";
+        risk_color = COLOR_RED;
     } else {
-        const char *rl = risk_lvl[0] ? risk_lvl : "SAFE";
-        lv_label_set_text(s_lbl_risk, rl);
-        lv_color_t c = (strcmp(rl,"LOW")==0||strcmp(rl,"SAFE")==0) ?
-                        COLOR_GREEN : COLOR_ORANGE;
-        lv_obj_set_style_text_color(s_lbl_risk, c, 0);
+        risk_text = risk_lvl[0] ? risk_lvl : "SAFE";
+        if ((strcmp(risk_text, "LOW") == 0) || (strcmp(risk_text, "SAFE") == 0)) {
+            risk_color = COLOR_GREEN;
+        } else if (strcmp(risk_text, "UNKNOWN") == 0) {
+            risk_color = COLOR_GRAY;
+        } else {
+            risk_color = COLOR_ORANGE;
+        }
     }
+    lv_label_set_text_fmt(
+        s_lbl_stats_row1,
+        "Risk:%s | Mint:%s | Freeze:%s",
+        risk_text,
+        is_mintable ? "YES" : "NO",
+        is_freezable ? "YES" : "NO"
+    );
+    lv_obj_set_style_text_color(s_lbl_stats_row1, risk_color, 0);
 
-    lv_label_set_text(s_lbl_mint,   is_mintable  ? "MINT:YES" : "MINT:NO");
-    lv_obj_set_style_text_color(s_lbl_mint,
-        is_mintable ? COLOR_ORANGE : COLOR_GREEN, 0);
-
-    lv_label_set_text(s_lbl_freeze, is_freezable ? "FREEZE:YES" : "FREEZE:NO");
-    lv_obj_set_style_text_color(s_lbl_freeze,
-        is_freezable ? COLOR_ORANGE : COLOR_GREEN, 0);
-
-    /* Holders / Liquidity */
-    char hbuf[32], lbuf[32];
-    snprintf(hbuf, sizeof(hbuf), "Holders: %s", holders[0] ? holders : "--");
-    snprintf(lbuf, sizeof(lbuf), "Liq: %s",     liq[0]     ? liq     : "--");
-    lv_label_set_text(s_lbl_holders, hbuf);
-    lv_label_set_text(s_lbl_liq,     lbuf);
+    /* Footer line 2-4: Vol/Liq/Mcap, Holders/Top100, and compact CA + page marker. */
+    lv_label_set_text_fmt(
+        s_lbl_stats_row2,
+        "Vol24h:%s | Liq:%s | Mcap:%s",
+        vol24h[0] ? vol24h : "N/A",
+        liq[0] ? liq : "N/A",
+        mcap[0] ? mcap : "N/A"
+    );
+    lv_label_set_text_fmt(
+        s_lbl_stats_row3,
+        "Holders:%s | Top100:%s",
+        holders[0] ? holders : "N/A",
+        top100[0] ? top100 : "N/A"
+    );
+    lv_label_set_text_fmt(
+        s_lbl_stats_row4,
+        "CA:%s",
+        ca_compact
+    );
 
     /* Feed position indicator (present only when navigating feed list) */
     s_feed_cursor = cursor;
     s_feed_total = total;
     if (cursor >= 0 && total > 1) {
-        lv_label_set_text_fmt(s_lbl_pos, "< %d/%d >", cursor + 1, total);
+        lv_obj_set_width(s_lbl_stats_row4, FOOTER_W - FOOTER_PAGE_W - FOOTER_ROW4_GAP);
+        lv_obj_set_pos(s_lbl_pos, FOOTER_X + FOOTER_W - FOOTER_PAGE_W, FOOTER_ROW4_Y);
+        lv_obj_set_width(s_lbl_pos, FOOTER_PAGE_W);
+        lv_label_set_text_fmt(s_lbl_pos, "<%d/%d>", cursor + 1, total);
     } else {
+        lv_obj_set_width(s_lbl_stats_row4, FOOTER_W);
         lv_label_set_text(s_lbl_pos, "");
     }
 }
 
+#if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
 void screen_spotlight_key(int key)
 {
     if (key == AVE_KEY_B) {
@@ -758,3 +856,16 @@ int screen_spotlight_get_selected_context_json(char *out, size_t out_n)
     );
     return (n > 0 && (size_t)n < out_n) ? 1 : 0;
 }
+#else
+void screen_spotlight_key(int key)
+{
+    (void)key;
+}
+
+int screen_spotlight_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+#endif

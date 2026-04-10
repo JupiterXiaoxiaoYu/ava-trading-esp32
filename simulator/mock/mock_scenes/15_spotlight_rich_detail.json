@@ -1,0 +1,33 @@
+{
+  "type": "display",
+  "screen": "spotlight",
+  "ts": 1775457999,
+  "data": {
+    "token_id": "spot-rich-token-sol",
+    "contract": "0x2299f25A95A9539f25A95A9539f25A95A953C599",
+    "chain": "eth",
+    "cursor": 0,
+    "total": 20,
+    "symbol": "BONK",
+    "interval": "60",
+    "price": "$1.2300",
+    "change_24h": "+4.56%",
+    "change_positive": true,
+    "risk_level": "LOW",
+    "is_honeypot": false,
+    "is_mintable": false,
+    "is_freezable": false,
+    "holders": "1,234",
+    "liquidity": "$98.8K",
+    "volume_24h": "$7.7M",
+    "market_cap": "$123.5M",
+    "top100_concentration": "27.3%",
+    "contract_short": "0x22...C599",
+    "chart": [120, 240, 360, 520, 680, 740, 810, 900],
+    "chart_min_y": "$1.00",
+    "chart_max_y": "$2.00",
+    "chart_t_start": "09:00",
+    "chart_t_mid": "12:00",
+    "chart_t_end": "now"
+  }
+}
