@@ -3,14 +3,11 @@
  * @brief FEED screen - multi-chain token list view with FEED-local Explore/Search-guide overlays.
  *
  * Layout (320x240 landscape):
- *   y=  0..21   top bar (22px): [source label (left)] [mode label (right)] [N/M counter (far right)]
+ *   y=  0..21   top bar (22px): [source label (left)] [context hint (mid)] [N/M counter (far right)]
  *              - ORDERS mode tints the top bar orange.
- *   y= 22..213  list (8 rows x 24px): [Chain 38px] [Symbol 74px] [Price 112px] [Change 82px]
+ *   y= 22..213  list (8 rows x 24px): [Chain 32px] [Symbol 122px] [Price 84px] [Change 60px]
  *   y=214       divider
- *   y=215..239  bottom bar (25px) segmented into fixed slots with vertical dividers:
- *              - left (x=0..79):   navigation hint (e.g. "^ v MOVE")
- *              - center (x=80..199): source controls (e.g. "< REFRESH  X SOURCE" or "< X SOURCE OFF")
- *              - right (x=200..319): action hint (e.g. "> DETAIL  Y PORTFOLIO", "> OFF  Y PORTFOLIO")
+ *   y=215..239  bottom bar (25px): [navigation hint (left)] [action hint (right)]
  *
  * Navigation:
  *   Standard FEED home:
@@ -86,20 +83,11 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 #define BOTTOM_Y     215
 #define BOTTOM_BAR_H (240 - BOTTOM_Y)
 
-/* Bottom bar segmented slots (320x240):
- * Prevent hint overlap by reserving explicit widths for left/center/right regions. */
-#define BOT_SLOT_LEFT_W   80
-#define BOT_SLOT_CENTER_W 120
-#define BOT_SLOT_RIGHT_W  (320 - BOT_SLOT_LEFT_W - BOT_SLOT_CENTER_W) /* 120 */
-#define BOT_SLOT_PAD_X    6
-#define BOT_DIV_X1        BOT_SLOT_LEFT_W
-#define BOT_DIV_X2        (BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W)
-
 /* Column x positions (within the row container, i.e. relative to x=0) */
 #define COL_CHAIN_X    4
-#define COL_SYM_X     44
-#define COL_PRICE_X   120
-#define COL_CHG_X     234
+#define COL_SYM_X     36
+#define COL_PRICE_X   164
+#define COL_CHG_X     252
 
 /* ─── Colors ──────────────────────────────────────────────────────────────── */
 #define COLOR_GREEN   lv_color_hex(0x00C853)
@@ -127,7 +115,6 @@ static lv_obj_t *s_lbl_source = NULL;
 static lv_obj_t *s_lbl_src_hint = NULL;
 static lv_obj_t *s_lbl_nav_hint = NULL;
 static lv_obj_t *s_lbl_action_hint = NULL;
-static lv_obj_t *s_lbl_mode = NULL;
 static int s_is_orders_mode = 0;
 static int s_is_search_mode = 0;
 static char s_feed_source_label[24] = "TRENDING";
@@ -170,10 +157,8 @@ typedef struct {
 
 typedef struct {
     feed_surface_t surface;
-    const char *mode_label;
-    int mode_dim;
     const char *nav_hint;
-    const char *src_hint;
+    const char *top_hint;
     const char *action_hint;
     int is_overlay_local;
 } feed_surface_model_t;
@@ -203,10 +188,10 @@ static const feed_source_entry_t SOURCE_MENU[] = {
 };
 
 static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
-    {FEED_SURFACE_STANDARD,             "FEED",    1, "^ v MOVE", "< REFRESH  X SOURCE", "> DETAIL  Y PORTFOLIO", 0},
-    {FEED_SURFACE_EXPLORE_PANEL,        "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
-    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "EXPLORE", 0, "FN 说币名", "< CLOSE",              "> OFF  Y PORTFOLIO",    1},
-    {FEED_SURFACE_EXPLORE_SOURCES,      "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
+    {FEED_SURFACE_STANDARD,             "^ v MOVE", " | <- REFRESH X CHANGE", "> DETAIL  Y PORTFOLIO", 0},
+    {FEED_SURFACE_EXPLORE_PANEL,        "^ v MOVE", " | B CLOSE",             "> OPEN  Y PORTFOLIO",   1},
+    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "FN 说币名", " | B CLOSE",            "> OFF  Y PORTFOLIO",    1},
+    {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",             "> OPEN  Y PORTFOLIO",   1},
 };
 
 typedef struct {
@@ -315,10 +300,8 @@ static const feed_surface_model_t *_current_surface_model(void)
     if (s_is_orders_mode) {
         static const feed_surface_model_t orders_model = {
             FEED_SURFACE_STANDARD,
-            "ORDERS",
-            0,
             "^ v MOVE",
-            "Orders: view only",
+            " | VIEW ONLY",
             "B BACK  Y PORT",
             0,
         };
@@ -327,10 +310,8 @@ static const feed_surface_model_t *_current_surface_model(void)
     if (s_is_search_mode) {
         static const feed_surface_model_t search_model = {
             FEED_SURFACE_STANDARD,
-            "SEARCH",
-            0,
             "^ v MOVE",
-            "< X SOURCE OFF",
+            " | B BACK TO FEED",
             "> DETAIL  Y PORTFOLIO",
             0,
         };
@@ -339,10 +320,8 @@ static const feed_surface_model_t *_current_surface_model(void)
     if (s_has_special_source_label) {
         static const feed_surface_model_t special_model = {
             FEED_SURFACE_STANDARD,
-            "SPECIAL",
-            0,
             "^ v MOVE",
-            "< X SOURCE OFF",
+            " | B BACK TO FEED",
             "> DETAIL  Y PORTFOLIO",
             0,
         };
@@ -351,20 +330,12 @@ static const feed_surface_model_t *_current_surface_model(void)
     return _surface_model_for(s_feed_surface);
 }
 
-static void _update_mode_identity(const feed_surface_model_t *surface_model)
-{
-    if (!s_lbl_mode) return;
-
-    lv_label_set_text(s_lbl_mode, surface_model->mode_label);
-    lv_obj_set_style_text_color(s_lbl_mode, surface_model->mode_dim ? COLOR_GRAY : COLOR_WHITE, 0);
-}
-
 static void _update_mode_hint(const feed_surface_model_t *surface_model)
 {
     if (!s_lbl_src_hint || !s_lbl_action_hint || !s_lbl_nav_hint) return;
 
     lv_label_set_text(s_lbl_nav_hint, surface_model->nav_hint);
-    lv_label_set_text(s_lbl_src_hint, surface_model->src_hint);
+    lv_label_set_text(s_lbl_src_hint, surface_model->top_hint);
     lv_label_set_text(s_lbl_action_hint, surface_model->action_hint);
 }
 
@@ -389,7 +360,6 @@ static void _render_feed_surface(void)
     s_explore_idx = _clamp_explore_idx(s_explore_idx);
     s_source_menu_idx = _clamp_source_menu_idx(s_source_menu_idx);
 
-    _update_mode_identity(surface_model);
     _update_mode_hint(surface_model);
     _update_rows();
 }
@@ -822,13 +792,13 @@ static void _build_screen(void)
     lv_obj_set_style_text_font(s_lbl_count, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_lbl_count, "");
 
-    s_lbl_mode = lv_label_create(s_top_bar);
-    lv_obj_align(s_lbl_mode, LV_ALIGN_RIGHT_MID, -74, 0);
-    lv_obj_set_width(s_lbl_mode, 64);
-    lv_label_set_long_mode(s_lbl_mode, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(s_lbl_mode, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_mode, &lv_font_montserrat_12, 0);
-    lv_label_set_text(s_lbl_mode, "FEED");
+    s_lbl_src_hint = lv_label_create(s_top_bar);
+    lv_obj_set_pos(s_lbl_src_hint, 76, 6);
+    lv_obj_set_width(s_lbl_src_hint, 164);
+    lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_lbl_src_hint, " | <- REFRESH X CHANGE");
 
     /* ── List rows ───────────────────────────────────────────────────────── */
     for (int r = 0; r < VISIBLE_ROWS; r++) {
@@ -850,7 +820,7 @@ static void _build_screen(void)
         lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chain, 38);
+        lv_obj_set_width(ui->lbl_chain, 32);
 
         /* Symbol */
         ui->lbl_sym = lv_label_create(ui->row);
@@ -858,7 +828,7 @@ static void _build_screen(void)
         lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
         lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_sym, 74);
+        lv_obj_set_width(ui->lbl_sym, 122);
 
         /* Price */
         ui->lbl_price = lv_label_create(ui->row);
@@ -866,7 +836,8 @@ static void _build_screen(void)
         lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_price, 112);
+        lv_obj_set_width(ui->lbl_price, 84);
+        lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Change % */
         ui->lbl_chg = lv_label_create(ui->row);
@@ -874,7 +845,8 @@ static void _build_screen(void)
         lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chg, 82);
+        lv_obj_set_width(ui->lbl_chg, 60);
+        lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
     }
 
     /* ── Divider ─────────────────────────────────────────────────────────── */
@@ -895,77 +867,23 @@ static void _build_screen(void)
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Explicit left/center/right slots prevent overlap on 320x240. */
-    lv_obj_t *bot_left = lv_obj_create(bot);
-    lv_obj_set_size(bot_left, BOT_SLOT_LEFT_W, BOTTOM_BAR_H);
-    lv_obj_set_pos(bot_left, 0, 0);
-    lv_obj_set_style_bg_opa(bot_left, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(bot_left, 0, 0);
-    lv_obj_set_style_pad_all(bot_left, 0, 0);
-    lv_obj_clear_flag(bot_left, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *bot_center = lv_obj_create(bot);
-    lv_obj_set_size(bot_center, BOT_SLOT_CENTER_W, BOTTOM_BAR_H);
-    lv_obj_set_pos(bot_center, BOT_SLOT_LEFT_W, 0);
-    lv_obj_set_style_bg_opa(bot_center, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(bot_center, 0, 0);
-    lv_obj_set_style_pad_all(bot_center, 0, 0);
-    lv_obj_clear_flag(bot_center, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *bot_right = lv_obj_create(bot);
-    lv_obj_set_size(bot_right, BOT_SLOT_RIGHT_W, BOTTOM_BAR_H);
-    lv_obj_set_pos(bot_right, BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W, 0);
-    lv_obj_set_style_bg_opa(bot_right, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(bot_right, 0, 0);
-    lv_obj_set_style_pad_all(bot_right, 0, 0);
-    lv_obj_clear_flag(bot_right, LV_OBJ_FLAG_SCROLLABLE);
-
-    s_lbl_nav_hint = lv_label_create(bot_left);
+    s_lbl_nav_hint = lv_label_create(bot);
     lv_label_set_long_mode(s_lbl_nav_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_lbl_nav_hint, BOT_SLOT_LEFT_W - 2 * BOT_SLOT_PAD_X);
-    lv_obj_align(s_lbl_nav_hint, LV_ALIGN_LEFT_MID, BOT_SLOT_PAD_X, 0);
+    lv_obj_set_width(s_lbl_nav_hint, 88);
+    lv_obj_align(s_lbl_nav_hint, LV_ALIGN_LEFT_MID, 8, 0);
     lv_label_set_text(s_lbl_nav_hint, "^ v MOVE");
     lv_obj_set_style_text_color(s_lbl_nav_hint, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_nav_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_nav_hint, LV_TEXT_ALIGN_LEFT, 0);
 
-    s_lbl_src_hint = lv_label_create(bot_center);
-    lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_lbl_src_hint, BOT_SLOT_CENTER_W - 2 * BOT_SLOT_PAD_X);
-    lv_obj_align(s_lbl_src_hint, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(s_lbl_src_hint, "< REFRESH  X SOURCE");
-    lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_align(s_lbl_src_hint, LV_TEXT_ALIGN_CENTER, 0);
-
-    s_lbl_action_hint = lv_label_create(bot_right);
+    s_lbl_action_hint = lv_label_create(bot);
     lv_label_set_long_mode(s_lbl_action_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_lbl_action_hint, BOT_SLOT_RIGHT_W - 2 * BOT_SLOT_PAD_X);
-    lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -BOT_SLOT_PAD_X, 0);
+    lv_obj_set_width(s_lbl_action_hint, 200);
+    lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_label_set_text(s_lbl_action_hint, "> DETAIL  Y PORTFOLIO");
     lv_obj_set_style_text_color(s_lbl_action_hint, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_action_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_action_hint, LV_TEXT_ALIGN_RIGHT, 0);
-
-    /* Vertical dividers between slots (also used by the screenshot gate).
-     * Create last so they stay visible even if a label ever regresses to overlap. */
-    lv_obj_t *vdiv1 = lv_obj_create(bot);
-    lv_obj_set_size(vdiv1, 1, BOTTOM_BAR_H);
-    lv_obj_set_pos(vdiv1, BOT_DIV_X1, 0);
-    lv_obj_set_style_bg_color(vdiv1, COLOR_DIVIDER, 0);
-    lv_obj_set_style_bg_opa(vdiv1, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(vdiv1, 0, 0);
-    lv_obj_set_style_pad_all(vdiv1, 0, 0);
-    lv_obj_clear_flag(vdiv1, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *vdiv2 = lv_obj_create(bot);
-    lv_obj_set_size(vdiv2, 1, BOTTOM_BAR_H);
-    lv_obj_set_pos(vdiv2, BOT_DIV_X2, 0);
-    lv_obj_set_style_bg_color(vdiv2, COLOR_DIVIDER, 0);
-    lv_obj_set_style_bg_opa(vdiv2, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(vdiv2, 0, 0);
-    lv_obj_set_style_pad_all(vdiv2, 0, 0);
-    lv_obj_clear_flag(vdiv2, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 /* ─── Public screen API ───────────────────────────────────────────────────── */
