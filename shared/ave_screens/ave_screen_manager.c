@@ -6,6 +6,7 @@
  * If cJSON is not available, link against cJSON.c separately.
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -93,14 +94,8 @@ static int _json_str(const char *json, const char *key, char *out, size_t out_n)
     p += strlen(needle);
     /* Skip whitespace and colon */
     while (*p == ' ' || *p == ':' || *p == '\t') p++;
-    if (*p == '"') {
-        p++;
-        size_t i = 0;
-        while (*p && *p != '"' && i < out_n - 1) out[i++] = *p++;
-        out[i] = '\0';
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, out_n, NULL);
 }
 
 /**

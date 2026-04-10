@@ -11,6 +11,7 @@
  *   y=215..240   divider + bottom bar: "< CANCEL"  "CONFIRM >"
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -72,14 +73,8 @@ static int _get_str(const char *json, const char *key, char *out, int n)
     if (!p) return 0;
     p += strlen(needle);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-        out[i] = '\0';
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _get_int(const char *json, const char *key, int def)
@@ -111,10 +106,7 @@ static int _get_optional_int(const char *json, const char *key, int *out)
     }
     if (*p == '"') {
         char val[32] = {0};
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < (int)sizeof(val) - 1) val[i++] = *p++;
-        val[i] = '\0';
+        if (!ave_json_decode_quoted(p, val, sizeof(val), NULL)) return 0;
         *out = atoi(val);
         return 1;
     }

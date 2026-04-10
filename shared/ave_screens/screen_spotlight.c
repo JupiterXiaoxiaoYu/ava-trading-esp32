@@ -11,6 +11,8 @@
  *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] BUY  [Y] PORTFOLIO
  */
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #include "ave_price_fmt.h"
 #if __has_include("lvgl.h")
@@ -129,12 +131,8 @@ static int _str(const char *o, const char *k, char *out, int n) {
     const char *p = strstr(o, nd); if (!p) return 0;
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++; int i = 0;
-        while (*p && *p != '"' && i < n-1) out[i++] = *p++;
-        out[i] = 0; return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _bool(const char *o, const char *k, int def) {
@@ -225,7 +223,7 @@ static void _build(void) {
     s_lbl_sym = lv_label_create(top);
     lv_obj_align(s_lbl_sym, LV_ALIGN_LEFT_MID, 6, 0);
     lv_obj_set_style_text_color(s_lbl_sym, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(s_lbl_sym, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_lbl_sym, ave_font_cjk_14(), 0);
 
     s_lbl_price = lv_label_create(top);
     lv_obj_align(s_lbl_price, LV_ALIGN_CENTER, 0, 0);
@@ -487,7 +485,11 @@ void screen_spotlight_show(const char *json_data)
     /* Top bar */
     _identity_text(identity_buf, sizeof(identity_buf), sym, s_chain, s_contract_tail);
     lv_label_set_text(s_lbl_sym,   identity_buf);
-    lv_label_set_text(s_lbl_price, price[0]  ? price  : "$0");
+    {
+        char price_compact[32] = {0};
+        ave_fmt_price_text(price_compact, sizeof(price_compact), price[0] ? price : "$0");
+        lv_label_set_text(s_lbl_price, price_compact);
+    }
     lv_label_set_text(s_lbl_change,change[0] ? change : "N/A");
     lv_obj_set_style_text_color(s_lbl_change,
         change_pos ? COLOR_GREEN : COLOR_RED, 0);

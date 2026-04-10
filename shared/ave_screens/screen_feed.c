@@ -36,6 +36,8 @@
  *     B        -> send key_action back and exit orders locally (go_to_feed placeholder)
  */
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #include "ave_price_fmt.h"
 #if __has_include("lvgl.h")
@@ -85,8 +87,8 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 
 /* Column x positions (within the row container, i.e. relative to x=0) */
 #define COL_CHAIN_X    4
-#define COL_SYM_X     36
-#define COL_PRICE_X   164
+#define COL_SYM_X     42
+#define COL_PRICE_X   154
 #define COL_CHG_X     252
 
 /* ─── Colors ──────────────────────────────────────────────────────────────── */
@@ -188,10 +190,10 @@ static const feed_source_entry_t SOURCE_MENU[] = {
 };
 
 static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
-    {FEED_SURFACE_STANDARD,             "^ v MOVE", " | <- REFRESH X CHANGE", "> DETAIL  Y PORTFOLIO", 0},
-    {FEED_SURFACE_EXPLORE_PANEL,        "^ v MOVE", " | B CLOSE",             "> OPEN  Y PORTFOLIO",   1},
-    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "FN 说币名", " | B CLOSE",            "> OFF  Y PORTFOLIO",    1},
-    {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",             "> OPEN  Y PORTFOLIO",   1},
+    {FEED_SURFACE_STANDARD,             "^ v MOVE", " | < Refresh | X Change", "> Detail | Y Portfolio", 0},
+    {FEED_SURFACE_EXPLORE_PANEL,        "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
+    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "FN 说币名", " | B CLOSE",              "> OFF | Y PORTFOLIO",    1},
+    {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
 };
 
 typedef struct {
@@ -203,6 +205,12 @@ typedef struct {
 } feed_row_ui_t;
 
 static feed_row_ui_t s_rows[VISIBLE_ROWS];
+
+static int _center_text_y(const lv_font_t *font)
+{
+    int y = (ROW_H - lv_font_get_line_height(font)) / 2;
+    return (y < 0) ? 0 : y;
+}
 
 static int _source_index_from_label(const char *label)
 {
@@ -302,7 +310,7 @@ static const feed_surface_model_t *_current_surface_model(void)
             FEED_SURFACE_STANDARD,
             "^ v MOVE",
             " | VIEW ONLY",
-            "B BACK  Y PORT",
+            "B Back | Y Port",
             0,
         };
         return &orders_model;
@@ -312,7 +320,7 @@ static const feed_surface_model_t *_current_surface_model(void)
             FEED_SURFACE_STANDARD,
             "^ v MOVE",
             " | B BACK TO FEED",
-            "> DETAIL  Y PORTFOLIO",
+            "> Detail | Y Portfolio",
             0,
         };
         return &search_model;
@@ -322,7 +330,7 @@ static const feed_surface_model_t *_current_surface_model(void)
             FEED_SURFACE_STANDARD,
             "^ v MOVE",
             " | B BACK TO FEED",
-            "> DETAIL  Y PORTFOLIO",
+            "> Detail | Y Portfolio",
             0,
         };
         return &special_model;
@@ -459,14 +467,8 @@ static int _get_json_str_field(const char *obj, const char *key, char *out, int 
     if (!p) return 0;
     p += strlen(needle);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-        out[i] = '\0';
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _get_json_int_field(const char *obj, const char *key, int def)
@@ -720,6 +722,7 @@ static void _update_token_rows(void)
 
         const feed_token_t *t = &s_tokens[tok_idx];
         char sym_buf[48];
+        char price_buf[32];
         lv_color_t row_bg;
         if (tok_idx == s_token_idx)
             row_bg = COLOR_SEL;
@@ -732,7 +735,8 @@ static void _update_token_rows(void)
 
         _feed_symbol_text(t, sym_buf, sizeof(sym_buf));
         lv_label_set_text(ui->lbl_sym, sym_buf);
-        lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : "$0");
+        ave_fmt_price_text(price_buf, sizeof(price_buf), t->price[0] ? t->price : "$0");
+        lv_label_set_text(ui->lbl_price, price_buf);
 
         lv_label_set_text(ui->lbl_chg, t->change_24h[0] ? t->change_24h : "N/A");
         if (!t->change_24h[0] ||
@@ -798,7 +802,7 @@ static void _build_screen(void)
     lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
-    lv_label_set_text(s_lbl_src_hint, " | <- REFRESH X CHANGE");
+    lv_label_set_text(s_lbl_src_hint, " | < Refresh | X Change");
 
     /* ── List rows ───────────────────────────────────────────────────────── */
     for (int r = 0; r < VISIBLE_ROWS; r++) {
@@ -816,33 +820,33 @@ static void _build_screen(void)
 
         /* Chain badge */
         ui->lbl_chain = lv_label_create(ui->row);
-        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, 5);
         lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
+        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
         lv_obj_set_width(ui->lbl_chain, 32);
 
         /* Symbol */
         ui->lbl_sym = lv_label_create(ui->row);
-        lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, 4);
-        lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
+        lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
         lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
         lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_sym, 122);
+        lv_obj_set_width(ui->lbl_sym, 110);
 
         /* Price */
         ui->lbl_price = lv_label_create(ui->row);
-        lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, 5);
-        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_14, 0);
+        lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
         lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_price, 84);
+        lv_obj_set_width(ui->lbl_price, 88);
         lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Change % */
         ui->lbl_chg = lv_label_create(ui->row);
-        lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, 5);
         lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
+        lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
         lv_obj_set_width(ui->lbl_chg, 60);
@@ -880,7 +884,7 @@ static void _build_screen(void)
     lv_label_set_long_mode(s_lbl_action_hint, LV_LABEL_LONG_CLIP);
     lv_obj_set_width(s_lbl_action_hint, 200);
     lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -8, 0);
-    lv_label_set_text(s_lbl_action_hint, "> DETAIL  Y PORTFOLIO");
+    lv_label_set_text(s_lbl_action_hint, "> Detail | Y Portfolio");
     lv_obj_set_style_text_color(s_lbl_action_hint, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_action_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_action_hint, LV_TEXT_ALIGN_RIGHT, 0);

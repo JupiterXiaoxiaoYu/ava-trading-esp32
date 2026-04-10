@@ -8,6 +8,7 @@
  *   Body:  font 12, gray,  x=12, y=28
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
 #else
@@ -37,14 +38,8 @@ static int _getf(const char *j, const char *k, char *o, int n)
     if (!p) return 0;
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < n - 1) o[i++] = *p++;
-        o[i] = 0;
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, o, (size_t)n, NULL);
 }
 
 /* ---- Hide callback ----------------------------------------------------- */

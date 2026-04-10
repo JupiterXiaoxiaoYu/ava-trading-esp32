@@ -1,4 +1,5 @@
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -54,7 +55,6 @@ static int _json_str(const char *obj, const char *key, char *out, int n)
 {
     char needle[64];
     const char *p;
-    int i = 0;
 
     snprintf(needle, sizeof(needle), "\"%s\"", key);
     p = strstr(obj, needle);
@@ -62,10 +62,7 @@ static int _json_str(const char *obj, const char *key, char *out, int n)
     p += (int)strlen(needle);
     while (*p == ' ' || *p == ':') p++;
     if (*p != '"') return 0;
-    p++;
-    while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-    out[i] = '\0';
-    return 1;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _json_int(const char *obj, const char *key, int def)

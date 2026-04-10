@@ -11,6 +11,7 @@
  *   y=215~240: bottom bar "press any key"
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -58,14 +59,8 @@ static int _get_str(const char *json, const char *key, char *out, int n)
     if (!p) return 0;
     p += strlen(needle);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-        out[i] = '\0';
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _get_bool(const char *json, const char *key)

@@ -215,6 +215,36 @@ if(NOT MSVC)
     target_link_libraries(verify_p3_5_minimal m pthread)
 endif()
 
+add_executable(verify_price_fmt
+    mock/verify_price_fmt.c
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_price_fmt.c
+)
+target_include_directories(verify_price_fmt PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/mock
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+)
+if(NOT MSVC)
+    target_link_libraries(verify_price_fmt m)
+endif()
+
+add_executable(verify_misans_font
+    mock/verify_misans_font.c
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_font_provider.c
+)
+target_compile_definitions(verify_misans_font PRIVATE LV_CONF_INCLUDE_SIMPLE LV_SIMULATOR=1)
+target_include_directories(verify_misans_font PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/mock
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+)
+target_link_libraries(verify_misans_font
+    lvgl
+)
+if(NOT MSVC)
+    target_link_libraries(verify_misans_font m pthread)
+endif()
+
 # On Windows, GUI applications do not show a console by default,
 # which hides log output. This ensures a console is available for logging.
 if (WIN32)

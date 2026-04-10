@@ -433,8 +433,8 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
                 fprintf(stderr, "FAIL: [%s] expected ORDERS top hint mentioning 'VIEW ONLY'\n", test_case->screen_name);
                 return 0;
             }
-            if (count_labels_containing_text_recursive(scr, "Y PORT") <= 0) {
-                fprintf(stderr, "FAIL: [%s] expected ORDERS affordance mentioning 'Y PORT'\n", test_case->screen_name);
+            if (count_labels_containing_text_recursive(scr, "| Y PORT") <= 0) {
+                fprintf(stderr, "FAIL: [%s] expected ORDERS affordance mentioning '| Y PORT'\n", test_case->screen_name);
                 return 0;
             }
             return 1;
@@ -445,19 +445,18 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
                 fprintf(stderr, "FAIL: [%s] expected top hint mentioning 'BACK TO FEED'\n", test_case->screen_name);
                 return 0;
             }
-            if (count_labels_containing_text_recursive(scr, "Y PORTFOLIO") <= 0) {
-                fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning 'Y PORTFOLIO'\n", test_case->screen_name);
+            if (count_labels_containing_text_recursive(scr, "| Y PORTFOLIO") <= 0) {
+                fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning '| Y PORTFOLIO'\n", test_case->screen_name);
                 return 0;
             }
             return 1;
         }
-        if (count_labels_containing_text_recursive(scr, "REFRESH") <= 0 ||
-            count_labels_containing_text_recursive(scr, "X CHANGE") <= 0) {
-            fprintf(stderr, "FAIL: [%s] expected top hint mentioning 'REFRESH' and 'X CHANGE'\n", test_case->screen_name);
+        if (count_labels_containing_text_recursive(scr, "<- REFRESH | X CHANGE") <= 0) {
+            fprintf(stderr, "FAIL: [%s] expected top hint mentioning '<- REFRESH | X CHANGE'\n", test_case->screen_name);
             return 0;
         }
-        if (count_labels_containing_text_recursive(scr, "Y PORTFOLIO") <= 0) {
-            fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning 'Y PORTFOLIO'\n", test_case->screen_name);
+        if (count_labels_containing_text_recursive(scr, "| Y PORTFOLIO") <= 0) {
+            fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning '| Y PORTFOLIO'\n", test_case->screen_name);
             return 0;
         }
         return 1;

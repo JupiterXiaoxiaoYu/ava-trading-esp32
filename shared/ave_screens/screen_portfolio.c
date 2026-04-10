@@ -10,6 +10,7 @@
  *   y=215..240  bottom bar: [B] BACK  [A] DETAIL  [X] SELL  [Y] PORTFOLIO
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -78,12 +79,8 @@ static int _str(const char *o, const char *k, char *out, int n) {
     const char *p = strstr(o, nd); if (!p) return 0;
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++; int i = 0;
-        while (*p && *p != '"' && i < n-1) out[i++] = *p++;
-        out[i] = 0; return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _str_exact(const char *o, const char *k, char *out, int n) {
@@ -92,15 +89,7 @@ static int _str_exact(const char *o, const char *k, char *out, int n) {
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
     if (*p != '"') return 0;
-    p++;
-    int i = 0;
-    while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-    if (*p != '"') {
-        if (n > 0) out[0] = 0;
-        return 0;
-    }
-    out[i] = 0;
-    return 1;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 /* Like _str(), but only matches keys at the shallow object level of the payload.
@@ -153,13 +142,8 @@ static int _str_shallow_object(const char *obj_start, const char *obj_end,
                     if (q < obj_end && *q == ':') {
                         q++;
                         while (q < obj_end && (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t')) q++;
-                        if (q < obj_end && *q == '"') {
-                            q++;
-                            int i = 0;
-                            while (q < obj_end && *q && *q != '"' && i < n - 1) out[i++] = *q++;
-                            out[i] = 0;
-                            return 1;
-                        }
+                        if (q < obj_end && *q == '"')
+                            return ave_json_decode_quoted(q, out, (size_t)n, NULL);
                         /* Treat null/non-string as absent for this screen. */
                         return 0;
                     }
