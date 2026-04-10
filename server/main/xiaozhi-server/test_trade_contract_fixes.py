@@ -246,6 +246,8 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
         mock_create.assert_not_called()
         self.assertEqual(sent[0][0], "notify")
         self.assertEqual(sent[0][1]["level"], "error")
+        self.assertEqual(sent[0][1]["title"], "Dangerous Token Blocked")
+        self.assertEqual(sent[0][1]["body"], "Honeypot contract detected. Limit order cancelled.")
         self.assertEqual(conn.ave_state.get("screen"), None)
 
 
