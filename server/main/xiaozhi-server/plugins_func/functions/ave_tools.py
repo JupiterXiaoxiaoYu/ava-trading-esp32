@@ -53,6 +53,7 @@ DEFAULT_SL_PCT = 15             # %
 DEFAULT_SLIPPAGE = 100          # basis points (1%)
 _BATCH_PRICE_EVM_SUFFIXES = ("-bsc", "-eth", "-base")
 _CHAIN_SUFFIXES = ("solana", "bsc", "eth", "base")
+_SUPPORTED_FEED_CHAINS = frozenset(_CHAIN_SUFFIXES)
 _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
@@ -914,6 +915,21 @@ def _normalize_chain_name(value, default: str = "") -> str:
     return chain_name or default
 
 
+def _filter_supported_feed_items(items, fallback_chain: str = "") -> list:
+    filtered = []
+    fallback = _normalize_chain_name(fallback_chain)
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        chain_name = _normalize_chain_name(item.get("chain"), fallback)
+        if chain_name not in _SUPPORTED_FEED_CHAINS:
+            continue
+        normalized_item = dict(item)
+        normalized_item["chain"] = chain_name
+        filtered.append(normalized_item)
+    return filtered
+
+
 def _normalize_portfolio_wallets(wallets) -> list:
     normalized = []
     for wallet in wallets or []:
@@ -1587,8 +1603,13 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
     # Normalize topic: empty or "trending" → use /tokens/trending endpoint
     use_ranks = topic and topic != "trending"
 
-    CHAINS     = ["solana", "eth", "bsc", "base"] if chain == "all" else [chain]
-    PER_CHAIN  = max(5, 20 // len(CHAINS))   # ≈ 5 each → 20 total
+    CHAINS = ["solana", "eth", "bsc", "base"] if chain == "all" else [chain]
+    if use_ranks:
+        # `/ranks` behaves like a global board mirrored across chain params.
+        # Pull a deeper slice per request, then dedupe globally to fill 20.
+        PER_CHAIN = 20
+    else:
+        PER_CHAIN = max(5, 20 // len(CHAINS))   # ≈ 5 each → 20 total
 
     def _fetch_chain(ch):
         try:
@@ -1603,13 +1624,9 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
             lst = raw if isinstance(raw, list) else []
             for item in lst:
-                # `/ranks` currently mirrors the requested chain poorly in the
-                # payload, so trust the request context for multi-chain feed rows.
-                if use_ranks:
+                if not item.get("chain"):
                     item["chain"] = ch
-                elif not item.get("chain"):
-                    item["chain"] = ch
-            return ch, lst
+            return ch, _filter_supported_feed_items(lst, ch)
         except Exception as e:
             logger.bind(tag=TAG).warning(f"fetch_chain {ch}: {e}")
             return ch, []
@@ -1628,7 +1645,10 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 if i < len(lst):
                     t   = lst[i]
                     tid = t.get("token", t.get("token_id", t.get("address", "")))
-                    dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
+                    if use_ranks:
+                        dedupe_key = str(tid)
+                    else:
+                        dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
                     if tid and dedupe_key not in seen:
                         seen.add(dedupe_key)
                         raw_all.append(t)
