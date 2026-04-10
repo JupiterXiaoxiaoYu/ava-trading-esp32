@@ -229,6 +229,91 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conn.ave_state["feed_source"], "gainer")
         self.assertEqual(conn.ave_state["feed_platform"], "")
 
+    async def test_ave_get_trending_topic_keeps_cross_chain_rank_rows_even_when_token_ids_repeat(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+        requests = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_data_get(path, params=None):
+            requests.append((path, params))
+            chain = params["chain"]
+            return {
+                "data": {
+                    "ranks": [
+                        {
+                            "token": f"shared-rank-{idx}",
+                            "chain": chain,
+                            "symbol": f"R{idx}",
+                            "current_price_usd": str(idx + 1),
+                            "token_price_change_24h": str(idx + 10),
+                        }
+                        for idx in range(5)
+                    ]
+                }
+            }
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_get_trending(conn, chain="all", topic="gainer")
+            await asyncio.sleep(0)
+
+        self.assertEqual(
+            requests,
+            [
+                ("/ranks", {"topic": "gainer", "chain": "solana", "limit": 5}),
+                ("/ranks", {"topic": "gainer", "chain": "eth", "limit": 5}),
+                ("/ranks", {"topic": "gainer", "chain": "bsc", "limit": 5}),
+                ("/ranks", {"topic": "gainer", "chain": "base", "limit": 5}),
+            ],
+        )
+        self.assertEqual(sent[0][0], "feed")
+        self.assertEqual(len(sent[0][1]["tokens"]), 20)
+        self.assertEqual(
+            [item["chain"] for item in sent[0][1]["tokens"][:8]],
+            ["solana", "eth", "bsc", "base", "solana", "eth", "bsc", "base"],
+        )
+        self.assertEqual(len(conn.ave_state["feed_token_list"]), 20)
+
+    async def test_ave_get_trending_topic_prefers_requested_chain_over_incorrect_rank_payload_chain(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_data_get(path, params=None):
+            chain = params["chain"]
+            return {
+                "data": {
+                    "ranks": [
+                        {
+                            "token": f"shared-rank-{idx}",
+                            "chain": "solana",
+                            "symbol": f"{chain.upper()}-{idx}",
+                            "current_price_usd": str(idx + 1),
+                            "token_price_change_24h": str(idx + 10),
+                        }
+                        for idx in range(5)
+                    ]
+                }
+            }
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_get_trending(conn, chain="all", topic="gainer")
+            await asyncio.sleep(0)
+
+        self.assertEqual(len(sent[0][1]["tokens"]), 20)
+        self.assertEqual(
+            [item["chain"] for item in sent[0][1]["tokens"][:8]],
+            ["solana", "eth", "bsc", "base", "solana", "eth", "bsc", "base"],
+        )
+
     async def test_ave_get_trending_default_topic_uses_tokens_trending_endpoint(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)

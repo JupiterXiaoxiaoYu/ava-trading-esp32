@@ -1352,8 +1352,9 @@ async def initial_feed_push(conn: "ConnectionHandler"):
                 if i < len(lst):
                     t   = lst[i]
                     tid = t.get("token", t.get("token_id", t.get("address", "")))
-                    if tid and tid not in seen:
-                        seen.add(tid)
+                    dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
+                    if tid and dedupe_key not in seen:
+                        seen.add(dedupe_key)
                         raw_all.append(t)
 
         tokens = []

@@ -1602,8 +1602,12 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             if isinstance(raw, dict):
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
             lst = raw if isinstance(raw, list) else []
-            for item in lst:          # inject chain if API omits it
-                if not item.get("chain"):
+            for item in lst:
+                # `/ranks` currently mirrors the requested chain poorly in the
+                # payload, so trust the request context for multi-chain feed rows.
+                if use_ranks:
+                    item["chain"] = ch
+                elif not item.get("chain"):
                     item["chain"] = ch
             return ch, lst
         except Exception as e:
@@ -1624,8 +1628,9 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 if i < len(lst):
                     t   = lst[i]
                     tid = t.get("token", t.get("token_id", t.get("address", "")))
-                    if tid and tid not in seen:
-                        seen.add(tid)
+                    dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
+                    if tid and dedupe_key not in seen:
+                        seen.add(dedupe_key)
                         raw_all.append(t)
 
         tokens = _build_token_list(raw_all[:20], chain if chain != "all" else "???")
