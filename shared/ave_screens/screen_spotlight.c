@@ -104,10 +104,10 @@ static void _arm_loading_guard(void)
 }
 
 /* K-line timeframe cycling */
-static int s_interval_idx = 1;  /* default 1H */
-static const char *INTERVALS[]     = {"5",   "60",  "240", "1440"};
-static const char *INTERVAL_LBLS[] = {"5M",  "1H",  "4H",  "1D"};
-#define N_INTERVALS 4
+static int s_interval_idx = 3;  /* default 1H */
+static const char *INTERVALS[]     = {"s1",  "1",   "5",   "60",  "240", "1440"};
+static const char *INTERVAL_LBLS[] = {"L1S", "L1M", "5M",  "1H",  "4H",  "1D"};
+#define N_INTERVALS 6
 
 static lv_obj_t *s_lbl_tf  = NULL;
 static lv_obj_t *s_lbl_pos = NULL;
@@ -173,14 +173,31 @@ static int _parse_chart(const char *json, int16_t *out, int max) {
     return n;
 }
 
+static int _interval_index_from_value(const char *interval)
+{
+    char normalized[16];
+    size_t i = 0;
+    const char *src = interval;
+
+    if (!src || !src[0]) return -1;
+    if (src[0] == 'k' || src[0] == 'K') src++;
+    while (*src && i + 1 < sizeof(normalized)) {
+        normalized[i++] = *src++;
+    }
+    normalized[i] = '\0';
+
+    for (i = 0; i < N_INTERVALS; i++) {
+        if (strcmp(normalized, INTERVALS[i]) == 0) return (int)i;
+    }
+    return -1;
+}
+
 static void _identity_text(char *out, size_t out_n, const char *symbol, const char *chain, const char *tail)
 {
+    (void)chain;
+    (void)tail;
     if (!out || out_n == 0) return;
-    if (tail && tail[0]) {
-        snprintf(out, out_n, "%s %s *%s", symbol && symbol[0] ? symbol : "???", chain && chain[0] ? chain : "?", tail);
-        return;
-    }
-    snprintf(out, out_n, "%s %s", symbol && symbol[0] ? symbol : "???", chain && chain[0] ? chain : "?");
+    snprintf(out, out_n, "%s", symbol && symbol[0] ? symbol : "???");
 }
 
 /* ─── Back fallback ──────────────────────────────────────────────────────── */
@@ -223,7 +240,7 @@ static void _build(void) {
     lv_obj_align(s_lbl_tf, LV_ALIGN_RIGHT_MID, -46, 0);
     lv_obj_set_width(s_lbl_tf, 32);
     lv_label_set_long_mode(s_lbl_tf, LV_LABEL_LONG_CLIP);
-    lv_label_set_text(s_lbl_tf, "1H");
+    lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
     lv_obj_set_style_text_color(s_lbl_tf, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_tf, &lv_font_montserrat_12, 0);
 
@@ -421,9 +438,17 @@ void screen_spotlight_show(const char *json_data)
     /* Clear navigation loading guard — new data has arrived */
     _clear_loading_guard();
 
-    /* Reset interval to 1H on fresh (non-live) load */
     int is_live = _bool(json_data, "live", 0);
-    if (!is_live) s_interval_idx = 1;
+    char interval_value[16] = {0};
+    int interval_idx = -1;
+    if (_str(json_data, "interval", interval_value, sizeof(interval_value))) {
+        interval_idx = _interval_index_from_value(interval_value);
+    }
+    if (interval_idx >= 0) {
+        s_interval_idx = interval_idx;
+    } else if (!is_live) {
+        s_interval_idx = 3;  /* default 1H for fresh payloads that omit interval */
+    }
     lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
 
     lv_screen_load(s_screen);

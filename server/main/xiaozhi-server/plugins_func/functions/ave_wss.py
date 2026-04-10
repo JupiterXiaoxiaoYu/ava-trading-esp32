@@ -47,6 +47,7 @@ from config.logger import setup_logging
 from plugins_func.functions.ave_trade_mgr import _send_display, _SWAP_TERMINAL_STATUSES
 from plugins_func.functions.ave_tools import (
     _build_result_payload,
+    _clear_search_state,
     _build_trade_state_notify_payload,
     _clear_pending_trade,
     _clear_submitted_trade,
@@ -54,6 +55,7 @@ from plugins_func.functions.ave_tools import (
     _get_pending_trade,
     _get_submitted_trades,
     _queue_deferred_result_payload,
+    _set_feed_navigation_state,
 )
 
 if TYPE_CHECKING:
@@ -189,6 +191,59 @@ def _fmt_chart_time(ts: int) -> str:
         return datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
     except Exception:
         return ""
+
+
+def _fmt_y_label(price) -> str:
+    if price is None or float(price) <= 0:
+        return "N/A"
+    price = float(price)
+    if price >= 1000:
+        return f"${price:,.0f}"
+    if price >= 1:
+        return f"${price:.2f}"
+    if price >= 0.001:
+        return f"${price:.4f}"
+    exp = int(math.floor(math.log10(abs(price))))
+    mantissa = price / (10 ** exp)
+    return f"{mantissa:.2f}e{exp}"
+
+
+def _normalized_interval(interval: str) -> str:
+    value = str(interval or "").strip().lower()
+    if value.startswith("k"):
+        return value[1:]
+    return value
+
+
+def _is_live_chart_interval(interval: str) -> bool:
+    return _normalized_interval(interval) in {"s1", "1"}
+
+
+def _interval_matches_selected(selected_interval: str, incoming_interval: str) -> bool:
+    if not incoming_interval:
+        return True
+    return _normalized_interval(selected_interval) == _normalized_interval(incoming_interval)
+
+
+def _build_spotlight_chart_patch(raw_closes: list[float], raw_times: list[int]) -> dict:
+    valid = [float(v) for v in raw_closes if v is not None and float(v) > 0]
+    if not valid:
+        return {}
+
+    times = [int(v) for v in raw_times if v]
+    n_times = len(times)
+    chart_min = min(valid)
+    chart_max = max(valid)
+    return {
+        "chart": _normalize_kline(valid),
+        "chart_min": _fmt_price(chart_min),
+        "chart_max": _fmt_price(chart_max),
+        "chart_min_y": _fmt_y_label(chart_min),
+        "chart_max_y": _fmt_y_label(chart_max),
+        "chart_t_start": _fmt_chart_time(times[0]) if n_times > 0 else "",
+        "chart_t_mid": _fmt_chart_time(times[n_times // 2]) if n_times > 0 else "",
+        "chart_t_end": "now",
+    }
 
 
 def _infer_event_trade_type(msg: dict) -> str:
@@ -670,11 +725,14 @@ class AveWssManager:
             if isinstance(kline_data, dict):
                 id_str = result.get("id", "")
                 pair = id_str.rsplit("-", 1)[0] if "-" in id_str else ""
+                incoming_interval = result.get("interval", "")
                 for denom_val in kline_data.values():
                     if isinstance(denom_val, dict) and "close" in denom_val:
                         normalized = dict(denom_val)
                         if pair:
                             normalized["pair"] = pair
+                        if incoming_interval:
+                            normalized["interval"] = incoming_interval
                         await self._on_kline_event(normalized)
                         break
                 return
@@ -701,6 +759,7 @@ class AveWssManager:
         # {"id":"pair-chain","interval":"s1","kline":{"eth":{"close":"...","high":"...","low":"...","open":"...","time":...}},"topic":"..."}
         kline_data = msg.get("kline")
         if isinstance(kline_data, dict):
+            incoming_interval = msg.get("interval", "")
             for denom_val in kline_data.values():
                 if isinstance(denom_val, dict) and "close" in denom_val:
                     normalized = dict(denom_val)
@@ -708,6 +767,8 @@ class AveWssManager:
                     id_str = msg.get("id", "")
                     if "-" in id_str:
                         normalized["pair"] = id_str.rsplit("-", 1)[0]
+                    if incoming_interval:
+                        normalized["interval"] = incoming_interval
                     await self._on_kline_event(normalized)
                     break
             return
@@ -828,7 +889,7 @@ class AveWssManager:
         })
 
     async def _on_kline_event(self, evt: dict):
-        """Append new kline point and push a SPOTLIGHT refresh."""
+        """Buffer kline points; only s1 live interval redraws spotlight chart."""
         if not self._spotlight_data:
             return
 
@@ -852,30 +913,29 @@ class AveWssManager:
                     self._spotlight_raw_times = self._spotlight_raw_times[-MAX_CHART_POINTS:]
 
             # Do NOT update price from kline close — kline uses "eth" denomination
-            # and may lag by 1-2s.  Price is kept current by _on_price_event only.
+            # and may lag by 1-2s. Price is kept current by _on_price_event only.
+            #
+            selected_interval = getattr(self, "_spotlight_interval", "k60")
+            incoming_interval = evt.get("interval", "")
+            selected_normalized = _normalized_interval(selected_interval)
+            if selected_normalized != "s1":
+                return
+            if not _interval_matches_selected(selected_interval, incoming_interval):
+                return
 
-            # Switch to live chart once we have ≥10 points with price variation.
-            # Until then keep the initial REST chart to avoid a near-empty view.
-            valid = [v for v in self._spotlight_raw_closes if v > 0]
-            has_variation = len(valid) >= 10 and max(valid) != min(valid)
-            if has_variation:
-                self._spotlight_data["chart"] = _normalize_kline(self._spotlight_raw_closes)
-                self._spotlight_data["chart_min"] = _fmt_price(min(valid))
-                self._spotlight_data["chart_max"] = _fmt_price(max(valid))
-                # X-axis: live window start/mid
-                n_t = len(self._spotlight_raw_times)
-                if n_t > 0:
-                    self._spotlight_data["chart_t_start"] = _fmt_chart_time(self._spotlight_raw_times[0])
-                    self._spotlight_data["chart_t_mid"]   = _fmt_chart_time(self._spotlight_raw_times[n_t // 2])
-                self._spotlight_data["chart_t_end"] = "now"
-            else:
-                # Keep REST chart; update only the rightmost time label
-                self._spotlight_data["chart_t_end"] = "now"
+            chart_patch = _build_spotlight_chart_patch(
+                self._spotlight_raw_closes,
+                self._spotlight_raw_times,
+            )
+            if not chart_patch:
+                return
 
-        await _send_display(self.conn, "spotlight", {
-            **self._spotlight_data,
-            "live": True,
-        })
+            self._spotlight_data.update(chart_patch)
+            await _send_display(self.conn, "spotlight", {
+                **self._spotlight_data,
+                "live": True,
+            })
+        return
 
     # ── Spotlight holders/liq poll ────────────────────────────────────────────
 
@@ -915,6 +975,35 @@ class AveWssManager:
                         pass
                 if liq_raw is not None:
                     self._spotlight_data["liquidity"] = _fmt_volume(liq_raw)
+
+                # L1M should keep moving even when upstream k1 pushes are sparse.
+                # Refresh 1-minute chart from REST on each spotlight poll tick.
+                selected_interval = _normalized_interval(
+                    str(self._spotlight_data.get("interval", self._spotlight_interval))
+                )
+                if selected_interval == "1":
+                    kline_resp = await loop.run_in_executor(
+                        None,
+                        lambda: _data_get(
+                            f"/klines/token/{addr}-{chain}",
+                            {"interval": "1", "limit": MAX_CHART_POINTS},
+                        ),
+                    )
+                    points = kline_resp.get("data", {}).get("points", [])
+                    closes = []
+                    times = []
+                    for point in points:
+                        close_value = point.get("close", point.get("c"))
+                        if close_value is None:
+                            continue
+                        close_float = float(close_value)
+                        if close_float <= 0:
+                            continue
+                        closes.append(close_float)
+                        times.append(int(point.get("time", point.get("t", 0)) or 0))
+                    chart_patch = _build_spotlight_chart_patch(closes, times)
+                    if chart_patch:
+                        self._spotlight_data.update(chart_patch)
                 # Push on every successful poll so both labels refresh together
                 await _send_display(self.conn, "spotlight", {
                     **self._spotlight_data,
@@ -1293,6 +1382,15 @@ async def initial_feed_push(conn: "ConnectionHandler"):
 
         if hasattr(conn, "ave_wss"):
             conn.ave_wss.set_feed_tokens(tokens, "all")
+
+        state = _ensure_ave_state(conn)
+        state["screen"] = "feed"
+        state["feed_source"] = "trending"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "standard"
+        state.pop("nav_from", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, tokens, cursor=0)
 
         logger.bind(tag=TAG).info(
             f"initial_feed_push: pushed {len(tokens)} tokens across {CHAINS}"

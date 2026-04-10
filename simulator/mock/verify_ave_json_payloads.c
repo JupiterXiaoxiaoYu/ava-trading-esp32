@@ -400,12 +400,77 @@ int main(void)
 int main(void)
 {
     int ok = 1;
+    const char *spotlight_json =
+        "{"
+        "\"symbol\":\"PEPE\","
+        "\"token_id\":\"spot-1\","
+        "\"chain\":\"eth\","
+        "\"interval\":\"1440\","
+        "\"contract_tail\":\"beef\","
+        "\"price\":\"$1\","
+        "\"change_24h\":\"+1%\","
+        "\"chart\":[1,2],"
+        "\"chart_min\":\"$1\","
+        "\"chart_max\":\"$2\""
+        "}";
+
+    screen_spotlight_show(spotlight_json);
+    if (strcmp(s_lbl_sym->text, "PEPE") != 0) {
+        fprintf(stderr,
+                "FAIL: spotlight top-bar symbol polluted identity: %s\n",
+                s_lbl_sym->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_tf->text, "1D") != 0) {
+        fprintf(stderr,
+                "FAIL: spotlight timeframe label did not follow payload interval: %s\n",
+                s_lbl_tf->text);
+        ok = 0;
+    }
+    screen_spotlight_show(
+        "{"
+        "\"symbol\":\"PEPE\","
+        "\"token_id\":\"spot-1\","
+        "\"chain\":\"eth\","
+        "\"interval\":\"s1\","
+        "\"price\":\"$1\","
+        "\"change_24h\":\"+1%\","
+        "\"chart\":[1,2],"
+        "\"chart_min\":\"$1\","
+        "\"chart_max\":\"$2\""
+        "}"
+    );
+    if (strcmp(s_lbl_tf->text, "L1S") != 0) {
+        fprintf(stderr,
+                "FAIL: spotlight timeframe label did not map s1 to L1S: %s\n",
+                s_lbl_tf->text);
+        ok = 0;
+    }
+    screen_spotlight_show(
+        "{"
+        "\"symbol\":\"PEPE\","
+        "\"token_id\":\"spot-1\","
+        "\"chain\":\"eth\","
+        "\"interval\":\"1\","
+        "\"price\":\"$1\","
+        "\"change_24h\":\"+1%\","
+        "\"chart\":[1,2],"
+        "\"chart_min\":\"$1\","
+        "\"chart_max\":\"$2\""
+        "}"
+    );
+    if (strcmp(s_lbl_tf->text, "L1M") != 0) {
+        fprintf(stderr,
+                "FAIL: spotlight timeframe label did not map 1 to L1M: %s\n",
+                s_lbl_tf->text);
+        ok = 0;
+    }
 
     s_loading = false;
     snprintf(s_token_id, sizeof(s_token_id), "%s", "spot\"id\\line");
     snprintf(s_chain, sizeof(s_chain), "%s", "ba\"se");
     snprintf(s_symbol, sizeof(s_symbol), "%s", "MO\"ON");
-    s_interval_idx = 1;
+    s_interval_idx = 0;
 
     clear_last_json();
     screen_spotlight_key(AVE_KEY_A);
@@ -417,8 +482,14 @@ int main(void)
     clear_last_json();
     screen_spotlight_key(AVE_KEY_UP);
     ok &= expect_contains("\"action\":\"kline_interval\"", "spotlight interval action");
+    ok &= expect_contains("\"interval\":\"1\"", "spotlight up interval should advance to live 1m");
     ok &= expect_contains("spot\\\"id\\\\line", "spotlight interval token escaped");
     ok &= expect_not_contains("spot\"id\\line", "spotlight raw interval token");
+
+    s_interval_idx = 5;
+    clear_last_json();
+    screen_spotlight_key(AVE_KEY_UP);
+    ok &= expect_contains("\"interval\":\"s1\"", "spotlight up interval should wrap to live 1s");
 
     s_loading = false;
     clear_last_json();

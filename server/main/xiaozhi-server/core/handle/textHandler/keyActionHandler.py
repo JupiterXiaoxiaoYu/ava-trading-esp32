@@ -251,18 +251,25 @@ class KeyActionHandler(TextMessageHandler):
             state = getattr(conn, "ave_state", {})
             lst = state.get("feed_token_list", [])
             if not lst:
-                return  # No list loaded yet, silent return
+                logger.bind(tag=TAG).info(f"key_action {action} ignored: feed_token_list is empty")
+                return
 
             cursor = state.get("feed_cursor", 0)
             is_next = (action == "feed_next")
 
             if is_next:
                 if cursor >= len(lst) - 1:
-                    return  # At last item — boundary, do nothing
+                    logger.bind(tag=TAG).info(
+                        f"key_action {action} ignored at boundary cursor={cursor} size={len(lst)}"
+                    )
+                    return
                 cursor += 1
             else:
                 if cursor <= 0:
-                    return  # At first item — boundary, do nothing
+                    logger.bind(tag=TAG).info(
+                        f"key_action {action} ignored at boundary cursor={cursor} size={len(lst)}"
+                    )
+                    return
                 cursor -= 1
 
             state["feed_cursor"] = cursor

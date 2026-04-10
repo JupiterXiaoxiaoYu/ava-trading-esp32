@@ -187,3 +187,8 @@ uploadfile
 !main/manager-mobile/**/.env*
 !main/manager-mobile/**/*.json
 !main/xiaozhi-server/**/*.json
+
+# Keep migrated local env files out of the monorepo.
+main/manager-mobile/**/.env*
+main/manager-web/.env*
+main/xiaozhi-server/.env

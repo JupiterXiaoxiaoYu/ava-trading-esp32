@@ -364,7 +364,7 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][0], "feed")
         self.assertTrue(sent[0][1]["live"])
 
-    async def test_data_event_kline_result_format_updates_spotlight_runtime_state(self):
+    async def test_data_event_kline_result_format_buffers_live_points_without_replacing_spotlight_chart(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
         manager = ave_wss.AveWssManager(conn)
@@ -378,6 +378,9 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
             "token_id": "token-1-solana",
             "symbol": "BONK",
             "chart": [100, 200],
+            "chart_min": "$1",
+            "chart_max": "$2",
+            "interval": "60",
             "chart_t_end": "old",
         }
 
@@ -399,9 +402,163 @@ class Batch1PythonTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manager._spotlight_raw_closes[-1], 0.1234)
         self.assertEqual(manager._spotlight_raw_times[-1], 1710000000)
+        self.assertEqual(manager._spotlight_data["chart"], [100, 200])
+        self.assertEqual(manager._spotlight_data["chart_min"], "$1")
+        self.assertEqual(manager._spotlight_data["chart_max"], "$2")
+        self.assertEqual(manager._spotlight_data["chart_t_end"], "old")
+        self.assertEqual(sent, [])
+
+    async def test_data_event_kline_refreshes_spotlight_chart_when_live_s1_selected(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        manager = ave_wss.AveWssManager(conn)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        manager._spotlight_pair = "pair-1"
+        manager._spotlight_interval = "s1"
+        manager._spotlight_data = {
+            "token_id": "token-1-solana",
+            "symbol": "BONK",
+            "interval": "s1",
+            "chart": [100, 200],
+            "chart_min": "$1",
+            "chart_max": "$2",
+            "chart_t_end": "old",
+        }
+
+        raw = json.dumps({
+            "result": {
+                "id": "pair-1-solana",
+                "interval": "s1",
+                "kline": {
+                    "eth": {
+                        "close": "0.1234",
+                        "time": 1710000000,
+                    }
+                },
+            }
+        })
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+            await manager._handle_data_event(raw)
+
         self.assertEqual(sent[0][0], "spotlight")
-        self.assertEqual(sent[0][1]["chart_t_end"], "now")
         self.assertTrue(sent[0][1]["live"])
+        self.assertEqual(sent[0][1]["interval"], "s1")
+        self.assertEqual(sent[0][1]["chart_t_end"], "now")
+        self.assertGreaterEqual(len(sent[0][1]["chart"]), 1)
+        self.assertEqual(manager._spotlight_data["chart_t_end"], "now")
+
+    async def test_data_event_kline_does_not_refresh_spotlight_chart_when_live_k1_selected(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        manager = ave_wss.AveWssManager(conn)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        manager._spotlight_pair = "pair-1"
+        manager._spotlight_interval = "k1"
+        manager._spotlight_data = {
+            "token_id": "token-1-solana",
+            "symbol": "BONK",
+            "interval": "1",
+            "chart": [100, 200],
+            "chart_min": "$1",
+            "chart_max": "$2",
+            "chart_t_end": "old",
+        }
+
+        raw = json.dumps({
+            "result": {
+                "id": "pair-1-solana",
+                "interval": "k1",
+                "kline": {
+                    "eth": {
+                        "close": "0.2234",
+                        "time": 1710000010,
+                    }
+                },
+            }
+        })
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+            await manager._handle_data_event(raw)
+
+        self.assertEqual(manager._spotlight_raw_closes[-1], 0.2234)
+        self.assertEqual(manager._spotlight_raw_times[-1], 1710000010)
+        self.assertEqual(manager._spotlight_data["chart"], [100, 200])
+        self.assertEqual(manager._spotlight_data["chart_min"], "$1")
+        self.assertEqual(manager._spotlight_data["chart_max"], "$2")
+        self.assertEqual(manager._spotlight_data["chart_t_end"], "old")
+        self.assertEqual(sent, [])
+
+    async def test_spotlight_poll_loop_refreshes_chart_for_live_minute_interval(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        manager = ave_wss.AveWssManager(conn)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        sleep_calls = {"count": 0}
+
+        async def _fake_sleep(_seconds):
+            sleep_calls["count"] += 1
+            if sleep_calls["count"] > 1:
+                raise asyncio.CancelledError()
+            return None
+
+        def _fake_data_get(path, params=None):
+            if path == "/tokens/token-1-solana":
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "holders": 4321,
+                            "main_pair_tvl": 2500000,
+                        }
+                    }
+                }
+            if path == "/klines/token/token-1-solana":
+                self.assertEqual(params, {"interval": "1", "limit": 48})
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.0, "time": 1710000000},
+                            {"close": 1.2, "time": 1710000060},
+                            {"close": 1.1, "time": 1710000120},
+                        ]
+                    }
+                }
+            raise AssertionError(f"unexpected path: {path}")
+
+        manager._spotlight_data = {
+            "addr": "token-1",
+            "chain": "solana",
+            "interval": "1",
+            "chart": [0, 0, 0],
+            "chart_min": "$0",
+            "chart_max": "$0",
+            "chart_t_end": "old",
+        }
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("asyncio.sleep", side_effect=_fake_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await manager._spotlight_poll_loop("token-1", "solana")
+
+        self.assertGreaterEqual(len(sent), 1)
+        self.assertEqual(sent[0][0], "spotlight")
+        self.assertEqual(sent[0][1]["interval"], "1")
+        self.assertNotEqual(sent[0][1]["chart"], [0, 0, 0])
+        self.assertEqual(sent[0][1]["chart_t_end"], "now")
 
     async def test_disambiguation_select_enters_spotlight_and_back_restores_search(self):
         conn = make_fake_conn_with_search_state()

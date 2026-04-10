@@ -603,14 +603,6 @@ static void _feed_symbol_text(const feed_token_t *t, char *out, size_t out_n)
         out[0] = '\0';
         return;
     }
-    if (t->contract_tail[0]) {
-        snprintf(out, out_n, "%s *%s", t->symbol[0] ? t->symbol : "???", t->contract_tail);
-        return;
-    }
-    if (t->source_tag[0]) {
-        snprintf(out, out_n, "%s %s", t->symbol[0] ? t->symbol : "???", t->source_tag);
-        return;
-    }
     snprintf(out, out_n, "%s", t->symbol[0] ? t->symbol : "???");
 }
 
@@ -980,6 +972,10 @@ static void _build_screen(void)
 
 void screen_feed_show(const char *json_data)
 {
+    char prev_selected_token_id[80] = {0};
+    int prev_token_idx = s_token_idx;
+    int prev_scroll_top = s_scroll_top;
+
     if (!s_screen) _build_screen();
     lv_screen_load(s_screen);
 
@@ -996,7 +992,7 @@ void screen_feed_show(const char *json_data)
     }
 
     int has_tokens = (json_data && strstr(json_data, "\"tokens\"") != NULL);
-    int is_live_push = (json_data && strstr(json_data, "\"live\":true") != NULL);
+    int is_live_push = _get_json_int_field(json_data, "live", 0);
     char source_label[24] = {0};
     char search_query[24] = {0};
     char mode[16] = {0};
@@ -1059,15 +1055,60 @@ void screen_feed_show(const char *json_data)
 
     if (has_tokens || s_token_count == 0) {
         int requested_cursor = _get_json_int_field(json_data, "cursor", -1);
+        int max_scroll_top = 0;
+
+        if (is_live_push &&
+            requested_cursor < 0 &&
+            prev_token_idx >= 0 &&
+            prev_token_idx < s_token_count &&
+            s_tokens[prev_token_idx].token_id[0]) {
+            snprintf(prev_selected_token_id,
+                     sizeof(prev_selected_token_id),
+                     "%s",
+                     s_tokens[prev_token_idx].token_id);
+        }
+
         _parse_tokens_from_json(json_data);
         if (has_tokens) {
-            /* New list payloads reset to top unless a restore cursor is supplied. */
+            /* Non-live list payloads reset to top unless a restore cursor is supplied.
+             * Live refreshes preserve the user's current selection/viewport when possible. */
             if (requested_cursor >= 0 && requested_cursor < s_token_count) {
                 s_token_idx = requested_cursor;
+            } else if (is_live_push && prev_selected_token_id[0]) {
+                int matched_idx = -1;
+                int i;
+                for (i = 0; i < s_token_count; i++) {
+                    if (strcmp(s_tokens[i].token_id, prev_selected_token_id) == 0) {
+                        matched_idx = i;
+                        break;
+                    }
+                }
+                if (matched_idx >= 0) {
+                    s_token_idx = matched_idx;
+                } else if (s_token_count > 0) {
+                    if (prev_token_idx < 0) prev_token_idx = 0;
+                    if (prev_token_idx >= s_token_count) prev_token_idx = s_token_count - 1;
+                    s_token_idx = prev_token_idx;
+                } else {
+                    s_token_idx = 0;
+                }
             } else {
                 s_token_idx = 0;
             }
-            s_scroll_top = (s_token_idx >= VISIBLE_ROWS) ? (s_token_idx - VISIBLE_ROWS + 1) : 0;
+
+            max_scroll_top = (s_token_count > VISIBLE_ROWS) ? (s_token_count - VISIBLE_ROWS) : 0;
+            if (is_live_push && requested_cursor < 0) {
+                s_scroll_top = prev_scroll_top;
+                if (s_scroll_top < 0) s_scroll_top = 0;
+                if (s_scroll_top > max_scroll_top) s_scroll_top = max_scroll_top;
+                if (s_token_idx < s_scroll_top) {
+                    s_scroll_top = s_token_idx;
+                } else if (s_token_idx >= s_scroll_top + VISIBLE_ROWS) {
+                    s_scroll_top = s_token_idx - VISIBLE_ROWS + 1;
+                }
+            } else {
+                s_scroll_top = (s_token_idx >= VISIBLE_ROWS) ? (s_token_idx - VISIBLE_ROWS + 1) : 0;
+            }
         }
     }
 

@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import sys
+import types
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -84,6 +87,76 @@ class _FakeConn:
 class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         trade_mgr._pending.clear()
+
+    async def test_initial_feed_push_seeds_feed_navigation_state(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        class _FakeResp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def json(self):
+                return self._payload
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            def get(self, url, headers=None, timeout=None):
+                del headers, timeout
+                chain = url.split("chain=")[1].split("&", 1)[0]
+                return _FakeResp(
+                    {
+                        "data": {
+                            "tokens": [
+                                {
+                                    "token": f"{chain}-token",
+                                    "chain": chain,
+                                    "symbol": chain.upper(),
+                                    "current_price_usd": "1.23",
+                                    "token_price_change_24h": "4.5",
+                                }
+                            ]
+                        }
+                    }
+                )
+
+        fake_aiohttp = types.SimpleNamespace(
+            ClientSession=lambda: _FakeSession(),
+            ClientTimeout=lambda total=10: total,
+        )
+
+        with patch.dict(os.environ, {"AVE_API_KEY": "test-key"}, clear=False), \
+             patch.dict(sys.modules, {"aiohttp": fake_aiohttp}), \
+             patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+            await ave_wss.initial_feed_push(conn)
+
+        self.assertEqual(sent[0][0], "feed")
+        self.assertEqual(sent[0][1]["chain"], "all")
+        self.assertEqual(conn.ave_wss.feed_calls[0][1], "all")
+        self.assertEqual(conn.ave_state["screen"], "feed")
+        self.assertEqual(conn.ave_state["feed_source"], "trending")
+        self.assertEqual(conn.ave_state["feed_platform"], "")
+        self.assertEqual(conn.ave_state["feed_mode"], "standard")
+        self.assertEqual(conn.ave_state["feed_cursor"], 0)
+        self.assertEqual(
+            [item["addr"] for item in conn.ave_state["feed_token_list"]],
+            ["solana", "eth", "bsc", "base"],
+        )
 
     async def test_ave_get_trending_platform_uses_platform_endpoint_mapping(self):
         loop = asyncio.get_running_loop()
@@ -285,9 +358,131 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(sent[0][0], "spotlight")
+        self.assertEqual(sent[0][1]["interval"], "5")
         self.assertEqual(sent[0][1]["risk_level"], "HIGH")
         self.assertTrue(sent[0][1]["is_mintable"])
         self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "k5")
+
+    async def test_ave_token_detail_interval_1_maps_to_rest_1m_and_wss_k1(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        requests = []
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_data_get(path, params=None):
+            requests.append((path, params))
+            if path == "/tokens/token-123-solana":
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": "0.00002",
+                            "token_price_change_24h": "4.5",
+                            "holders": 123456,
+                            "main_pair_tvl": 250000,
+                        }
+                    }
+                }
+            if path == "/klines/token/token-123-solana":
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.0, "time": 1710000000},
+                            {"close": 2.0, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path == "/contracts/token-123-solana":
+                return {
+                    "data": {
+                        "risk_score": 65,
+                        "has_mint_method": True,
+                        "has_black_method": False,
+                    }
+                }
+            raise AssertionError(f"unexpected path: {path}")
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="1")
+            await asyncio.sleep(0)
+
+        normalized_requests = [
+            (path, json.dumps(params, sort_keys=True) if params is not None else None)
+            for path, params in requests
+        ]
+        self.assertCountEqual(
+            normalized_requests,
+            [
+                ("/tokens/token-123-solana", None),
+                ("/klines/token/token-123-solana", "{\"interval\": \"1\", \"limit\": 48}"),
+                ("/contracts/token-123-solana", None),
+            ],
+        )
+        self.assertEqual(sent[0][0], "spotlight")
+        self.assertEqual(sent[0][1]["interval"], "1")
+        self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "k1")
+
+    async def test_ave_token_detail_interval_s1_skips_rest_kline_and_seeds_live_chart(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        requests = []
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_data_get(path, params=None):
+            requests.append((path, params))
+            if path == "/tokens/token-123-solana":
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": "0.00002",
+                            "token_price_change_24h": "4.5",
+                            "holders": 123456,
+                            "main_pair_tvl": 250000,
+                        }
+                    }
+                }
+            if path == "/contracts/token-123-solana":
+                return {
+                    "data": {
+                        "risk_score": 65,
+                        "has_mint_method": True,
+                        "has_black_method": False,
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                raise AssertionError("interval=s1 must not call REST kline endpoint")
+            raise AssertionError(f"unexpected path: {path}")
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_token_detail(conn, addr="token-123", chain="solana", interval="s1")
+            await asyncio.sleep(0)
+
+        normalized_requests = [
+            (path, json.dumps(params, sort_keys=True) if params is not None else None)
+            for path, params in requests
+        ]
+        self.assertCountEqual(
+            normalized_requests,
+            [
+                ("/tokens/token-123-solana", None),
+                ("/contracts/token-123-solana", None),
+            ],
+        )
+        self.assertEqual(sent[0][0], "spotlight")
+        self.assertEqual(sent[0][1]["interval"], "s1")
+        self.assertGreaterEqual(len(sent[0][1]["chart"]), 8)
+        self.assertTrue(any(v > 0 for v in sent[0][1]["chart"]))
+        self.assertEqual(sent[0][1]["chart_t_end"], "now")
+        self.assertEqual(conn.ave_wss.spotlight_calls[0][1]["interval"], "s1")
 
     async def test_ave_buy_token_maps_contract_price_quote_and_trade_payloads(self):
         loop = asyncio.get_running_loop()

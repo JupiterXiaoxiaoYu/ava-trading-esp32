@@ -15,6 +15,8 @@ const lv_font_t lv_font_montserrat_14 = {0};
 
 static uint32_t g_tick = 0;
 static lv_timer_t *g_timers[FAKE_TIMER_CAP];
+static uint32_t g_timer_due[FAKE_TIMER_CAP];
+static bool g_timer_active[FAKE_TIMER_CAP];
 static int g_timer_count = 0;
 static int32_t g_chart_y[FAKE_CHART_CAP];
 
@@ -41,6 +43,13 @@ void lv_obj_set_style_bg_color(lv_obj_t *obj, lv_color_t color, int part)
 {
     (void)obj;
     (void)color;
+    (void)part;
+}
+
+void lv_obj_set_style_bg_opa(lv_obj_t *obj, int opa, int part)
+{
+    (void)obj;
+    (void)opa;
     (void)part;
 }
 
@@ -92,6 +101,12 @@ void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part)
     (void)obj;
     (void)font;
     (void)part;
+}
+
+void lv_obj_clear_flag(lv_obj_t *obj, int flag)
+{
+    (void)obj;
+    (void)flag;
 }
 
 void lv_obj_set_width(lv_obj_t *obj, int w)
@@ -211,6 +226,8 @@ void lv_init(void)
     g_tick = 0;
     g_timer_count = 0;
     memset(g_timers, 0, sizeof(g_timers));
+    memset(g_timer_due, 0, sizeof(g_timer_due));
+    memset(g_timer_active, 0, sizeof(g_timer_active));
 }
 
 lv_timer_t *lv_timer_create(void (*cb)(lv_timer_t *), uint32_t period, void *user_data)
@@ -223,11 +240,11 @@ lv_timer_t *lv_timer_create(void (*cb)(lv_timer_t *), uint32_t period, void *use
 
     timer->cb = cb;
     timer->period = period;
-    timer->due_tick = g_tick + period;
     timer->repeat_count = -1;
     timer->user_data = user_data;
-    timer->active = true;
     g_timers[g_timer_count++] = timer;
+    g_timer_due[g_timer_count - 1] = g_tick + period;
+    g_timer_active[g_timer_count - 1] = true;
     return timer;
 }
 
@@ -246,7 +263,11 @@ void lv_timer_del(lv_timer_t *timer)
         if (g_timers[i] == timer) {
             free(g_timers[i]);
             g_timers[i] = g_timers[g_timer_count - 1];
+            g_timer_due[i] = g_timer_due[g_timer_count - 1];
+            g_timer_active[i] = g_timer_active[g_timer_count - 1];
             g_timers[g_timer_count - 1] = NULL;
+            g_timer_due[g_timer_count - 1] = 0;
+            g_timer_active[g_timer_count - 1] = false;
             g_timer_count--;
             return;
         }
@@ -258,8 +279,8 @@ uint32_t lv_timer_handler(void)
     int i;
     for (i = g_timer_count - 1; i >= 0; i--) {
         lv_timer_t *timer = g_timers[i];
-        if (!timer || !timer->active) continue;
-        if (g_tick < timer->due_tick) continue;
+        if (!timer || !g_timer_active[i]) continue;
+        if (g_tick < g_timer_due[i]) continue;
 
         timer->cb(timer);
 
@@ -267,7 +288,7 @@ uint32_t lv_timer_handler(void)
             lv_timer_del(timer);
         } else {
             if (timer->repeat_count > 1) timer->repeat_count--;
-            timer->due_tick = g_tick + timer->period;
+            g_timer_due[i] = g_tick + timer->period;
         }
     }
     return 0;
@@ -290,6 +311,71 @@ uint32_t lv_tick_elaps(uint32_t prev_tick)
 
 /* ---- Screen deps -------------------------------------------------------- */
 static char g_last_json[512];
+
+int ave_sm_json_escape_string(const char *src, char *out, size_t out_n)
+{
+    size_t oi = 0;
+    size_t i = 0;
+    if (!src || !out || out_n == 0) return 0;
+    while (src[i] != '\0') {
+        const char *esc = NULL;
+        char ch = src[i++];
+        switch (ch) {
+            case '\"': esc = "\\\""; break;
+            case '\\': esc = "\\\\"; break;
+            case '\n': esc = "\\n"; break;
+            case '\r': esc = "\\r"; break;
+            case '\t': esc = "\\t"; break;
+            default: break;
+        }
+        if (esc) {
+            if (oi + 2 >= out_n) return 0;
+            out[oi++] = esc[0];
+            out[oi++] = esc[1];
+            continue;
+        }
+        if (oi + 1 >= out_n) return 0;
+        out[oi++] = ch;
+    }
+    out[oi] = '\0';
+    return 1;
+}
+
+int ave_sm_build_key_action_json(
+    const char *action,
+    const ave_sm_json_field_t *fields,
+    size_t field_count,
+    char *out,
+    size_t out_n
+)
+{
+    char action_esc[128];
+    size_t i;
+    int n;
+    int used = 0;
+
+    if (!action || !out || out_n == 0) return 0;
+    if (!ave_sm_json_escape_string(action, action_esc, sizeof(action_esc))) return 0;
+
+    n = snprintf(out, out_n, "{\"type\":\"key_action\",\"action\":\"%s\"", action_esc);
+    if (n <= 0 || (size_t)n >= out_n) return 0;
+    used = n;
+
+    for (i = 0; i < field_count; i++) {
+        char key_esc[128];
+        char val_esc[256];
+        if (!fields || !fields[i].key || !fields[i].value) continue;
+        if (!ave_sm_json_escape_string(fields[i].key, key_esc, sizeof(key_esc))) return 0;
+        if (!ave_sm_json_escape_string(fields[i].value, val_esc, sizeof(val_esc))) return 0;
+        n = snprintf(out + used, out_n - (size_t)used, ",\"%s\":\"%s\"", key_esc, val_esc);
+        if (n <= 0 || (size_t)n >= out_n - (size_t)used) return 0;
+        used += n;
+    }
+
+    n = snprintf(out + used, out_n - (size_t)used, "}");
+    if (n <= 0 || (size_t)n >= out_n - (size_t)used) return 0;
+    return 1;
+}
 
 void ave_send_json(const char *json)
 {
@@ -378,6 +464,24 @@ int main(void)
     ok &= run_case(AVE_KEY_LEFT, "\"action\":\"feed_prev\"");
     ok &= run_case(AVE_KEY_RIGHT, "\"action\":\"feed_next\"");
     ok &= run_case(AVE_KEY_UP, "\"action\":\"kline_interval\"");
+
+    screen_spotlight_show(seed_json);
+
+    reset_last_json();
+    screen_spotlight_key(AVE_KEY_UP);
+    ok &= expect_json_contains("\"interval\":\"240\"", "UP #1 should move 1H -> 4H");
+    lv_tick_inc(10000);
+    lv_timer_handler();
+
+    reset_last_json();
+    screen_spotlight_key(AVE_KEY_UP);
+    ok &= expect_json_contains("\"interval\":\"1440\"", "UP #2 should move 4H -> 1D");
+    lv_tick_inc(10000);
+    lv_timer_handler();
+
+    reset_last_json();
+    screen_spotlight_key(AVE_KEY_UP);
+    ok &= expect_json_contains("\"interval\":\"s1\"", "UP #3 should wrap 1D -> L1S");
 
     if (ok) {
         printf("PASS: spotlight loading timeout protects A/X from permanent lock.\n");

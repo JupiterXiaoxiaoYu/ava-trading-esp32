@@ -137,12 +137,25 @@ def _fmt_y_label(price) -> str:
 
 def _kline_limit_for_interval(interval: str) -> int:
     interval_to_size = {
+        "s1": 48,
+        "1": 48,
         "5": 48,
         "60": 48,
         "240": 42,
         "1440": 30,
     }
     return interval_to_size.get(str(interval), 48)
+
+
+def _to_wss_kline_interval(interval: str) -> str:
+    value = str(interval or "60").strip().lower()
+    if not value:
+        return "k60"
+    if value == "s1":
+        return "s1"
+    if value.startswith("k"):
+        return value
+    return f"k{value}"
 
 
 def _fmt_change(pct) -> str:
@@ -1968,8 +1981,8 @@ ave_token_detail_desc = {
                 "symbol": {"type": "string", "description": "代币符号，如 BONK（addr省略时按此查找）"},
                 "interval": {
                     "type": "string",
-                    "description": "K线周期，5/60/240/1440（分钟），默认60（1小时）",
-                    "enum": ["5", "60", "240", "1440"]
+                    "description": "K线周期，s1(秒级实时)/1/5/60/240/1440（分钟），默认60（1小时）",
+                    "enum": ["s1", "1", "5", "60", "240", "1440"]
                 },
             },
             "required": [],
@@ -2000,16 +2013,22 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请告诉我你想查看哪个代币的地址或名称")
 
+        interval = str(interval or "60").strip().lower() or "60"
+        is_live_second = interval == "s1"
+        kline_limit = _kline_limit_for_interval(interval)
+
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            f_token = pool.submit(_data_get, f"/tokens/{addr}-{chain}")
-            kline_limit = _kline_limit_for_interval(interval)
-            f_kline = pool.submit(_data_get, f"/klines/token/{addr}-{chain}",
-                                  {"interval": interval, "limit": kline_limit})
-            f_risk  = pool.submit(_data_get, f"/contracts/{addr}-{chain}")
-            token_resp = f_token.result()
-            kline_resp = f_kline.result()
-            risk_resp  = f_risk.result()
+            token_resp = pool.submit(_data_get, f"/tokens/{addr}-{chain}").result()
+            if not is_live_second:
+                kline_resp = pool.submit(
+                    _data_get,
+                    f"/klines/token/{addr}-{chain}",
+                    {"interval": interval, "limit": kline_limit},
+                ).result()
+            else:
+                kline_resp = {"data": {"points": []}}
+            risk_resp = pool.submit(_data_get, f"/contracts/{addr}-{chain}").result()
 
         token_data = token_resp.get("data", token_resp)
         token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
@@ -2017,11 +2036,35 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
             token = token[0]
 
         kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
-        chart_values = _normalize_kline(kline_points)
 
-        # Get price min/max and timestamps from raw kline data
+        # Get price min/max and timestamps from raw kline data.
         raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
         raw_times  = [int(p.get("time",  p.get("t",  0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
+        price_now = float(token.get("current_price_usd", token.get("price", 0)) or 0)
+        if is_live_second:
+            # "Live 1s" does not fetch token klines from REST.
+            # Seed chart from existing live buffer when staying on same token; otherwise
+            # use current price as a visible flat seed line until live ticks arrive.
+            token_id = f"{addr}-{chain}"
+            seeded_closes = []
+            seeded_times = []
+            if hasattr(conn, "ave_wss"):
+                wss = conn.ave_wss
+                if getattr(wss, "_spotlight_id", "") == token_id:
+                    seeded_closes = list(getattr(wss, "_spotlight_raw_closes", []) or [])
+                    seeded_times = list(getattr(wss, "_spotlight_raw_times", []) or [])
+            raw_closes = [float(v) for v in seeded_closes if v is not None and float(v) > 0][-kline_limit:]
+            raw_times = [int(v) for v in seeded_times if v][-kline_limit:]
+            if not raw_closes and price_now > 0:
+                raw_closes = [price_now] * 12
+            kline_points = [
+                {"close": value, "time": raw_times[idx] if idx < len(raw_times) else 0}
+                for idx, value in enumerate(raw_closes)
+            ]
+        chart_values = _normalize_kline(kline_points)
+        if is_live_second and raw_closes and len(set(raw_closes)) == 1:
+            # Constant-value seeds normalize to zeros; render a visible flat line instead.
+            chart_values = [500] * len(raw_closes)
         price_min = min(raw_closes) if raw_closes else 0
         price_max = max(raw_closes) if raw_closes else 0
         n_pts = len(raw_times)
@@ -2042,9 +2085,10 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
         spotlight_data = {
             **identity,
             "addr": addr,
+            "interval": str(interval or "60"),
             "pair": f"{token.get('symbol', '???')} / USDC",
             "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
-            "price_raw": float(token.get("current_price_usd", token.get("price", 0)) or 0),
+            "price_raw": price_now,
             "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
             "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
             "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
@@ -2068,9 +2112,9 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
         conn.loop.create_task(_send_display(conn, "spotlight", spotlight_data))
 
         # Update WSS kline subscription — use addr as pair_addr (server resolves to main pair)
-        # Map REST interval (minutes) to WSS kline interval format (e.g. "60" → "k60")
+        # Map UI interval to WSS kline interval format (e.g. "60" → "k60", "s1" → "s1")
         if hasattr(conn, "ave_wss"):
-            wss_interval = f"k{interval}"
+            wss_interval = _to_wss_kline_interval(interval)
             conn.ave_wss.set_spotlight(addr, chain, spotlight_data, raw_closes, raw_times,
                                        interval=wss_interval)
 

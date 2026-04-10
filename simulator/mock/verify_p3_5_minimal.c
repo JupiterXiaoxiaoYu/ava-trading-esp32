@@ -22,6 +22,8 @@
  * verify_p3_5_minimal is linked without real LVGL. Provide no-op stubs for the
  * subset of LVGL that screen_feed.c pulls in, so this probe can be compiled
  * and run standalone. */
+static char *label_text_slot(lv_obj_t *obj);
+
 lv_color_t lv_color_hex(uint32_t value)
 {
     lv_color_t c;
@@ -143,8 +145,9 @@ lv_obj_t *lv_label_create(lv_obj_t *parent)
 
 void lv_label_set_text(lv_obj_t *obj, const char *text)
 {
-    (void)obj;
-    (void)text;
+    char *slot = label_text_slot(obj);
+    if (!slot) return;
+    snprintf(slot, 160, "%s", text ? text : "");
 }
 
 void lv_label_set_long_mode(lv_obj_t *obj, lv_label_long_mode_t long_mode)
@@ -182,6 +185,34 @@ const lv_font_t lv_font_montserrat_14 = {0};
 static int g_current_screen = -1;
 static char g_last_sent[512];
 static char g_last_notify[512];
+static struct {
+    lv_obj_t *obj;
+    char text[160];
+} g_label_text[256];
+static int g_label_text_count = 0;
+
+static char *label_text_slot(lv_obj_t *obj)
+{
+    int i;
+
+    if (!obj) return NULL;
+    for (i = 0; i < g_label_text_count; i++) {
+        if (g_label_text[i].obj == obj) return g_label_text[i].text;
+    }
+    if (g_label_text_count >= (int)(sizeof(g_label_text) / sizeof(g_label_text[0]))) {
+        return NULL;
+    }
+    g_label_text[g_label_text_count].obj = obj;
+    g_label_text[g_label_text_count].text[0] = '\0';
+    g_label_text_count++;
+    return g_label_text[g_label_text_count - 1].text;
+}
+
+static const char *label_text(lv_obj_t *obj)
+{
+    char *slot = label_text_slot(obj);
+    return slot ? slot : "";
+}
 
 static void set_screen(int id)
 {
@@ -298,6 +329,45 @@ static int expect_equal_int(int actual, int expected, const char *msg)
                 msg,
                 actual,
                 expected);
+        return 0;
+    }
+    return 1;
+}
+
+static int expect_string_equal(const char *actual, const char *expected, const char *msg)
+{
+    if (strcmp(actual ? actual : "", expected ? expected : "") != 0) {
+        fprintf(stderr,
+                "FAIL: %s (actual=\"%s\" expected=\"%s\")\n",
+                msg,
+                actual ? actual : "",
+                expected ? expected : "");
+        return 0;
+    }
+    return 1;
+}
+
+static int expect_string_not_contains(const char *actual, const char *needle, const char *msg)
+{
+    if ((actual && needle) && strstr(actual, needle)) {
+        fprintf(stderr,
+                "FAIL: %s (actual=\"%s\" contains \"%s\")\n",
+                msg,
+                actual,
+                needle);
+        return 0;
+    }
+    return 1;
+}
+
+static int expect_string_contains(const char *actual, const char *needle, const char *msg)
+{
+    if (!(actual && needle) || !strstr(actual, needle)) {
+        fprintf(stderr,
+                "FAIL: %s (actual=\"%s\" missing \"%s\")\n",
+                msg,
+                actual ? actual : "",
+                needle ? needle : "");
         return 0;
     }
     return 1;
@@ -464,6 +534,26 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
 }
 
 int screen_portfolio_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_disambiguation_show(const char *json_data)
+{
+    (void)json_data;
+    set_screen(AVE_SCREEN_DISAMBIGUATION);
+}
+
+void screen_disambiguation_key(int key)
+{
+    (void)key;
+}
+
+void screen_disambiguation_cancel_timers(void) {}
+
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
 {
     (void)out;
     (void)out_n;
@@ -810,6 +900,122 @@ static int run_case_feed_orders_back_unchanged(void)
     return ok;
 }
 
+static int run_case_feed_symbol_hides_contract_tail_suffix(void)
+{
+    int ok = 1;
+    const char *feed =
+        "{"
+        "\"source_label\":\"TRENDING\","
+        "\"tokens\":[{"
+        "\"token_id\":\"token-tail-1\","
+        "\"chain\":\"solana\","
+        "\"symbol\":\"CRCLx\","
+        "\"contract_tail\":\"3b\","
+        "\"price\":\"$86.7846\","
+        "\"change_24h\":\"-6.87%\","
+        "\"change_positive\":0"
+        "}]}";
+    const char *sym_text;
+
+    feed_under_test_show(feed);
+    sym_text = label_text(s_rows[0].lbl_sym);
+
+    ok &= expect_string_equal(sym_text, "CRCLx",
+                              "FEED symbol column should not append contract tail");
+    ok &= expect_string_not_contains(sym_text, "*",
+                                     "FEED symbol column should stay clean without suffix markers");
+    return ok;
+}
+
+static int run_case_feed_symbol_hides_source_tag_suffix(void)
+{
+    int ok = 1;
+    const char *feed =
+        "{"
+        "\"source_label\":\"TRENDING\","
+        "\"tokens\":[{"
+        "\"token_id\":\"token-source-1\","
+        "\"chain\":\"solana\","
+        "\"symbol\":\"MOODENG\","
+        "\"source_tag\":\"solana\","
+        "\"price\":\"$0.42\","
+        "\"change_24h\":\"+8.10%\","
+        "\"change_positive\":1"
+        "}]}";
+    const char *sym_text;
+
+    feed_under_test_show(feed);
+    sym_text = label_text(s_rows[0].lbl_sym);
+
+    ok &= expect_string_equal(sym_text, "MOODENG",
+                              "FEED symbol column should not append source/platform suffixes");
+    ok &= expect_string_not_contains(sym_text, "solana",
+                                     "FEED symbol column should hide source_tag text");
+    return ok;
+}
+
+static int run_case_feed_live_update_preserves_cursor(void)
+{
+    int ok = 1;
+    char selection_json[256];
+    const char *initial_feed =
+        "{"
+        "\"source_label\":\"TRENDING\","
+        "\"tokens\":["
+        "{"
+        "\"token_id\":\"token-1\","
+        "\"chain\":\"solana\","
+        "\"symbol\":\"FIRST\","
+        "\"price\":\"$1\","
+        "\"change_24h\":\"+1%\","
+        "\"change_positive\":1"
+        "},"
+        "{"
+        "\"token_id\":\"token-2\","
+        "\"chain\":\"base\","
+        "\"symbol\":\"SECOND\","
+        "\"price\":\"$2\","
+        "\"change_24h\":\"+2%\","
+        "\"change_positive\":1"
+        "}]}";
+    const char *live_feed =
+        "{"
+        "\"source_label\":\"TRENDING\","
+        "\"live\": true,"
+        "\"tokens\":["
+        "{"
+        "\"token_id\":\"token-1\","
+        "\"chain\":\"solana\","
+        "\"symbol\":\"FIRST\","
+        "\"price\":\"$1.1\","
+        "\"change_24h\":\"+1.1%\","
+        "\"change_positive\":1"
+        "},"
+        "{"
+        "\"token_id\":\"token-2\","
+        "\"chain\":\"base\","
+        "\"symbol\":\"SECOND\","
+        "\"price\":\"$2.2\","
+        "\"change_24h\":\"+2.2%\","
+        "\"change_positive\":1"
+        "}]}";
+
+    feed_under_test_show(initial_feed);
+    feed_under_test_key(AVE_KEY_DOWN);
+    ok &= expect_equal_int(s_token_idx, 1, "sanity: DOWN should move FEED cursor to second token");
+
+    feed_under_test_show(live_feed);
+    ok &= expect_equal_int(s_token_idx, 1,
+                           "live FEED refresh should preserve the current cursor");
+    ok &= expect_equal_int(feed_under_test_get_selected_context_json(selection_json, sizeof(selection_json)), 1,
+                           "selection JSON should still be available after a live refresh");
+    ok &= expect_string_contains(selection_json, "\"cursor\":1",
+                                 "selection JSON after live refresh should keep cursor=1");
+    ok &= expect_string_contains(selection_json, "\"addr\":\"token-2\"",
+                                 "selection JSON after live refresh should keep the selected token");
+    return ok;
+}
+
 static int run_case_result_y_portfolio_shortcut_variant(const char *scene_path)
 {
     char *scene = NULL;
@@ -848,9 +1054,12 @@ int main(void)
     int ok11 = run_case_result_y_portfolio_shortcut_variant("mock/mock_scenes/06_result_fail.json");
     int ok12 = run_case_feed_explore_orders_activation_reuses_orders_flow();
     int ok13 = run_case_feed_explore_sources_platform_activation_reuses_platform_feed();
+    int ok14 = run_case_feed_symbol_hides_contract_tail_suffix();
+    int ok15 = run_case_feed_symbol_hides_source_tag_suffix();
+    int ok16 = run_case_feed_live_update_preserves_cursor();
 
     if (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 &&
-        ok12 && ok13) {
+        ok12 && ok13 && ok14 && ok15 && ok16) {
         printf("PASS: P3-5 minimal simulator fallback verification succeeded.\n");
         return 0;
     }

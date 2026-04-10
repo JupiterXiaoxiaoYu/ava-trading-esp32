@@ -200,6 +200,21 @@ if(NOT MSVC)
     target_link_libraries(verify_screenshot_feed m pthread)
 endif()
 
+add_executable(verify_p3_5_minimal
+    mock/verify_p3_5_minimal.c
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_screen_manager.c
+)
+target_include_directories(verify_p3_5_minimal PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/mock
+    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${SDL2_INCLUDE_DIRS}
+)
+if(NOT MSVC)
+    target_link_libraries(verify_p3_5_minimal m pthread)
+endif()
+
 # On Windows, GUI applications do not show a console by default,
 # which hides log output. This ensures a console is available for logging.
 if (WIN32)
