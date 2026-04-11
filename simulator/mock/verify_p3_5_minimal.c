@@ -179,6 +179,49 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, lv_text_align_t value, lv_style_
 #undef screen_feed_should_ignore_live_push
 #undef screen_feed_get_selected_context_json
 
+void screen_explorer_show(const char *json_data)
+{
+    (void)json_data;
+}
+
+void screen_explorer_key(int key)
+{
+    (void)key;
+}
+
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_browse_show(const char *json_data)
+{
+    (void)json_data;
+}
+
+void screen_browse_show_placeholder(const char *mode)
+{
+    (void)mode;
+}
+
+void screen_browse_reveal(void)
+{
+}
+
+void screen_browse_key(int key)
+{
+    (void)key;
+}
+
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
 const lv_font_t lv_font_montserrat_12 = {0};
 const lv_font_t lv_font_montserrat_14 = {0};
 
