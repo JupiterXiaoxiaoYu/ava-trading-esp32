@@ -7,7 +7,7 @@
  *   y= 22..38   header row (Symbol / Value / P&L)
  *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
- *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL
+ *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL  [Y] CHAIN
  */
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
@@ -593,9 +593,9 @@ static void _build(void) {
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Portfolio is already the current destination, so keep only local actions here. */
+    /* Portfolio keeps Y for local chain cycling while preserving B/X/A actions. */
     lv_obj_t *slot_b = lv_obj_create(bot);
-    lv_obj_set_size(slot_b, 106, 240 - BOTTOM_Y);
+    lv_obj_set_size(slot_b, 64, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_b, 0, 0);
     lv_obj_set_style_bg_opa(slot_b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_b, 0, 0);
@@ -603,20 +603,28 @@ static void _build(void) {
     lv_obj_clear_flag(slot_b, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_x = lv_obj_create(bot);
-    lv_obj_set_size(slot_x, 106, 240 - BOTTOM_Y);
-    lv_obj_set_pos(slot_x, 106, 0);
+    lv_obj_set_size(slot_x, 64, 240 - BOTTOM_Y);
+    lv_obj_set_pos(slot_x, 64, 0);
     lv_obj_set_style_bg_opa(slot_x, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_x, 0, 0);
     lv_obj_set_style_pad_all(slot_x, 0, 0);
     lv_obj_clear_flag(slot_x, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_a = lv_obj_create(bot);
-    lv_obj_set_size(slot_a, 108, 240 - BOTTOM_Y);
-    lv_obj_set_pos(slot_a, 212, 0);
+    lv_obj_set_size(slot_a, 64, 240 - BOTTOM_Y);
+    lv_obj_set_pos(slot_a, 128, 0);
     lv_obj_set_style_bg_opa(slot_a, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_a, 0, 0);
     lv_obj_set_style_pad_all(slot_a, 0, 0);
     lv_obj_clear_flag(slot_a, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *slot_y = lv_obj_create(bot);
+    lv_obj_set_size(slot_y, 128, 240 - BOTTOM_Y);
+    lv_obj_set_pos(slot_y, 192, 0);
+    lv_obj_set_style_bg_opa(slot_y, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(slot_y, 0, 0);
+    lv_obj_set_style_pad_all(slot_y, 0, 0);
+    lv_obj_clear_flag(slot_y, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lbl_back = lv_label_create(slot_b);
     lv_obj_align(lbl_back, LV_ALIGN_CENTER, 0, 0);
@@ -635,6 +643,12 @@ static void _build(void) {
     lv_label_set_text(lbl_detail, "[A] DETAIL");
     lv_obj_set_style_text_color(lbl_detail, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(lbl_detail, &lv_font_montserrat_12, 0);
+
+    lv_obj_t *lbl_chain = lv_label_create(slot_y);
+    lv_obj_align(lbl_chain, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(lbl_chain, "[Y] CHAIN");
+    lv_obj_set_style_text_color(lbl_chain, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(lbl_chain, &lv_font_montserrat_12, 0);
 }
 
 /* ─── Public API ──────────────────────────────────────────────────────────── */
@@ -673,15 +687,30 @@ void screen_portfolio_show(const char *json_data)
     char total[24] = {0}, pnl[20] = {0}, pnl_pct[16] = {0};
     char pnl_reason[48] = {0};
     char mode_label[16] = {0};
+    char chain_label[8] = {0};
     _str_portfolio_top_level(json_data, "total_usd", total, sizeof(total));
     _str_portfolio_top_level(json_data, "pnl",       pnl,   sizeof(pnl));
     _str_portfolio_top_level(json_data, "pnl_pct",   pnl_pct, sizeof(pnl_pct));
     _str_portfolio_top_level(json_data, "pnl_reason", pnl_reason, sizeof(pnl_reason));
     _str_portfolio_top_level(json_data, "mode_label", mode_label, sizeof(mode_label));
+    _str_portfolio_top_level(json_data, "chain_label", chain_label, sizeof(chain_label));
 
     if (s_lbl_title) {
-        if (strcmp(mode_label, "PAPER") == 0) lv_label_set_text(s_lbl_title, "PAPER PORTFOLIO");
-        else lv_label_set_text(s_lbl_title, "PORTFOLIO");
+        char title_buf[32];
+        if (chain_label[0]) {
+            snprintf(
+                title_buf,
+                sizeof(title_buf),
+                "%s %s",
+                (strcmp(mode_label, "PAPER") == 0) ? "PAPER PORT" : "PORTFOLIO",
+                chain_label
+            );
+            lv_label_set_text(s_lbl_title, title_buf);
+        } else if (strcmp(mode_label, "PAPER") == 0) {
+            lv_label_set_text(s_lbl_title, "PAPER PORT");
+        } else {
+            lv_label_set_text(s_lbl_title, "PORTFOLIO");
+        }
     }
 
     lv_label_set_text(s_lbl_total, total[0] ? total : "--");
@@ -768,6 +797,8 @@ void screen_portfolio_key(int key)
         };
         if (!ave_sm_build_key_action_json("portfolio_sell", fields, 4, msg, sizeof(msg))) return;
         ave_send_json(msg);
+    } else if (key == AVE_KEY_Y) {
+        ave_send_json("{\"type\":\"key_action\",\"action\":\"portfolio_chain_cycle\"}");
     }
 }
 

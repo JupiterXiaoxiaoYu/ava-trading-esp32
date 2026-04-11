@@ -70,6 +70,9 @@ DEFAULT_SLIPPAGE = 100          # basis points (1%)
 _BATCH_PRICE_EVM_SUFFIXES = ("-bsc", "-eth", "-base")
 _CHAIN_SUFFIXES = ("solana", "bsc", "eth", "base")
 _SUPPORTED_FEED_CHAINS = frozenset(_CHAIN_SUFFIXES)
+_CHAIN_CYCLE_ORDER = ("solana", "base", "eth", "bsc")
+_SIGNALS_SUPPORTED_CHAINS = frozenset({"solana", "bsc"})
+_SIGNALS_CHAIN_CYCLE_ORDER = ("solana", "bsc")
 _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
@@ -1962,6 +1965,52 @@ def _normalize_chain_name(value, default: str = "") -> str:
     return chain_name or default
 
 
+def _normalize_surface_chain(value, default: str, *, allow_all: bool = False) -> str:
+    chain_name = _normalize_chain_name(value, default)
+    if allow_all and chain_name == "all":
+        return "all"
+    if chain_name not in _SUPPORTED_FEED_CHAINS:
+        return default
+    return chain_name
+
+
+def _cycle_surface_chain(current, *, allow_all: bool = False) -> str:
+    order = (("all",) + _CHAIN_CYCLE_ORDER) if allow_all else _CHAIN_CYCLE_ORDER
+    normalized = _normalize_surface_chain(current, order[0], allow_all=allow_all)
+    try:
+        idx = order.index(normalized)
+    except ValueError:
+        idx = 0
+    return order[(idx + 1) % len(order)]
+
+
+def _surface_chain_label(chain: str) -> str:
+    normalized = _normalize_chain_name(chain)
+    if normalized == "solana":
+        return "SOL"
+    if normalized == "base":
+        return "BASE"
+    if normalized == "eth":
+        return "ETH"
+    if normalized == "bsc":
+        return "BSC"
+    if normalized == "all":
+        return "ALL"
+    return normalized.upper() if normalized else ""
+
+
+def _browse_source_label(base_label: str, chain: str) -> str:
+    chain_label = _surface_chain_label(chain)
+    return f"{base_label} {chain_label}".strip()
+
+
+def _normalize_signals_chain(value, default: str = "solana") -> str:
+    chain_name = _normalize_surface_chain(value, default, allow_all=False)
+    if chain_name not in _SIGNALS_SUPPORTED_CHAINS:
+        return default
+    return chain_name
+
+
 def _filter_supported_feed_items(items, fallback_chain: str = "") -> list:
     filtered = []
     fallback = _normalize_chain_name(fallback_chain)
@@ -2157,7 +2206,7 @@ def _paper_positions_rows(account: dict) -> tuple[list[dict], list[str]]:
     return rows, token_ids
 
 
-def _build_paper_portfolio_payload(conn: "ConnectionHandler") -> dict:
+def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str = "all") -> dict:
     account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
     token_ids = [meta["token_id"] for meta in _PAPER_NATIVE_TOKEN_META.values()]
     paper_positions, position_token_ids = _paper_positions_rows(account)
@@ -2166,9 +2215,12 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler") -> dict:
 
     holdings = []
     total_usd = 0.0
+    normalized_chain_filter = _normalize_surface_chain(chain_filter, "all", allow_all=True)
 
     for chain, balance in (account.get("balances") or {}).items():
         if chain not in _PAPER_NATIVE_TOKEN_META or not isinstance(balance, dict):
+            continue
+        if normalized_chain_filter != "all" and chain != normalized_chain_filter:
             continue
         token_meta = _PAPER_NATIVE_TOKEN_META[chain]
         symbol = str(balance.get("symbol") or token_meta["symbol"])
@@ -2199,6 +2251,8 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler") -> dict:
     for position in paper_positions:
         symbol = str(position.get("symbol") or "TOKEN").strip() or "TOKEN"
         chain = _normalize_chain_name(position.get("chain"), "solana")
+        if normalized_chain_filter != "all" and chain != normalized_chain_filter:
+            continue
         addr = str(position.get("addr") or "").strip()
         token_id = str(position.get("token_id") or f"{addr}-{chain}").strip()
         try:
@@ -2236,6 +2290,7 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler") -> dict:
         "holding_source": "paper_store",
         "wallet_source_label": "Paper account",
         "mode_label": "PAPER",
+        "chain_label": _surface_chain_label(normalized_chain_filter),
         "total_usd": _fmt_volume(total_usd),
         "pnl": "N/A",
         "pnl_pct": "N/A",
@@ -3220,19 +3275,25 @@ ave_open_watchlist_desc = {
 
 
 @register_function("ave_list_signals", ave_list_signals_desc, ToolType.SYSTEM_CTL)
-def ave_list_signals(conn: "ConnectionHandler"):
+def ave_list_signals(conn: "ConnectionHandler", chain: str = ""):
     try:
+        state = _ensure_ave_state(conn)
+        selected_chain = _normalize_signals_chain(chain or state.get("signals_chain"), "solana")
+        state["signals_chain"] = selected_chain
+
         # Cut over FEED session before REST fetch so pending/stale live pushes
         # cannot repaint the previous feed while Signals is loading.
         feed_session = _invalidate_live_feed_session(conn, clear_tokens=True)
 
-        resp = _data_get("/signals/public/list", {"limit": 20, "pageSize": 20, "pageNO": 1})
+        resp = _data_get(
+            "/signals/public/list",
+            {"chain": selected_chain, "limit": 20, "pageSize": 20, "pageNO": 1},
+        )
         raw = resp.get("data", {})
         if isinstance(raw, dict):
             raw = raw.get("list", raw.get("items", []))
         rows = _build_signals_rows(raw if isinstance(raw, list) else [])
 
-        state = _ensure_ave_state(conn)
         state["screen"] = "browse"
         state["feed_source"] = "signals"
         state["feed_platform"] = ""
@@ -3250,7 +3311,7 @@ def ave_list_signals(conn: "ConnectionHandler"):
                 {
                     "tokens": rows or [_empty_feed_row("SIGNALS", "No signals now")],
                     "mode": "signals",
-                    "source_label": "SIGNALS",
+                    "source_label": _browse_source_label("SIGNALS", selected_chain),
                     "cursor": state.get("feed_cursor", 0),
                     "feed_session": feed_session,
                 },
@@ -3274,9 +3335,15 @@ def ave_list_signals(conn: "ConnectionHandler"):
 
 
 @register_function("ave_open_watchlist", ave_open_watchlist_desc, ToolType.SYSTEM_CTL)
-def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
+def ave_open_watchlist(conn: "ConnectionHandler", cursor=None, chain_filter: str = ""):
     try:
         state = _ensure_ave_state(conn)
+        selected_chain = _normalize_surface_chain(
+            chain_filter or state.get("watchlist_chain"),
+            "all",
+            allow_all=True,
+        )
+        state["watchlist_chain"] = selected_chain
         if cursor is None:
             cursor = state.get("feed_cursor", 0)
         try:
@@ -3288,6 +3355,11 @@ def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
             _watchlist_store_path(),
             _watchlist_namespace(conn),
         )
+        if selected_chain != "all":
+            saved_rows = [
+                row for row in saved_rows
+                if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
+            ]
         rows = _build_watchlist_rows(saved_rows)
 
         state["screen"] = "browse"
@@ -3307,7 +3379,7 @@ def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
                 {
                     "tokens": rows or [_empty_feed_row("WATCHLIST", "Watchlist empty")],
                     "mode": "watchlist",
-                    "source_label": "WATCHLIST",
+                    "source_label": _browse_source_label("WATCHLIST", selected_chain),
                     "cursor": state.get("feed_cursor", 0),
                     "feed_session": feed_session,
                 },
@@ -4710,15 +4782,22 @@ ave_portfolio_desc = {
 
 
 @register_function("ave_portfolio", ave_portfolio_desc, ToolType.SYSTEM_CTL)
-def ave_portfolio(conn: "ConnectionHandler"):
+def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
     """查询持仓并推送 PORTFOLIO 屏幕"""
     try:
+        state = _ensure_ave_state(conn)
+        selected_chain = _normalize_surface_chain(
+            chain_filter or state.get("portfolio_chain"),
+            "all",
+            allow_all=True,
+        )
+        state["portfolio_chain"] = selected_chain
+
         if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
             _try_fill_paper_limit_orders(conn)
-            state = _ensure_ave_state(conn)
             selection_hint = state.pop("portfolio_selected_token", None)
             state["screen"] = "portfolio"
-            payload = _build_paper_portfolio_payload(conn)
+            payload = _build_paper_portfolio_payload(conn, chain_filter=selected_chain)
             holdings = payload.get("holdings", [])
             cursor = payload.get("cursor", 0)
             if isinstance(selection_hint, dict):
@@ -4744,7 +4823,6 @@ def ave_portfolio(conn: "ConnectionHandler"):
             return ActionResponse(action=Action.NONE, result=f"paper_portfolio:{len(holdings)}tokens", response=None)
 
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
-        state = _ensure_ave_state(conn)
         selection_hint = state.pop("portfolio_selected_token", None)
         state["screen"] = "portfolio"
         state["portfolio_holdings"] = []
@@ -4757,6 +4835,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
                 "total_usd": "$0",
                 "pnl": "N/A",
                 "pnl_pct": "N/A",
+                "chain_label": _surface_chain_label(selected_chain),
                 **explanation_fields,
             }))
             state["portfolio_cursor"] = 0
@@ -4780,6 +4859,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
                 "total_usd": "$0",
                 "pnl": "N/A",
                 "pnl_pct": "N/A",
+                "chain_label": _surface_chain_label(selected_chain),
                 **explanation_fields,
             }))
             state["portfolio_holding_source"] = "getUserByAssetsId"
@@ -4824,6 +4904,12 @@ def ave_portfolio(conn: "ConnectionHandler"):
 
         # Sort by value descending using raw float to avoid suffix parsing errors
         holdings.sort(key=lambda h: h.get("_value_raw", 0), reverse=True)
+        if selected_chain != "all":
+            holdings = [
+                row for row in holdings
+                if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
+            ]
+            total_usd = sum(float(row.get("_value_raw", 0) or 0) for row in holdings)
         cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
         if isinstance(selection_hint, dict):
             selected_idx = _portfolio_holding_index(
@@ -4840,6 +4926,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
             "cursor": cursor,
             "wallets": portfolio_wallets,
             "holding_source": holding_source,
+            "chain_label": _surface_chain_label(selected_chain),
             "total_usd": _fmt_volume(total_usd),
             "pnl": "N/A",
             "pnl_pct": "N/A",

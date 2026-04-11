@@ -72,6 +72,16 @@ class KeyActionHandler(TextMessageHandler):
                 return None
             return normalized
 
+        def _cycle_action_chain(current_value, *, allow_all=False):
+            order = ["solana", "base", "eth", "bsc"]
+            if allow_all:
+                order = ["all"] + order
+            normalized = str(current_value or "").strip().lower()
+            if normalized not in order:
+                normalized = order[0]
+            next_idx = (order.index(normalized) + 1) % len(order)
+            return order[next_idx]
+
         action = msg_json.get("action", "")
         token_id = msg_json.get("token_id", "")
         raw_chain, token_addr, token_chain, token_has_chain = _resolve_asset_ref(
@@ -268,6 +278,37 @@ class KeyActionHandler(TextMessageHandler):
                 ave_open_watchlist(conn)
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action watchlist error: {e}")
+
+        elif action == "signals_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            order = ["solana", "bsc"]
+            current_chain = str(state.get("signals_chain") or "").strip().lower()
+            if current_chain not in order:
+                current_chain = order[0]
+            next_chain = order[(order.index(current_chain) + 1) % len(order)]
+            logger.bind(tag=TAG).info(f"key_action signals_chain_cycle -> {next_chain}")
+            try:
+                ave_list_signals(conn, chain=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action signals_chain_cycle error: {e}")
+
+        elif action == "watchlist_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            next_chain = _cycle_action_chain(state.get("watchlist_chain"), allow_all=True)
+            logger.bind(tag=TAG).info(f"key_action watchlist_chain_cycle -> {next_chain}")
+            try:
+                ave_open_watchlist(conn, cursor=0, chain_filter=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action watchlist_chain_cycle error: {e}")
+
+        elif action == "portfolio_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            next_chain = _cycle_action_chain(state.get("portfolio_chain"), allow_all=True)
+            logger.bind(tag=TAG).info(f"key_action portfolio_chain_cycle -> {next_chain}")
+            try:
+                ave_portfolio(conn, chain_filter=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action portfolio_chain_cycle error: {e}")
 
         elif action == "explorer_sync":
             logger.bind(tag=TAG).info("key_action explorer_sync")

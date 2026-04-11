@@ -310,12 +310,8 @@ static void _update_hints(void)
 {
     if (!s_lbl_nav_hint || !s_lbl_src_hint || !s_lbl_action_hint) return;
     lv_label_set_text(s_lbl_nav_hint, "^ v MOVE");
-    lv_label_set_text(s_lbl_src_hint, " | B EXPLORER");
-    if (s_mode == BROWSE_MODE_WATCHLIST) {
-        lv_label_set_text(s_lbl_action_hint, "> Detail | X Remove | B Back");
-    } else {
-        lv_label_set_text(s_lbl_action_hint, "> Detail | B Back");
-    }
+    lv_label_set_text(s_lbl_src_hint, "");
+    lv_label_set_text(s_lbl_action_hint, "> Detail | X Chain | B Back");
 }
 
 static void _clear_row(browse_row_ui_t *ui)
@@ -683,8 +679,12 @@ void screen_browse_key(int key)
         _enter_selected_detail();
         return;
     }
-    if (key == AVE_KEY_X && s_mode == BROWSE_MODE_WATCHLIST) {
-        _emit_watchlist_remove();
+    if (key == AVE_KEY_X) {
+        if (s_mode == BROWSE_MODE_WATCHLIST) {
+            ave_send_json("{\"type\":\"key_action\",\"action\":\"watchlist_chain_cycle\"}");
+        } else {
+            ave_send_json("{\"type\":\"key_action\",\"action\":\"signals_chain_cycle\"}");
+        }
         return;
     }
     if (key == AVE_KEY_LEFT || key == AVE_KEY_B) {

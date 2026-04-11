@@ -287,7 +287,7 @@ void ave_sm_key_press(int key)
     }
 
     /* Global shortcut: Y button → portfolio (works from any screen) */
-    if (key == AVE_KEY_Y) {
+    if (key == AVE_KEY_Y && s_current != AVE_SCREEN_PORTFOLIO) {
         if (is_confirm_waiting_ack) {
             return;
         }
