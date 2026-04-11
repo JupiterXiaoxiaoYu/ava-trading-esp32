@@ -37,11 +37,13 @@ typedef enum {
     EXPLORER_SURFACE_MENU = 0,
     EXPLORER_SURFACE_SEARCH_GUIDE,
     EXPLORER_SURFACE_SOURCES,
+    EXPLORER_SURFACE_TRADE_MODE,
 } explorer_surface_t;
 
 typedef enum {
     EXPLORER_ITEM_SEARCH = 0,
     EXPLORER_ITEM_ORDERS,
+    EXPLORER_ITEM_TRADE_MODE,
     EXPLORER_ITEM_SOURCES,
     EXPLORER_ITEM_SIGNALS,
     EXPLORER_ITEM_WATCHLIST,
@@ -82,6 +84,7 @@ typedef struct {
 static const explorer_item_t MENU_ITEMS[EXPLORER_ITEM_COUNT] = {
     {EXPLORER_ITEM_SEARCH,    "Search",    "Say token"},
     {EXPLORER_ITEM_ORDERS,    "Orders",    "Open current orders list"},
+    {EXPLORER_ITEM_TRADE_MODE,"Trading Mode", "Current: Real"},
     {EXPLORER_ITEM_SOURCES,   "Sources",   "Choose topic or platform"},
     {EXPLORER_ITEM_SIGNALS,   "Signals",   "Browse public signal flow"},
     {EXPLORER_ITEM_WATCHLIST, "Watchlist", "Open saved tokens"},
@@ -116,6 +119,12 @@ static const explorer_surface_model_t SOURCES_MODEL = {
     "> OPEN | Y PORTFOLIO",
 };
 
+static const explorer_surface_model_t TRADE_MODE_MODEL = {
+    "^ v MOVE",
+    "Mode picker",
+    "> APPLY | B BACK",
+};
+
 static lv_obj_t *s_screen = NULL;
 static lv_obj_t *s_top_bar = NULL;
 static lv_obj_t *s_lbl_source = NULL;
@@ -127,6 +136,8 @@ static explorer_row_ui_t s_rows[VISIBLE_ROWS];
 static explorer_surface_t s_surface = EXPLORER_SURFACE_MENU;
 static int s_menu_idx = 0;
 static int s_source_idx = 0;
+static int s_trade_mode_idx = 0;
+static char s_trade_mode[8] = "real";
 
 #if defined(__GNUC__)
 extern const char *screen_feed_get_last_search_query(void) __attribute__((weak));
@@ -152,6 +163,11 @@ static int _source_count(void)
     return (int)(sizeof(SOURCE_MENU) / sizeof(SOURCE_MENU[0]));
 }
 
+static int _trade_mode_count(void)
+{
+    return 2;
+}
+
 static int _clamp_source_idx(int idx)
 {
     if (idx < 0) return 0;
@@ -159,11 +175,53 @@ static int _clamp_source_idx(int idx)
     return idx;
 }
 
+static int _clamp_trade_mode_idx(int idx)
+{
+    if (idx < 0) return 0;
+    if (idx >= _trade_mode_count()) return _trade_mode_count() - 1;
+    return idx;
+}
+
 static const explorer_surface_model_t *_current_surface_model(void)
 {
     if (s_surface == EXPLORER_SURFACE_SEARCH_GUIDE) return &SEARCH_MODEL;
     if (s_surface == EXPLORER_SURFACE_SOURCES) return &SOURCES_MODEL;
+    if (s_surface == EXPLORER_SURFACE_TRADE_MODE) return &TRADE_MODE_MODEL;
     return &MENU_MODEL;
+}
+
+static const char *_trade_mode_subtitle(void)
+{
+    return (strcmp(s_trade_mode, "paper") == 0) ? "Current: Paper" : "Current: Real";
+}
+
+static void _set_trade_mode_local(const char *mode)
+{
+    if (mode && strcmp(mode, "paper") == 0) {
+        snprintf(s_trade_mode, sizeof(s_trade_mode), "%s", "paper");
+        s_trade_mode_idx = 1;
+        return;
+    }
+    snprintf(s_trade_mode, sizeof(s_trade_mode), "%s", "real");
+    s_trade_mode_idx = 0;
+}
+
+static void _sync_trade_mode_from_json(const char *json)
+{
+    const char *p;
+    if (!json) return;
+    p = strstr(json, "\"trade_mode\"");
+    if (!p) return;
+    p = strchr(p, ':');
+    if (!p) return;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return;
+    if (strncmp(p, "\"paper\"", 7) == 0) {
+        _set_trade_mode_local("paper");
+    } else if (strncmp(p, "\"real\"", 6) == 0) {
+        _set_trade_mode_local("real");
+    }
 }
 
 static void _apply_row_layout(explorer_row_ui_t *ui)
@@ -224,6 +282,12 @@ static void _refresh_count(void)
         lv_label_set_text(s_lbl_count, buf);
         return;
     }
+    if (s_surface == EXPLORER_SURFACE_TRADE_MODE) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%d/%d", s_trade_mode_idx + 1, _trade_mode_count());
+        lv_label_set_text(s_lbl_count, buf);
+        return;
+    }
     lv_label_set_text(s_lbl_count, "");
 }
 
@@ -269,13 +333,17 @@ static void _render_rows(void)
                 _clear_row(ui);
                 continue;
             }
+            const char *detail = MENU_ITEMS[r].subtitle;
+            if (MENU_ITEMS[r].id == EXPLORER_ITEM_TRADE_MODE) {
+                detail = _trade_mode_subtitle();
+            }
             int selected = (r == s_menu_idx);
             _set_row(ui,
                      selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
                      selected ? COLOR_WHITE : COLOR_GRAY,
                      selected ? ">" : "",
                      MENU_ITEMS[r].title,
-                     MENU_ITEMS[r].subtitle);
+                     detail);
             continue;
         }
 
@@ -294,6 +362,26 @@ static void _render_rows(void)
             continue;
         }
 
+        if (s_surface == EXPLORER_SURFACE_TRADE_MODE) {
+            static const char *mode_title[2] = {"Real Trading", "Paper Trading"};
+            static const char *mode_detail[2] = {
+                "Live wallet and orders",
+                "Simulated funds and fills",
+            };
+            if (r >= _trade_mode_count()) {
+                _clear_row(ui);
+                continue;
+            }
+            int selected = (r == s_trade_mode_idx);
+            _set_row(ui,
+                     selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
+                     selected ? COLOR_WHITE : COLOR_GRAY,
+                     selected ? ">" : "",
+                     mode_title[r],
+                     mode_detail[r]);
+            continue;
+        }
+
         _set_row(ui,
                  (r == 0) ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG),
                  (r == 0) ? COLOR_WHITE : COLOR_GRAY,
@@ -307,6 +395,21 @@ static void _show_feed_and_send(const char *cmd)
 {
     ave_sm_open_feed_cached();
     if (cmd && cmd[0]) ave_send_json(cmd);
+}
+
+static void _apply_trade_mode_selection(void)
+{
+    s_trade_mode_idx = _clamp_trade_mode_idx(s_trade_mode_idx);
+    if (s_trade_mode_idx <= 0) {
+        _set_trade_mode_local("real");
+        ave_send_json("{\"type\":\"key_action\",\"action\":\"trade_mode_set\",\"mode\":\"real\"}");
+    } else {
+        _set_trade_mode_local("paper");
+        ave_send_json("{\"type\":\"key_action\",\"action\":\"trade_mode_set\",\"mode\":\"paper\"}");
+    }
+    s_surface = EXPLORER_SURFACE_MENU;
+    if (s_lbl_source) lv_label_set_text(s_lbl_source, "EXPLORER");
+    _render_rows();
 }
 
 static void _activate_menu_item(void)
@@ -328,6 +431,14 @@ static void _activate_menu_item(void)
 
     if (item->id == EXPLORER_ITEM_ORDERS) {
         _show_feed_and_send("{\"type\":\"key_action\",\"action\":\"orders\"}");
+        return;
+    }
+
+    if (item->id == EXPLORER_ITEM_TRADE_MODE) {
+        s_surface = EXPLORER_SURFACE_TRADE_MODE;
+        s_trade_mode_idx = (strcmp(s_trade_mode, "paper") == 0) ? 1 : 0;
+        if (s_lbl_source) lv_label_set_text(s_lbl_source, "MODE");
+        _render_rows();
         return;
     }
 
@@ -458,12 +569,13 @@ static void _build_screen(void)
 
 void screen_explorer_show(const char *json_data)
 {
-    (void)json_data;
+    _sync_trade_mode_from_json(json_data);
     if (!s_screen) _build_screen();
     lv_screen_load(s_screen);
     s_surface = EXPLORER_SURFACE_MENU;
     s_menu_idx = 0;
     s_source_idx = 0;
+    s_trade_mode_idx = (strcmp(s_trade_mode, "paper") == 0) ? 1 : 0;
     if (s_lbl_source) lv_label_set_text(s_lbl_source, "EXPLORER");
     _render_rows();
 }
@@ -515,8 +627,33 @@ void screen_explorer_key(int key)
         return;
     }
 
+    if (s_surface == EXPLORER_SURFACE_TRADE_MODE) {
+        if (key == AVE_KEY_UP) {
+            if (s_trade_mode_idx > 0) s_trade_mode_idx--;
+            _render_rows();
+            return;
+        }
+        if (key == AVE_KEY_DOWN) {
+            if (s_trade_mode_idx < _trade_mode_count() - 1) s_trade_mode_idx++;
+            _render_rows();
+            return;
+        }
+        if (key == AVE_KEY_RIGHT || key == AVE_KEY_A) {
+            _apply_trade_mode_selection();
+            return;
+        }
+        if (key == AVE_KEY_LEFT || key == AVE_KEY_B) {
+            s_surface = EXPLORER_SURFACE_MENU;
+            if (s_lbl_source) lv_label_set_text(s_lbl_source, "EXPLORER");
+            _render_rows();
+            return;
+        }
+        return;
+    }
+
     if (key == AVE_KEY_LEFT || key == AVE_KEY_B) {
         s_surface = EXPLORER_SURFACE_MENU;
+        if (s_lbl_source) lv_label_set_text(s_lbl_source, "EXPLORER");
         _render_rows();
     }
 }

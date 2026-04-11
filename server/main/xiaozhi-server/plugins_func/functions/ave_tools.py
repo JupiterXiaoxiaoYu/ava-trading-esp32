@@ -26,6 +26,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.logger import setup_logging
+from plugins_func.functions.ave_paper_store import (
+    PaperStoreError,
+    get_paper_account,
+    get_trade_mode as load_trade_mode,
+    list_open_orders as list_paper_open_orders,
+    mutate_account as mutate_paper_account,
+    set_trade_mode as persist_trade_mode,
+)
 from plugins_func.functions.ave_watchlist_store import (
     add_watchlist_entry,
     list_watchlist_entries,
@@ -66,6 +74,28 @@ _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
 _WATCHLIST_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_watchlists.json"
+_PAPER_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_paper_accounts.json"
+_TRADE_MODE_REAL = "real"
+_TRADE_MODE_PAPER = "paper"
+_VALID_TRADE_MODES = frozenset({_TRADE_MODE_REAL, _TRADE_MODE_PAPER})
+_PAPER_NATIVE_TOKEN_META = {
+    "solana": {
+        "symbol": "SOL",
+        "token_id": f"{NATIVE_SOL}-solana",
+    },
+    "eth": {
+        "symbol": "ETH",
+        "token_id": "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2-eth",
+    },
+    "base": {
+        "symbol": "ETH",
+        "token_id": "0x4200000000000000000000000000000000000006-base",
+    },
+    "bsc": {
+        "symbol": "BNB",
+        "token_id": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c-bsc",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1181,6 +1211,62 @@ def _watchlist_store_path() -> Path:
     return Path(override) if override else _WATCHLIST_STORE_PATH
 
 
+def _trade_namespace(conn: "ConnectionHandler") -> str:
+    return _watchlist_namespace(conn)
+
+
+def _paper_store_path() -> Path:
+    override = str(os.environ.get("AVE_PAPER_STORE_PATH", "") or "").strip()
+    return Path(override) if override else _PAPER_STORE_PATH
+
+
+def _normalize_trade_mode(mode) -> str:
+    normalized = str(mode or "").strip().lower()
+    return normalized if normalized in _VALID_TRADE_MODES else _TRADE_MODE_REAL
+
+
+def _trade_mode_label(mode: str) -> str:
+    return "Paper Trading" if _normalize_trade_mode(mode) == _TRADE_MODE_PAPER else "Real Trading"
+
+
+def _trade_mode_marker(conn: "ConnectionHandler") -> str:
+    return "PAPER" if _get_trade_mode(conn) == _TRADE_MODE_PAPER else ""
+
+
+def _get_trade_mode(conn: "ConnectionHandler", *, refresh: bool = False) -> str:
+    state = _ensure_ave_state(conn)
+    if not refresh:
+        cached = _normalize_trade_mode(state.get("trade_mode"))
+        if cached in _VALID_TRADE_MODES and state.get("trade_mode"):
+            return cached
+
+    try:
+        mode = _normalize_trade_mode(load_trade_mode(_paper_store_path(), _trade_namespace(conn)))
+    except PaperStoreError as exc:
+        logger.bind(tag=TAG).warning(f"load trade mode failed; defaulting to real: {exc}")
+        mode = _TRADE_MODE_REAL
+
+    state["trade_mode"] = mode
+    return mode
+
+
+def _set_trade_mode(conn: "ConnectionHandler", mode: str) -> str:
+    normalized = _normalize_trade_mode(mode)
+    normalized = _normalize_trade_mode(
+        persist_trade_mode(_paper_store_path(), _trade_namespace(conn), normalized)
+    )
+    _ensure_ave_state(conn)["trade_mode"] = normalized
+    return normalized
+
+
+def _build_explorer_payload(conn: "ConnectionHandler") -> dict:
+    mode = _get_trade_mode(conn)
+    return {
+        "trade_mode": mode,
+        "trade_mode_label": _trade_mode_label(mode),
+    }
+
+
 def _resolve_feed_total(state: dict) -> int | None:
     feed_list = state.get("feed_token_list")
     if not isinstance(feed_list, list) or not feed_list:
@@ -2023,6 +2109,649 @@ def _collect_portfolio_holdings(wallets) -> tuple[list, dict, list]:
     return token_ids, holdings_map, sorted(holding_sources)
 
 
+def _price_map_for_token_ids(token_ids: list[str]) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    if not token_ids:
+        return prices
+
+    price_resp = _data_post("/tokens/price", _build_batch_price_payload(token_ids[:50]))
+    price_data = price_resp.get("data", {})
+    if isinstance(price_data, dict):
+        for tid_str, info in price_data.items():
+            if isinstance(info, dict):
+                prices[_normalize_batch_price_token_id(tid_str)] = float(
+                    info.get("current_price_usd", 0) or 0
+                )
+    elif isinstance(price_data, list):
+        for row in price_data:
+            if not isinstance(row, dict):
+                continue
+            tid_str = row.get("token_id", "")
+            prices[_normalize_batch_price_token_id(tid_str)] = float(
+                row.get("current_price_usd", row.get("price", 0)) or 0
+            )
+    return prices
+
+
+def _paper_positions_rows(account: dict) -> tuple[list[dict], list[str]]:
+    rows: list[dict] = []
+    token_ids: list[str] = []
+    raw_positions = account.get("positions", {})
+
+    if isinstance(raw_positions, dict):
+        iterable = raw_positions.values()
+    elif isinstance(raw_positions, list):
+        iterable = raw_positions
+    else:
+        iterable = []
+
+    for position in iterable:
+        if not isinstance(position, dict):
+            continue
+        token_id = str(position.get("token_id") or "").strip()
+        if token_id:
+            token_ids.append(token_id)
+        rows.append(position)
+    return rows, token_ids
+
+
+def _build_paper_portfolio_payload(conn: "ConnectionHandler") -> dict:
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    token_ids = [meta["token_id"] for meta in _PAPER_NATIVE_TOKEN_META.values()]
+    paper_positions, position_token_ids = _paper_positions_rows(account)
+    token_ids.extend(position_token_ids)
+    prices = _price_map_for_token_ids(token_ids)
+
+    holdings = []
+    total_usd = 0.0
+
+    for chain, balance in (account.get("balances") or {}).items():
+        if chain not in _PAPER_NATIVE_TOKEN_META or not isinstance(balance, dict):
+            continue
+        token_meta = _PAPER_NATIVE_TOKEN_META[chain]
+        symbol = str(balance.get("symbol") or token_meta["symbol"])
+        try:
+            amount = float(balance.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        price = prices.get(_normalize_batch_price_token_id(token_meta["token_id"]), 0.0)
+        value = amount * price
+        total_usd += value
+        holdings.append({
+            "symbol": symbol,
+            "addr": "",
+            "chain": chain,
+            "contract_tail": "",
+            "token_id": token_meta["token_id"],
+            "source_tag": "",
+            "balance": f"{amount:.4f}",
+            "balance_raw": "",
+            "amount_raw": "",
+            "value_usd": _fmt_volume(value),
+            "_value_raw": value,
+            "price": _fmt_price(price),
+            "pnl_pct": "N/A",
+            "pnl_positive": None,
+        })
+
+    for position in paper_positions:
+        symbol = str(position.get("symbol") or "TOKEN").strip() or "TOKEN"
+        chain = _normalize_chain_name(position.get("chain"), "solana")
+        addr = str(position.get("addr") or "").strip()
+        token_id = str(position.get("token_id") or f"{addr}-{chain}").strip()
+        try:
+            amount = float(position.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        price = prices.get(_normalize_batch_price_token_id(token_id), 0.0)
+        value = amount * price
+        total_usd += value
+        balance_raw = str(position.get("amount_raw") or "").strip()
+        holdings.append({
+            "symbol": symbol,
+            "addr": addr,
+            "chain": chain,
+            "contract_tail": str(position.get("contract_tail") or ""),
+            "token_id": token_id,
+            "source_tag": "",
+            "balance": f"{amount:.4f}",
+            "balance_raw": balance_raw,
+            "amount_raw": balance_raw,
+            "value_usd": _fmt_volume(value),
+            "_value_raw": value,
+            "price": _fmt_price(price),
+            "pnl_pct": "N/A",
+            "pnl_positive": None,
+        })
+
+    holdings.sort(key=lambda row: row.get("_value_raw", 0), reverse=True)
+    state = _ensure_ave_state(conn)
+    cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
+    return {
+        "holdings": holdings,
+        "cursor": cursor,
+        "wallets": [],
+        "holding_source": "paper_store",
+        "wallet_source_label": "Paper account",
+        "mode_label": "PAPER",
+        "total_usd": _fmt_volume(total_usd),
+        "pnl": "N/A",
+        "pnl_pct": "N/A",
+        "pnl_reason": "Paper account",
+    }
+
+
+def _paper_limit_order_rows(conn: "ConnectionHandler", chain: str) -> list[dict]:
+    rows = []
+    for order in list_paper_open_orders(_paper_store_path(), _trade_namespace(conn)):
+        if not isinstance(order, dict):
+            continue
+        row_chain = _normalize_chain_name(order.get("chain"), chain)
+        if row_chain != chain:
+            continue
+        rows.append({
+            "id": str(order.get("id") or ""),
+            "outTokenAddress": str(order.get("addr") or ""),
+            "symbol": str(order.get("symbol") or "TOKEN"),
+            "chain": row_chain,
+            "limitPrice": order.get("limit_price"),
+            "createPrice": order.get("create_price"),
+        })
+    return _build_limit_order_rows(rows, chain=chain)
+
+
+def _try_fill_paper_limit_orders(
+    conn: "ConnectionHandler",
+    *,
+    chain: str = "",
+    token_addr: str = "",
+) -> list[dict]:
+    normalized_chain = _normalize_chain_name(chain)
+    resolved_addr, _ = _split_token_reference(token_addr, normalized_chain)
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    open_orders = account.get("open_orders", [])
+    candidates = []
+    token_ids = set()
+    native_token_ids = set()
+
+    for order in open_orders:
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("status") or "waiting") != "waiting":
+            continue
+        order_chain = _normalize_chain_name(order.get("chain"), normalized_chain or "solana")
+        order_addr = str(order.get("addr") or "").strip()
+        if normalized_chain and order_chain != normalized_chain:
+            continue
+        if resolved_addr and order_addr != resolved_addr:
+            continue
+        token_id = f"{order_addr}-{order_chain}" if order_addr else ""
+        native_meta = _PAPER_NATIVE_TOKEN_META.get(order_chain)
+        if not token_id or not native_meta:
+            continue
+        candidates.append((order, token_id, native_meta))
+        token_ids.add(token_id)
+        native_token_ids.add(native_meta["token_id"])
+
+    if not candidates:
+        return []
+
+    prices = _price_map_for_token_ids(list(token_ids) + list(native_token_ids))
+    fill_plan: dict[str, dict] = {}
+
+    for order, token_id, native_meta in candidates:
+        current_price = Decimal(str(prices.get(_normalize_batch_price_token_id(token_id), 0) or 0))
+        native_price = Decimal(
+            str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0)
+        )
+        limit_price = _parse_decimal_amount(order.get("limit_price"))
+        native_amount = _parse_decimal_amount(order.get("native_amount"))
+        if current_price <= 0 or native_price <= 0 or limit_price is None or native_amount is None:
+            continue
+        if current_price > limit_price:
+            continue
+        usd_value = native_amount * native_price
+        token_amount = usd_value / current_price if current_price > 0 else Decimal("0")
+        fill_plan[str(order.get("id") or "")] = {
+            "symbol": str(order.get("symbol") or "TOKEN"),
+            "addr": str(order.get("addr") or ""),
+            "chain": _normalize_chain_name(order.get("chain"), "solana"),
+            "token_id": token_id,
+            "native_amount": native_amount,
+            "native_symbol": native_meta["symbol"],
+            "token_amount": token_amount,
+            "price_usd": current_price,
+            "amount_usd": usd_value,
+            "fill_id": f"paper-fill-{int(time.time() * 1000)}-{str(order.get('id') or '')}",
+            "order_id": str(order.get("id") or ""),
+        }
+
+    if not fill_plan:
+        return []
+
+    def _mutate(account_data: dict):
+        open_orders_data = account_data.setdefault("open_orders", [])
+        positions = account_data.setdefault("positions", {})
+        fills = account_data.setdefault("fills", [])
+        kept = []
+        applied = []
+        for order in open_orders_data:
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("id") or "")
+            fill = fill_plan.get(order_id)
+            if not fill:
+                kept.append(order)
+                continue
+
+            position_key = _paper_position_key(fill["addr"], fill["chain"])
+            existing = positions.get(position_key)
+            prev_amount = _parse_decimal_amount((existing or {}).get("amount")) or Decimal("0")
+            prev_cost = _parse_decimal_amount((existing or {}).get("cost_basis_usd")) or Decimal("0")
+            new_amount = prev_amount + fill["token_amount"]
+            new_cost = prev_cost + fill["amount_usd"]
+            avg_cost = (new_cost / new_amount) if new_amount > 0 else Decimal("0")
+            positions[position_key] = {
+                "addr": fill["addr"],
+                "chain": fill["chain"],
+                "symbol": fill["symbol"],
+                "token_id": fill["token_id"],
+                "amount": _decimal_to_string(new_amount),
+                "amount_raw": _decimal_to_string(new_amount),
+                "avg_cost_usd": _decimal_to_string(avg_cost),
+                "cost_basis_usd": _decimal_to_string(new_cost),
+                "last_price_usd": _decimal_to_string(fill["price_usd"]),
+            }
+            fills.insert(0, {
+                "id": fill["fill_id"],
+                "order_id": fill["order_id"],
+                "trade_type": "limit_buy",
+                "fill_source": "paper_limit_match",
+                "chain": fill["chain"],
+                "addr": fill["addr"],
+                "symbol": fill["symbol"],
+                "native_amount": _decimal_to_string(fill["native_amount"]),
+                "native_symbol": fill["native_symbol"],
+                "token_amount": _decimal_to_string(fill["token_amount"]),
+                "price_usd": _decimal_to_string(fill["price_usd"]),
+                "amount_usd": _decimal_to_string(fill["amount_usd"]),
+                "created_at": int(time.time()),
+            })
+            applied.append(fill)
+        account_data["open_orders"] = kept
+        return applied
+
+    _, applied_fills = mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    if applied_fills:
+        symbols = [str(item.get("symbol") or "TOKEN") for item in applied_fills[:3]]
+        body = ", ".join(symbols)
+        if len(applied_fills) > 3:
+            body = f"{body} +{len(applied_fills) - 3} more"
+        conn.loop.create_task(_send_display(conn, "notify", {
+            "level": "info",
+            "title": "Paper Order Filled",
+            "body": body,
+        }))
+    return applied_fills or []
+
+
+def _paper_position_key(addr: str, chain: str) -> str:
+    resolved_addr, resolved_chain = _split_token_reference(addr, chain)
+    return f"{resolved_addr}-{resolved_chain}" if resolved_addr and resolved_chain else ""
+
+
+def _format_paper_amount(amount: Decimal, symbol: str) -> str:
+    return f"{_decimal_to_string(amount)} {symbol}".strip()
+
+
+def _paper_market_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("outTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    native_amount = _parse_decimal_amount(params.get("paper_native_amount"))
+    if native_amount is None:
+        try:
+            native_amount = Decimal(str(params.get("inAmount", "0"))) / Decimal("1000000000")
+        except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+            native_amount = None
+    if native_amount is None or native_amount <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid trade amount"}
+
+    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    prices = _price_map_for_token_ids([native_meta["token_id"], f"{token_addr}-{token_chain}"])
+    native_price = Decimal(str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0))
+    token_price = Decimal(str(prices.get(_normalize_batch_price_token_id(f"{token_addr}-{token_chain}"), 0) or 0))
+    if native_price <= 0 or token_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Paper price unavailable"}
+
+    usd_value = native_amount * native_price
+    token_amount = usd_value / token_price
+    position_key = _paper_position_key(token_addr, token_chain)
+    tx_id = f"paper-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        if balance_amount < native_amount:
+            raise PaperStoreError(f"Insufficient {native_meta['symbol']} balance")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount - native_amount)
+
+        positions = account.setdefault("positions", {})
+        existing = positions.get(position_key)
+        prev_amount = _parse_decimal_amount((existing or {}).get("amount")) or Decimal("0")
+        prev_cost = _parse_decimal_amount((existing or {}).get("cost_basis_usd")) or Decimal("0")
+        new_amount = prev_amount + token_amount
+        new_cost = prev_cost + usd_value
+        avg_cost = (new_cost / new_amount) if new_amount > 0 else Decimal("0")
+        positions[position_key] = {
+            "addr": token_addr,
+            "chain": token_chain,
+            "symbol": symbol,
+            "token_id": f"{token_addr}-{token_chain}",
+            "amount": _decimal_to_string(new_amount),
+            "amount_raw": _decimal_to_string(new_amount),
+            "avg_cost_usd": _decimal_to_string(avg_cost),
+            "cost_basis_usd": _decimal_to_string(new_cost),
+            "last_price_usd": _decimal_to_string(token_price),
+        }
+
+        fills = account.setdefault("fills", [])
+        fills.insert(0, {
+            "id": tx_id,
+            "trade_type": trade_type,
+            "chain": token_chain,
+            "addr": token_addr,
+            "symbol": symbol,
+            "native_amount": _decimal_to_string(native_amount),
+            "token_amount": _decimal_to_string(token_amount),
+            "price_usd": _decimal_to_string(token_price),
+            "amount_usd": _decimal_to_string(usd_value),
+            "created_at": int(time.time()),
+        })
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Bought!",
+        "subtitle": "Paper trade executed.",
+        "mode_label": "PAPER",
+        "data": {
+            "txId": tx_id,
+            "outAmountFormatted": _format_paper_amount(token_amount, symbol),
+            "outAmountUsd": f"${usd_value:.2f}",
+            "outTokenSymbol": symbol,
+            "outTokenAddress": token_addr,
+        },
+    }
+
+
+def _paper_market_sell(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("inTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    sell_ratio = _parse_decimal_amount(params.get("paper_sell_ratio")) or Decimal("1")
+    requested_amount = _parse_decimal_amount(params.get("paper_position_amount"))
+    position_key = _paper_position_key(token_addr, token_chain)
+    prices = _price_map_for_token_ids([native_meta["token_id"], f"{token_addr}-{token_chain}"])
+    native_price = Decimal(str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0))
+    token_price = Decimal(str(prices.get(_normalize_batch_price_token_id(f"{token_addr}-{token_chain}"), 0) or 0))
+    if native_price <= 0 or token_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Paper price unavailable"}
+
+    tx_id = f"paper-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        positions = account.setdefault("positions", {})
+        existing = positions.get(position_key)
+        if not isinstance(existing, dict):
+            raise PaperStoreError("No paper position to sell")
+
+        held_amount = _parse_decimal_amount(existing.get("amount")) or Decimal("0")
+        if held_amount <= 0:
+            raise PaperStoreError("No paper position to sell")
+
+        amount_to_sell = requested_amount if requested_amount is not None else held_amount
+        amount_to_sell = amount_to_sell * sell_ratio
+        if amount_to_sell <= 0:
+            raise PaperStoreError("Sell amount must be positive")
+        if amount_to_sell > held_amount:
+            amount_to_sell = held_amount
+
+        avg_cost = _parse_decimal_amount(existing.get("avg_cost_usd")) or Decimal("0")
+        cost_basis = avg_cost * amount_to_sell
+        proceeds_usd = amount_to_sell * token_price
+        native_out = proceeds_usd / native_price
+        remaining = held_amount - amount_to_sell
+
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount + native_out)
+
+        if remaining <= Decimal("0.000000001"):
+            positions.pop(position_key, None)
+        else:
+            remaining_cost = (avg_cost * remaining)
+            existing["amount"] = _decimal_to_string(remaining)
+            existing["amount_raw"] = _decimal_to_string(remaining)
+            existing["cost_basis_usd"] = _decimal_to_string(remaining_cost)
+            existing["last_price_usd"] = _decimal_to_string(token_price)
+
+        realized = _parse_decimal_amount(account.get("realized_pnl_usd")) or Decimal("0")
+        account["realized_pnl_usd"] = _decimal_to_string(realized + (proceeds_usd - cost_basis))
+
+        fills = account.setdefault("fills", [])
+        fills.insert(0, {
+            "id": tx_id,
+            "trade_type": trade_type,
+            "chain": token_chain,
+            "addr": token_addr,
+            "symbol": symbol,
+            "native_amount": _decimal_to_string(native_out),
+            "token_amount": _decimal_to_string(amount_to_sell),
+            "price_usd": _decimal_to_string(token_price),
+            "amount_usd": _decimal_to_string(proceeds_usd),
+            "created_at": int(time.time()),
+        })
+        return native_out, proceeds_usd
+
+    try:
+        _, mutate_result = mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    native_out, proceeds_usd = mutate_result
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Sold!",
+        "subtitle": "Paper trade executed.",
+        "mode_label": "PAPER",
+        "data": {
+            "txId": tx_id,
+            "outAmountFormatted": _format_paper_amount(native_out, native_meta["symbol"]),
+            "outAmountUsd": f"${proceeds_usd:.2f}",
+            "inTokenSymbol": symbol,
+            "inTokenAddress": token_addr,
+        },
+    }
+
+
+def _paper_limit_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("outTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    native_amount = _parse_decimal_amount(params.get("paper_native_amount"))
+    if native_amount is None:
+        try:
+            native_amount = Decimal(str(params.get("inAmount", "0"))) / Decimal("1000000000")
+        except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+            native_amount = None
+    limit_price = _parse_decimal_amount(params.get("limitPrice"))
+    create_price = _parse_decimal_amount(params.get("paper_current_price"))
+    if native_amount is None or native_amount <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid trade amount"}
+    if limit_price is None or limit_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid limit price"}
+
+    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    order_id = f"paper-order-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        if balance_amount < native_amount:
+            raise PaperStoreError(f"Insufficient {native_meta['symbol']} balance")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount - native_amount)
+
+        open_orders = account.setdefault("open_orders", [])
+        open_orders.insert(0, {
+            "id": order_id,
+            "addr": token_addr,
+            "chain": token_chain,
+            "symbol": symbol,
+            "limit_price": _decimal_to_string(limit_price),
+            "create_price": _decimal_to_string(create_price),
+            "native_amount": _decimal_to_string(native_amount),
+            "native_symbol": native_meta["symbol"],
+            "status": "waiting",
+            "created_at": int(time.time()),
+        })
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Limit Order Placed",
+        "subtitle": "Paper limit order created.",
+        "mode_label": "PAPER",
+        "data": {
+            "id": order_id,
+            "outTokenSymbol": symbol,
+            "outTokenAddress": token_addr,
+            "outAmount": "1 order",
+        },
+    }
+
+
+def _paper_cancel_order(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    resolved_ids = [str(item) for item in params.get("ids", []) if item not in (None, "")]
+    if not resolved_ids:
+        return {"trade_type": trade_type, "status": "failed", "error": "No paper order ids"}
+
+    restored = Decimal("0")
+    cancelled_ids: list[str] = []
+
+    def _mutate(account: dict):
+        nonlocal restored
+        open_orders = account.setdefault("open_orders", [])
+        kept = []
+        balances = account.setdefault("balances", {})
+        native_meta = _PAPER_NATIVE_TOKEN_META.get(chain)
+        if native_meta:
+            native_balance = balances.setdefault(
+                chain,
+                {"symbol": native_meta["symbol"], "amount": "0"},
+            )
+            balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        else:
+            native_balance = None
+            balance_amount = Decimal("0")
+
+        for order in open_orders:
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("id") or "")
+            if order_id in resolved_ids:
+                native_amount = _parse_decimal_amount(order.get("native_amount")) or Decimal("0")
+                restored += native_amount
+                cancelled_ids.append(order_id)
+                continue
+            kept.append(order)
+
+        if not cancelled_ids:
+            raise PaperStoreError("No waiting paper orders")
+
+        if native_balance is not None:
+            native_balance["amount"] = _decimal_to_string(balance_amount + restored)
+        account["open_orders"] = kept
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Order Cancelled",
+        "subtitle": "Paper order cancelled.",
+        "mode_label": "PAPER",
+        "data": {
+            "ids": cancelled_ids,
+        },
+    }
+
+
+def _execute_paper_trade(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    if trade_type == "limit_buy":
+        return _paper_limit_buy(conn, trade_type, params)
+    if trade_type == "cancel_order":
+        return _paper_cancel_order(conn, trade_type, params)
+    if trade_type == "market_buy":
+        return _paper_market_buy(conn, trade_type, params)
+    if trade_type == "market_sell":
+        return _paper_market_sell(conn, trade_type, params)
+    return {
+        "trade_type": trade_type,
+        "status": "failed",
+        "error": "Paper mode does not support this trade yet",
+    }
+
+
 def _portfolio_holding_index(holdings: list, addr: str, chain: str) -> int:
     target_addr, target_chain = _split_token_reference(addr, chain)
     if not target_addr:
@@ -2309,6 +3038,7 @@ def _normalize_result_data(result: dict, pending: dict = None) -> dict:
         "tx_id": _trim_result_tx_id(
             data.get("txId", data.get("tx_id", data.get("txHash", data.get("tx_hash", ""))))
         ),
+        "mode_label": _stringify_amount(result.get("mode_label", pending.get("mode_label", ""))),
         "error": error_message if not success else "",
         "subtitle": subtitle,
         "explain_state": explain_state,
@@ -2323,6 +3053,8 @@ def _build_result_payload(result: dict, pending: dict = None) -> dict:
         "action": normalized["action"],
         "symbol": normalized["symbol"],
     }
+    if normalized["mode_label"]:
+        payload["mode_label"] = normalized["mode_label"]
     if normalized["success"]:
         payload["out_amount"] = normalized["out_amount"]
         payload["amount"] = payload["out_amount"]
@@ -3136,17 +3868,22 @@ def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
         state = getattr(conn, "ave_state", {})
         if not chain:
             chain = state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
-        assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
-
-        resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
-            "assetsId": assets_id,
-            "chain": chain,
-            "pageSize": "20",
-            "pageNo": "0",
-            "status": "waiting",
-        })
-        orders = _extract_limit_order_list(resp)
-        rows = _build_limit_order_rows(orders, chain=chain)
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn, chain=chain)
+            rows = _paper_limit_order_rows(conn, chain)
+            source_label = "PAPER ORDERS"
+        else:
+            assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
+            resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
+                "assetsId": assets_id,
+                "chain": chain,
+                "pageSize": "20",
+                "pageNo": "0",
+                "status": "waiting",
+            })
+            orders = _extract_limit_order_list(resp)
+            rows = _build_limit_order_rows(orders, chain=chain)
+            source_label = "ORDERS"
 
         display_rows = rows or [{
             "token_id": "",
@@ -3170,7 +3907,7 @@ def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
             "tokens": display_rows,
             "chain": chain,
             "mode": "orders",
-            "source_label": "ORDERS",
+            "source_label": source_label,
             "feed_session": feed_session,
         }))
 
@@ -3240,18 +3977,27 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
         state = getattr(conn, "ave_state", {})
         chain = chain or state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
         resolved_ids = [str(order_id) for order_id in order_ids]
+        trade_mode = _get_trade_mode(conn)
 
         if resolved_ids == ["all"]:
-            assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
-            resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
-                "assetsId": assets_id,
-                "chain": chain,
-                "pageSize": "20",
-                "pageNo": "0",
-                "status": "waiting",
-            })
-            orders = _extract_limit_order_list(resp)
-            resolved_ids = [str(order.get("id", "")) for order in orders if order.get("id")]
+            if trade_mode == _TRADE_MODE_PAPER:
+                orders = list_paper_open_orders(_paper_store_path(), _trade_namespace(conn))
+                resolved_ids = [
+                    str(order.get("id", ""))
+                    for order in orders
+                    if isinstance(order, dict) and _normalize_chain_name(order.get("chain"), chain) == chain and order.get("id")
+                ]
+            else:
+                assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
+                resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
+                    "assetsId": assets_id,
+                    "chain": chain,
+                    "pageSize": "20",
+                    "pageNo": "0",
+                    "status": "waiting",
+                })
+                orders = _extract_limit_order_list(resp)
+                resolved_ids = [str(order.get("id", "")) for order in orders if order.get("id")]
             if not resolved_ids:
                 return ActionResponse(action=Action.RESPONSE, result="no_waiting_orders", response="没有可撤销的挂单")
 
@@ -3289,6 +4035,7 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
             "sl_pct": 0,
             "slippage_pct": 0.0,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(
@@ -3349,6 +4096,9 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
             if not addr:
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请告诉我你想查看哪个代币的地址或名称")
+
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn, chain=chain, token_addr=addr)
 
         state = _ensure_ave_state(conn)
         previous_screen = str(state.get("screen") or "")
@@ -3630,6 +4380,8 @@ def ave_buy_token(
                     "type": "default",
                 },
             ],
+            "paper_native_amount": str(sol),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -3686,6 +4438,8 @@ def ave_buy_token(
             "slippage_pct": slippage / 100,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
         }
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            confirm_payload["mode_label"] = "PAPER"
         if out_amount_str:
             confirm_payload["out_amount"] = out_amount_str
         conn.loop.create_task(_send_display(conn, "confirm", confirm_payload))
@@ -3780,6 +4534,9 @@ def ave_limit_order(
             "useMev": True,
             "limitPrice": str(limit_price),
             "expireTime": str(expire_secs),
+            "paper_native_amount": str(sol),
+            "paper_current_price": str(current_price if current_price is not None else ""),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -3818,6 +4575,7 @@ def ave_limit_order(
             "amount_native": f"{sol} SOL",
             "expire_hours": expire_hours,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(action=Action.NONE, result=f"limit_pending:{tid}", response=None)
@@ -3887,6 +4645,9 @@ def ave_sell_token(
             "slippage": str(DEFAULT_SLIPPAGE),
             "useMev": True,
             "autoSlippage": True,
+            "paper_sell_ratio": str(sell_ratio),
+            "paper_position_amount": str(holdings_amount or ""),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -3912,12 +4673,13 @@ def ave_sell_token(
             **identity,
             "trade_id": tid,
             "action": "SELL",
-            "amount_native": f"{sell_pct}% 持仓",
+            "amount_native": f"{sell_pct}% holdings",
             "amount_usd": "",
             "tp_pct": None,
             "sl_pct": None,
             "slippage_pct": DEFAULT_SLIPPAGE / 100,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(action=Action.NONE, result=f"sell_pending:{tid}", response=None)
@@ -3949,6 +4711,36 @@ ave_portfolio_desc = {
 def ave_portfolio(conn: "ConnectionHandler"):
     """查询持仓并推送 PORTFOLIO 屏幕"""
     try:
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn)
+            state = _ensure_ave_state(conn)
+            selection_hint = state.pop("portfolio_selected_token", None)
+            state["screen"] = "portfolio"
+            payload = _build_paper_portfolio_payload(conn)
+            holdings = payload.get("holdings", [])
+            cursor = payload.get("cursor", 0)
+            if isinstance(selection_hint, dict):
+                selected_idx = _portfolio_holding_index(
+                    holdings,
+                    selection_hint.get("addr", ""),
+                    selection_hint.get("chain", ""),
+                )
+                if selected_idx >= 0:
+                    cursor = selected_idx
+                    payload["cursor"] = cursor
+            conn.loop.create_task(_send_display(conn, "portfolio", payload))
+            state["portfolio_holdings"] = [
+                {
+                    "addr": row.get("addr", ""),
+                    "chain": row.get("chain", ""),
+                    "symbol": row.get("symbol", ""),
+                }
+                for row in holdings
+                if row.get("addr")
+            ]
+            state["portfolio_cursor"] = cursor
+            return ActionResponse(action=Action.NONE, result=f"paper_portfolio:{len(holdings)}tokens", response=None)
+
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
         state = _ensure_ave_state(conn)
         selection_hint = state.pop("portfolio_selected_token", None)
@@ -3997,22 +4789,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
         state["portfolio_holding_source"] = holding_source
 
         # Batch price query
-        prices = {}
-        if token_ids:
-            price_resp = _data_post("/tokens/price", _build_batch_price_payload(token_ids[:50]))
-            price_data = price_resp.get("data", {})
-            if isinstance(price_data, dict):
-                for tid_str, info in price_data.items():
-                    if isinstance(info, dict):
-                        prices[_normalize_batch_price_token_id(tid_str)] = float(
-                            info.get("current_price_usd", 0) or 0
-                        )
-            elif isinstance(price_data, list):
-                for p in price_data:
-                    tid_str = p.get("token_id", "")
-                    prices[_normalize_batch_price_token_id(tid_str)] = float(
-                        p.get("current_price_usd", p.get("price", 0)) or 0
-                    )
+        prices = _price_map_for_token_ids(token_ids)
 
         # Build holdings list
         holdings = []
@@ -4088,6 +4865,49 @@ def ave_portfolio(conn: "ConnectionHandler"):
         except Exception:
             pass
         return ActionResponse(action=Action.RESPONSE, result=str(e), response="查询持仓失败，请稍后重试")
+
+
+# ---------------------------------------------------------------------------
+# Tool: ave_set_trade_mode
+# ---------------------------------------------------------------------------
+
+ave_set_trade_mode_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_set_trade_mode",
+        "description": "切换交易模式。real 为真实交易，paper 为模拟交易。切换后 Portfolio、Orders、后续交易确认都会跟随模式。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["real", "paper"],
+                    "description": "目标交易模式"
+                }
+            },
+            "required": ["mode"]
+        }
+    }
+}
+
+
+@register_function("ave_set_trade_mode", ave_set_trade_mode_desc, ToolType.SYSTEM_CTL)
+def ave_set_trade_mode(conn: "ConnectionHandler", mode: str):
+    try:
+        normalized = _set_trade_mode(conn, mode)
+        label = _trade_mode_label(normalized)
+        return ActionResponse(
+            action=Action.NONE,
+            result=f"trade_mode:{normalized}",
+            response=f"Switched to {label}."
+        )
+    except PaperStoreError as exc:
+        logger.bind(tag=TAG).error(f"ave_set_trade_mode error: {exc}")
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result=str(exc),
+            response="Failed to switch trading mode"
+        )
 
 
 # ---------------------------------------------------------------------------

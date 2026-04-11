@@ -304,7 +304,7 @@ void screen_confirm_show(const char *json_data)
     s_submitted = 0;
 
     /* Parse fields */
-    char action[16] = {0}, symbol[24] = {0};
+    char action[16] = {0}, symbol[24] = {0}, mode_label[16] = {0};
     char amount_native[32] = {0}, amount_usd[32] = {0};
     char out_amount[32] = {0};
     char chain[16] = {0}, contract_tail[12] = {0};
@@ -312,6 +312,7 @@ void screen_confirm_show(const char *json_data)
     _get_str(json_data, "trade_id",      s_trade_id,     sizeof(s_trade_id));
     _get_str(json_data, "action",        action,         sizeof(action));
     _get_str(json_data, "symbol",        symbol,         sizeof(symbol));
+    _get_str(json_data, "mode_label",    mode_label,     sizeof(mode_label));
     _get_str(json_data, "amount_native", amount_native,  sizeof(amount_native));
     _get_str(json_data, "amount_usd",    amount_usd,     sizeof(amount_usd));
     _get_str(json_data, "out_amount",    out_amount,     sizeof(out_amount));
@@ -338,6 +339,11 @@ void screen_confirm_show(const char *json_data)
         _buf_append(identity_buf, sizeof(identity_buf), contract_tail);
     }
     _buf_reset(top_buf, sizeof(top_buf));
+    if (mode_label[0]) {
+        _buf_append(top_buf, sizeof(top_buf), "[");
+        _buf_append(top_buf, sizeof(top_buf), mode_label);
+        _buf_append(top_buf, sizeof(top_buf), "] ");
+    }
     _buf_append(top_buf, sizeof(top_buf), action);
     if (strlen(out_amount) > 0) {
         /* Exact quote available: "BUY <out_amount> BONK  0.1 SOL" */

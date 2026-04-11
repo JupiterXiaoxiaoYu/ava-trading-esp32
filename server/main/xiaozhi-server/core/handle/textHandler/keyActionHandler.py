@@ -47,9 +47,10 @@ class KeyActionHandler(TextMessageHandler):
             ave_token_detail, ave_buy_token, ave_portfolio,
             ave_sell_token, ave_get_trending, ave_cancel_trade,
             ave_list_orders, ave_list_signals, ave_open_watchlist,
+            ave_set_trade_mode,
             ave_remove_current_watchlist_token,
             _get_pending_trade, _restore_search_session_payload,
-            _set_feed_navigation_state,
+            _set_feed_navigation_state, _build_explorer_payload,
             _send_display, _set_search_session_cursor, _split_token_reference,
         )
 
@@ -267,6 +268,21 @@ class KeyActionHandler(TextMessageHandler):
                 ave_open_watchlist(conn)
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action watchlist error: {e}")
+
+        elif action == "explorer_sync":
+            logger.bind(tag=TAG).info("key_action explorer_sync")
+            try:
+                await _send_display(conn, "explorer", _build_explorer_payload(conn))
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action explorer_sync error: {e}")
+
+        elif action == "trade_mode_set":
+            requested_mode = str(msg_json.get("mode", "") or "").strip().lower()
+            logger.bind(tag=TAG).info(f"key_action trade_mode_set mode={requested_mode}")
+            try:
+                ave_set_trade_mode(conn, mode=requested_mode)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action trade_mode_set error: {e}")
 
         elif action == "watchlist_remove":
             state = getattr(conn, "ave_state", {})

@@ -419,6 +419,17 @@ class _TradeMgr:
     def _execute_sync(self, trade: dict) -> dict:
         t = trade["type"]
         p = _normalize_proxy_trade_payload(t, trade["params"])
+        conn = trade.get("conn")
+
+        if conn is not None:
+            try:
+                from plugins_func.functions.ave_tools import _execute_paper_trade, _get_trade_mode
+
+                if _get_trade_mode(conn) == "paper":
+                    return _execute_paper_trade(conn, t, p)
+            except Exception as exc:
+                logger.bind(tag=TAG).warning(f"paper trade path failed; falling back to error: {exc}")
+                return {"error": str(exc), "trade_type": t}
 
         if t == "market_buy":
             result = _trade_post("/v1/thirdParty/tx/sendSwapOrder", p)

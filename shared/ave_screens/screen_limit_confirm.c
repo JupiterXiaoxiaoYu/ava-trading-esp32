@@ -265,13 +265,14 @@ void screen_limit_confirm_show(const char *json_data)
     s_submitted = 0;
 
     /* Parse fields */
-    char action[32] = {0}, symbol[24] = {0}, limit_price[32] = {0};
+    char action[32] = {0}, symbol[24] = {0}, limit_price[32] = {0}, mode_label[16] = {0};
     char current_price[32] = {0}, distance[16] = {0}, amount[32] = {0};
     char chain[16] = {0}, contract_tail[12] = {0};
     int  expire_hours = 24;
 
     _getf(json_data, "action",        action,        sizeof(action));
     _getf(json_data, "symbol",        symbol,        sizeof(symbol));
+    _getf(json_data, "mode_label",    mode_label,    sizeof(mode_label));
     _getf(json_data, "limit_price",   limit_price,   sizeof(limit_price));
     _getf(json_data, "current_price", current_price, sizeof(current_price));
     _getf(json_data, "distance",      distance,      sizeof(distance));
@@ -298,6 +299,11 @@ void screen_limit_confirm_show(const char *json_data)
         _buf_append(identity, sizeof(identity), contract_tail);
     }
     _buf_reset(top, sizeof(top));
+    if (mode_label[0]) {
+        _buf_append(top, sizeof(top), "[");
+        _buf_append(top, sizeof(top), mode_label);
+        _buf_append(top, sizeof(top), "] ");
+    }
     _buf_append(top, sizeof(top), action);
     _buf_append(top, sizeof(top), "  ");
     _buf_append(top, sizeof(top), identity);

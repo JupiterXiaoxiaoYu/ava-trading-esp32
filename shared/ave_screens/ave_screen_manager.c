@@ -363,6 +363,7 @@ void ave_sm_open_explorer(void)
         screen_explorer_show("{}");
         s_current = AVE_SCREEN_EXPLORER;
     }
+    ave_send_json("{\"type\":\"key_action\",\"action\":\"explorer_sync\"}");
 }
 
 void ave_sm_open_browse(const char *mode)

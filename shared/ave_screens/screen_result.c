@@ -183,16 +183,25 @@ void screen_result_show(const char *json_data)
 
     char title[64] = {0};
     char subtitle[128] = {0};
+    char mode_label[16] = {0};
     _get_str(json_data, "title", title, sizeof(title));
     _get_str(json_data, "subtitle", subtitle, sizeof(subtitle));
+    _get_str(json_data, "mode_label", mode_label, sizeof(mode_label));
     _trim_in_place(title);
     _trim_in_place(subtitle);
+    _trim_in_place(mode_label);
 
     if (success) {
         lv_label_set_text(s_lbl_icon, LV_SYMBOL_OK);
         lv_obj_set_style_text_color(s_lbl_icon, COLOR_GREEN, 0);
 
-        lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Success");
+        if (_has_text(mode_label) && _has_text(title)) {
+            char title_buf[96];
+            snprintf(title_buf, sizeof(title_buf), "[%s] %s", mode_label, title);
+            lv_label_set_text(s_lbl_title, title_buf);
+        } else {
+            lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Success");
+        }
 
         /* Amount line */
         char out_amount[64] = {0}, amount[64] = {0}, amount_usd[32] = {0};
@@ -259,7 +268,13 @@ void screen_result_show(const char *json_data)
         lv_label_set_text(s_lbl_icon, LV_SYMBOL_CLOSE);
         lv_obj_set_style_text_color(s_lbl_icon, COLOR_RED, 0);
 
-        lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Failed");
+        if (_has_text(mode_label) && _has_text(title)) {
+            char title_buf[96];
+            snprintf(title_buf, sizeof(title_buf), "[%s] %s", mode_label, title);
+            lv_label_set_text(s_lbl_title, title_buf);
+        } else {
+            lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Failed");
+        }
 
         /* Error line */
         char error[128] = {0};

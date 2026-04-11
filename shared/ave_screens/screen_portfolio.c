@@ -60,6 +60,7 @@ static int       s_sel_idx       = 0;   /* selected row index (absolute) */
 #define VISIBLE_ROWS  6
 
 static lv_obj_t *s_screen      = NULL;
+static lv_obj_t *s_lbl_title   = NULL;
 static lv_obj_t *s_lbl_total   = NULL;
 static lv_obj_t *s_lbl_pnl     = NULL;
 static lv_obj_t *s_lbl_summary = NULL;
@@ -476,11 +477,11 @@ static void _build(void) {
     lv_obj_set_style_border_width(top, 0, 0);
     lv_obj_set_style_pad_all(top, 0, 0);
 
-    lv_obj_t *lbl_title = lv_label_create(top);
-    lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 6, 0);
-    lv_label_set_text(lbl_title, "PORTFOLIO");
-    lv_obj_set_style_text_color(lbl_title, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_12, 0);
+    s_lbl_title = lv_label_create(top);
+    lv_obj_align(s_lbl_title, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_label_set_text(s_lbl_title, "PORTFOLIO");
+    lv_obj_set_style_text_color(s_lbl_title, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_title, &lv_font_montserrat_12, 0);
 
     s_lbl_total = lv_label_create(top);
     lv_obj_align(s_lbl_total, LV_ALIGN_CENTER, 0, 0);
@@ -685,10 +686,17 @@ void screen_portfolio_show(const char *json_data)
     /* Update top bar */
     char total[24] = {0}, pnl[20] = {0}, pnl_pct[16] = {0};
     char pnl_reason[48] = {0};
+    char mode_label[16] = {0};
     _str_portfolio_top_level(json_data, "total_usd", total, sizeof(total));
     _str_portfolio_top_level(json_data, "pnl",       pnl,   sizeof(pnl));
     _str_portfolio_top_level(json_data, "pnl_pct",   pnl_pct, sizeof(pnl_pct));
     _str_portfolio_top_level(json_data, "pnl_reason", pnl_reason, sizeof(pnl_reason));
+    _str_portfolio_top_level(json_data, "mode_label", mode_label, sizeof(mode_label));
+
+    if (s_lbl_title) {
+        if (strcmp(mode_label, "PAPER") == 0) lv_label_set_text(s_lbl_title, "PAPER PORTFOLIO");
+        else lv_label_set_text(s_lbl_title, "PORTFOLIO");
+    }
 
     lv_label_set_text(s_lbl_total, total[0] ? total : "--");
 
