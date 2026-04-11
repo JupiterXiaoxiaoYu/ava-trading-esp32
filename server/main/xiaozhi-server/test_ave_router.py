@@ -1337,6 +1337,32 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ave_context["feed_cursor"], 1)
 
+    def test_context_browse_selection_cursor_uses_feed_navigation_state(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "browse",
+                "feed_mode": "signals",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "stale-1", "chain": "solana", "symbol": "FIRST"},
+                    {"addr": "fresh-2", "chain": "base", "symbol": "SECOND"},
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(
+            conn,
+            selection_payload={
+                "screen": "browse",
+                "cursor": 1,
+                "token": {"addr": "fresh-2", "chain": "base", "symbol": "SECOND"},
+            },
+        )
+
+        self.assertEqual(ave_context["screen"], "browse")
+        self.assertEqual(ave_context["feed_cursor"], 1)
+        self.assertIn("watch_current", ave_context["allowed_actions"])
+
     def test_context_non_feed_selection_cursor_does_not_override_feed_cursor(self):
         conn = self._build_chat_conn(
             {
@@ -1356,6 +1382,33 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ave_context["screen"], "portfolio")
         self.assertEqual(ave_context["feed_cursor"], 0)
+
+    def test_context_browse_selection_is_trusted(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "browse",
+                "feed_mode": "watchlist",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(
+            conn,
+            selection_payload={
+                "screen": "browse",
+                "cursor": 0,
+                "token": {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+            },
+        )
+
+        self.assertTrue(ave_context["has_trusted_selection"])
+        self.assertEqual(
+            ave_context["current_token"],
+            {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+        )
 
     def test_context_without_explicit_selection_omits_current_token(self):
         conn = self._build_chat_conn(

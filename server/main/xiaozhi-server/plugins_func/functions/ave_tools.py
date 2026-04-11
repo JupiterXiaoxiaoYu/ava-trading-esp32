@@ -1304,7 +1304,7 @@ def _resolve_spotlight_origin_hint(
                 return hint
 
     nav_from = str(state.get("nav_from") or "").strip().lower()
-    allow_feed_origin = previous_screen in {"feed", "disambiguation"}
+    allow_feed_origin = previous_screen in {"feed", "browse", "disambiguation"}
     if previous_screen == "spotlight" and nav_from == "feed":
         allow_feed_origin = True
     if allow_feed_origin and feed_mode == "signals":
@@ -3231,7 +3231,7 @@ def ave_list_signals(conn: "ConnectionHandler"):
         rows = _build_signals_rows(raw if isinstance(raw, list) else [])
 
         state = _ensure_ave_state(conn)
-        state["screen"] = "feed"
+        state["screen"] = "browse"
         state["feed_source"] = "signals"
         state["feed_platform"] = ""
         state["feed_mode"] = "signals"
@@ -3244,7 +3244,7 @@ def ave_list_signals(conn: "ConnectionHandler"):
         conn.loop.create_task(
             _send_display(
                 conn,
-                "feed",
+                "browse",
                 {
                     "tokens": rows or [_empty_feed_row("SIGNALS", "No signals now")],
                     "mode": "signals",
@@ -3288,7 +3288,7 @@ def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
         )
         rows = _build_watchlist_rows(saved_rows)
 
-        state["screen"] = "feed"
+        state["screen"] = "browse"
         state["feed_source"] = "watchlist"
         state["feed_platform"] = ""
         state["feed_mode"] = "watchlist"
@@ -3301,7 +3301,7 @@ def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
         conn.loop.create_task(
             _send_display(
                 conn,
-                "feed",
+                "browse",
                 {
                     "tokens": rows or [_empty_feed_row("WATCHLIST", "Watchlist empty")],
                     "mode": "watchlist",
@@ -4134,7 +4134,7 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
         }
         if previous_screen == "portfolio":
             state["nav_from"] = "portfolio"
-        elif previous_screen in {"feed", "disambiguation"}:
+        elif previous_screen in {"feed", "browse", "disambiguation"}:
             state["nav_from"] = "feed"
         elif "nav_from" not in state:
             state["nav_from"] = "feed"

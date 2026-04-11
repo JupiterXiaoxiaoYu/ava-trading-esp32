@@ -710,7 +710,7 @@ int screen_browse_get_selected_context_json(char *out, size_t out_n)
     if (!ave_sm_json_escape_string(t->symbol, symbol_esc, sizeof(symbol_esc))) return 0;
 
     n = snprintf(out, out_n,
-                 "{\"screen\":\"feed\",\"cursor\":%d,\"token\":{\"addr\":\"%s\",\"chain\":\"%s\",\"symbol\":\"%s\"}}",
+                 "{\"screen\":\"browse\",\"cursor\":%d,\"token\":{\"addr\":\"%s\",\"chain\":\"%s\",\"symbol\":\"%s\"}}",
                  s_token_idx,
                  addr_esc,
                  chain_esc,

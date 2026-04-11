@@ -20,7 +20,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
             self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         self.loop.close()
 
-    def test_ave_list_signals_sends_feed_payload_with_signals_mode(self):
+    def test_ave_list_signals_sends_browse_payload_with_signals_mode(self):
         signal_payload = {
             "data": {
                 "list": [
@@ -56,7 +56,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
 
         self.assertEqual(send_display.await_count, 1)
         _, screen, payload = send_display.await_args.args
-        self.assertEqual(screen, "feed")
+        self.assertEqual(screen, "browse")
         self.assertEqual(payload["mode"], "signals")
         self.assertEqual(payload["source_label"], "SIGNALS")
         self.assertEqual(payload["tokens"][0]["token_id"], "Token111")
@@ -70,6 +70,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
             payload["tokens"][0]["signal_summary"],
             "First 2m Last 0m Count 2 Vol $125.0K",
         )
+        self.assertEqual(self.conn.ave_state["screen"], "browse")
         self.assertEqual(self.conn.ave_state["feed_mode"], "signals")
 
     def test_ave_list_signals_falls_back_to_action_count_when_actions_missing(self):
@@ -134,7 +135,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(payload["feed_session"], 77)
         self.assertEqual(self.conn.ave_state["feed_session"], 77)
 
-    def test_ave_open_watchlist_renders_watchlist_feed(self):
+    def test_ave_open_watchlist_renders_watchlist_browse(self):
         with patch.object(
             ave_tools,
             "list_watchlist_entries",
@@ -145,10 +146,11 @@ class SignalsWatchlistToolTests(unittest.TestCase):
 
         self.assertEqual(send_display.await_count, 1)
         _, screen, payload = send_display.await_args.args
-        self.assertEqual(screen, "feed")
+        self.assertEqual(screen, "browse")
         self.assertEqual(payload["mode"], "watchlist")
         self.assertEqual(payload["source_label"], "WATCHLIST")
         self.assertEqual(payload["tokens"][0]["symbol"], "BONK")
+        self.assertEqual(self.conn.ave_state["screen"], "browse")
         self.assertEqual(self.conn.ave_state["feed_mode"], "watchlist")
 
     def test_ave_open_watchlist_uses_empty_row_when_no_entries(self):
@@ -273,7 +275,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
 
     def test_ave_remove_current_watchlist_token_handles_store_failure(self):
         self.conn.ave_state = {
-            "screen": "feed",
+            "screen": "browse",
             "feed_mode": "watchlist",
             "feed_cursor": 0,
             "feed_token_list": [{"addr": "Token111", "chain": "solana", "symbol": "BONK"}],
@@ -294,7 +296,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
 
     def test_ave_token_detail_loading_payload_includes_origin_hint_and_watchlist_state(self):
         self.conn.ave_state = {
-            "screen": "feed",
+            "screen": "browse",
             "feed_mode": "signals",
             "feed_token_list": [{"addr": "Token111", "chain": "solana", "symbol": "BONK"}],
         }

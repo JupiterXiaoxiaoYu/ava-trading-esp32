@@ -56,7 +56,7 @@ _DEICTIC_RISK_PHRASES = {
 _OPEN_ENDED_DEICTIC_PATTERN = re.compile(
     r"(?:(?:给我讲讲|讲讲|说说|聊聊|看看|看下|分析)(?:这只币|这币|它)|(?:这只币|这币|它)(?:怎么样|如何))"
 )
-_SELECTION_GUARDED_SCREENS = {"feed", "portfolio", "spotlight", "confirm", "limit_confirm"}
+_SELECTION_GUARDED_SCREENS = {"feed", "browse", "portfolio", "spotlight", "confirm", "limit_confirm"}
 
 _WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
 _BUY_SYMBOL_PATTERN = re.compile(r"^买([A-Za-z][A-Za-z0-9._-]{1,15})$")
@@ -152,10 +152,14 @@ def _resolve_effective_screen(
     return state_screen
 
 
+def _screen_uses_feed_selection(screen: str) -> bool:
+    return screen in {"feed", "browse"}
+
+
 def _resolve_effective_feed_cursor(
     state_cursor: Any, selection_payload: Optional[Dict[str, Any]]
 ) -> Any:
-    if _extract_selection_screen(selection_payload) != "feed":
+    if not _screen_uses_feed_selection(_extract_selection_screen(selection_payload)):
         return state_cursor
 
     if isinstance(selection_payload, dict) and "cursor" in selection_payload:
@@ -170,7 +174,7 @@ def _resolve_selection_feed_nav(
     selection_payload: Optional[Dict[str, Any]],
     token: Optional[Dict[str, str]],
 ) -> tuple[Optional[int], Optional[int]]:
-    if _extract_selection_screen(selection_payload) != "feed":
+    if not _screen_uses_feed_selection(_extract_selection_screen(selection_payload)):
         return None, None
 
     feed_rows = state.get("feed_token_list")
@@ -334,7 +338,7 @@ def _build_allowed_actions(
     actions = {"search_symbol"}
 
     actions.add("open_watchlist")
-    if screen in {"feed", "portfolio", "spotlight"} and current_token and has_trusted_selection:
+    if screen in {"feed", "browse", "portfolio", "spotlight"} and current_token and has_trusted_selection:
         actions.add("watch_current")
     if screen == "spotlight" and current_token and has_trusted_selection:
         actions.add("buy_current")
@@ -468,7 +472,7 @@ async def try_route_ave_command(
             return True
         if effective_screen == "portfolio":
             state["nav_from"] = "portfolio"
-        elif effective_screen in {"feed", "disambiguation"}:
+        elif effective_screen in {"feed", "browse", "disambiguation"}:
             state["nav_from"] = "feed"
         feed_cursor, feed_total = _resolve_selection_feed_nav(state, selection_payload, token)
         await _handle_tool_response(
