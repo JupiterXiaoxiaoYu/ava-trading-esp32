@@ -1879,7 +1879,7 @@ int main(void)
             '"screen":"feed",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
             '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal",'
-            '"signal_summary":"BUY 3.5 SOL","headline":"THIS_HEADLINE_MUST_NOT_RENDER"}'
+            '"signal_label":"BUY","signal_summary":"总买入 3.5 SOL","headline":"THIS_HEADLINE_MUST_NOT_RENDER"}'
             ']}}'
         ).replace("\\", "\\\\").replace('"', '\\"')
 
@@ -1949,13 +1949,17 @@ int main(void)
         fprintf(stderr, "signals symbol not preserved: %s\\n", s_rows[0].lbl_sym ? s_rows[0].lbl_sym->text : "<null>");
         return 2;
     }}
-    if (!s_rows[0].lbl_subtitle || strcmp(s_rows[0].lbl_subtitle->text, "BUY 3.5 SOL") != 0) {{
-        fprintf(stderr, "signals subtitle should use summary: %s\\n", s_rows[0].lbl_subtitle ? s_rows[0].lbl_subtitle->text : "<null>");
+    if (!s_rows[0].lbl_price || strcmp(s_rows[0].lbl_price->text, "BUY") != 0) {{
+        fprintf(stderr, "signals action label incorrect: %s\\n", s_rows[0].lbl_price ? s_rows[0].lbl_price->text : "<null>");
         return 3;
+    }}
+    if (!s_rows[0].lbl_subtitle || strcmp(s_rows[0].lbl_subtitle->text, "总买入 3.5 SOL") != 0) {{
+        fprintf(stderr, "signals subtitle should use summary: %s\\n", s_rows[0].lbl_subtitle ? s_rows[0].lbl_subtitle->text : "<null>");
+        return 4;
     }}
     if (strstr(s_rows[0].lbl_subtitle->text, "HEADLINE") != NULL) {{
         fprintf(stderr, "signals subtitle leaked headline: %s\\n", s_rows[0].lbl_subtitle->text);
-        return 4;
+        return 5;
     }}
     return 0;
 }}
@@ -1983,8 +1987,8 @@ int main(void)
             '{'
             '"screen":"feed",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
-            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_summary":"BUY 3.5 SOL"},'
-            '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_summary":"BUY 1.2 ETH"}'
+            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_label":"BUY","signal_summary":"总买入 3.5 SOL"},'
+            '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_label":"BUY","signal_summary":"总买入 1.2 ETH"}'
             ']}}'
         ).replace("\\", "\\\\").replace('"', '\\"')
 

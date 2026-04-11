@@ -285,10 +285,32 @@ def _fmt_signal_amount(value) -> str:
     return f"{amount:.4f}".rstrip("0").rstrip(".")
 
 
-def _build_signal_summary(item: dict, chain: str) -> str:
+def _signal_label_from_totals(buy_total: float, sell_total: float) -> str:
+    if buy_total > 0 and buy_total >= sell_total:
+        return "BUY"
+    if sell_total > 0:
+        return "SELL"
+    return ""
+
+
+def _signal_label_from_item(item: dict) -> str:
+    text = str(item.get("action_type") or item.get("signal_type") or "").strip().lower()
+    if "sell" in text:
+        return "SELL"
+    if "buy" in text:
+        return "BUY"
+    return ""
+
+
+def _build_signal_display(item: dict, chain: str) -> tuple[str, str]:
     actions = item.get("actions")
     if not isinstance(actions, list) or not actions:
-        return "NO FLOWS"
+        label = _signal_label_from_item(item)
+        if label == "SELL":
+            return label, "卖出信号"
+        if label == "BUY":
+            return label, "买入信号"
+        return "", "信号更新中"
 
     buy_total = 0.0
     sell_total = 0.0
@@ -321,13 +343,20 @@ def _build_signal_summary(item: dict, chain: str) -> str:
     if not unit:
         unit = _signal_default_quote_symbol(chain)
 
-    if buy_total > 0 and sell_total > 0:
-        return f"B {_fmt_signal_amount(buy_total)} / S {_fmt_signal_amount(sell_total)} {unit}"
+    label = _signal_label_from_totals(buy_total, sell_total)
     if buy_total > 0:
-        return f"BUY {_fmt_signal_amount(buy_total)} {unit}"
+        if label == "BUY":
+            return label, f"总买入 {_fmt_signal_amount(buy_total)} {unit}"
+        return label or "SELL", f"总卖出 {_fmt_signal_amount(sell_total)} {unit}"
     if sell_total > 0:
-        return f"SELL {_fmt_signal_amount(sell_total)} {unit}"
-    return "NO FLOWS"
+        return label or "SELL", f"总卖出 {_fmt_signal_amount(sell_total)} {unit}"
+
+    label = _signal_label_from_item(item)
+    if label == "SELL":
+        return label, "卖出信号"
+    if label == "BUY":
+        return label, "买入信号"
+    return "", "信号更新中"
 
 
 def _balance_ratio_to_percent_points(raw_value):
@@ -1271,6 +1300,7 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
             }
         )
         change_value = _parse_numeric_value(item.get("price_change_24h"))
+        signal_label, signal_summary = _build_signal_display(item, chain)
         rows.append(
             {
                 **identity,
@@ -1278,7 +1308,8 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
                 "change_24h": _fmt_change(change_value if change_value is not None else 0),
                 "change_positive": True if change_value is None else change_value >= 0,
                 "signal_type": str(item.get("signal_type") or "").strip(),
-                "signal_summary": _build_signal_summary(item, chain),
+                "signal_label": signal_label,
+                "signal_summary": signal_summary,
                 "headline": str(item.get("headline") or "").strip(),
                 "signal_time": str(item.get("signal_time") or "").strip(),
                 "source": "signals",

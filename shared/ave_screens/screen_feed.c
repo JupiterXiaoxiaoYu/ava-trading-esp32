@@ -65,6 +65,7 @@ typedef struct {
     char volume_24h[16];
     char market_cap[16];
     char source[24];
+    char signal_label[8];
     char signal_type[32];
     char signal_summary[64];
     char headline[64];
@@ -593,6 +594,24 @@ static lv_color_t _chain_color(const char *chain)
     return COLOR_GRAY;
 }
 
+static const char *_signal_label(const feed_token_t *t)
+{
+    if (strcmp(t->signal_label, "BUY") == 0 || strcmp(t->signal_label, "SELL") == 0) {
+        return t->signal_label;
+    }
+    if (strncmp(t->signal_summary, "总买入", strlen("总买入")) == 0) return "BUY";
+    if (strncmp(t->signal_summary, "总卖出", strlen("总卖出")) == 0) return "SELL";
+    return "";
+}
+
+static const char *_signal_summary(const feed_token_t *t)
+{
+    if (t->signal_summary[0]) return t->signal_summary;
+    if (strcmp(_signal_label(t), "BUY") == 0) return "买入信号";
+    if (strcmp(_signal_label(t), "SELL") == 0) return "卖出信号";
+    return "信号更新中";
+}
+
 /* ─── JSON parsing ────────────────────────────────────────────────────────── */
 static int _get_json_str_field(const char *obj, const char *key, char *out, int n)
 {
@@ -696,6 +715,7 @@ static void _parse_tokens_from_json(const char *json)
         _get_json_str_field(obj, "volume_24h", t->volume_24h, sizeof(t->volume_24h));
         _get_json_str_field(obj, "market_cap", t->market_cap, sizeof(t->market_cap));
         _get_json_str_field(obj, "source",     t->source,     sizeof(t->source));
+        _get_json_str_field(obj, "signal_label", t->signal_label, sizeof(t->signal_label));
         _get_json_str_field(obj, "signal_type", t->signal_type, sizeof(t->signal_type));
         _get_json_str_field(obj, "signal_summary", t->signal_summary, sizeof(t->signal_summary));
         _get_json_str_field(obj, "headline",    t->headline,    sizeof(t->headline));
@@ -978,19 +998,19 @@ static void _update_browse_rows(void)
         lv_label_set_text(ui->lbl_sym, sym_text);
         lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
         lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
         lv_color_t text_color = selected ? COLOR_WHITE : COLOR_GRAY;
         lv_obj_set_style_text_color(ui->lbl_sym, text_color, 0);
         lv_obj_set_style_text_color(ui->lbl_price, text_color, 0);
 
         if (s_feed_mode == FEED_MODE_SIGNALS) {
-            lv_label_set_text(ui->lbl_price, t->signal_type[0] ? t->signal_type : "");
-            const char *summary = t->signal_summary[0] ? t->signal_summary : (t->headline[0] ? t->headline : "");
-            lv_label_set_text(ui->lbl_subtitle, summary);
+            lv_obj_set_style_text_font(ui->lbl_subtitle, ave_font_cjk_14(), 0);
+            lv_label_set_text(ui->lbl_price, _signal_label(t));
+            lv_label_set_text(ui->lbl_subtitle, _signal_summary(t));
             lv_label_set_text(ui->lbl_chg, "");
             lv_obj_set_style_text_color(ui->lbl_subtitle, text_color, 0);
             lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
         } else {
+            lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
             lv_label_set_text(ui->lbl_price, "");
             lv_label_set_text(ui->lbl_subtitle, t->price[0] ? t->price : "--");
             const char *chg_text = t->change_24h[0] ? t->change_24h : "--";

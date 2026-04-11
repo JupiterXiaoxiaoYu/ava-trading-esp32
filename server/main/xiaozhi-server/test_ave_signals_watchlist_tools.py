@@ -54,7 +54,8 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "signals")
         self.assertEqual(payload["source_label"], "SIGNALS")
         self.assertEqual(payload["tokens"][0]["token_id"], "Token111")
-        self.assertEqual(payload["tokens"][0]["signal_summary"], "BUY 3.5 SOL")
+        self.assertEqual(payload["tokens"][0]["signal_label"], "BUY")
+        self.assertEqual(payload["tokens"][0]["signal_summary"], "总买入 3.5 SOL")
         self.assertEqual(self.conn.ave_state["feed_mode"], "signals")
 
     def test_ave_list_signals_invalidates_live_feed_session_before_fetch(self):
