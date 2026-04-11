@@ -427,12 +427,13 @@ int main(void)
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        feed_source = repo_root / "shared/ave_screens/screen_feed.c"
+        explorer_source = repo_root / "shared/ave_screens/screen_explorer.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
         key_steps = "\n    ".join(
-            f"screen_feed_key({key_name});" for key_name in key_sequence
+            f"ave_sm_key_press({key_name});" for key_name in key_sequence
         )
         harness_source = f"""
 #define VERIFY_FEED
@@ -473,7 +474,7 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
-#include "{screen_source}"
+#include "{explorer_source}"
 
 int main(void)
 {{
@@ -496,6 +497,7 @@ int main(void)
             include_dir,
             manager_src,
             binary_name=binary_name,
+            extra_sources=(feed_source,),
         )
 
     def _assert_real_confirm_screen_locks_inputs_after_first_submit(
@@ -1747,11 +1749,12 @@ int main(void)
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        feed_source = repo_root / "shared/ave_screens/screen_feed.c"
+        explorer_source = repo_root / "shared/ave_screens/screen_explorer.c"
+        browse_source = repo_root / "shared/ave_screens/screen_browse.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
-
         feed_payload = (
             '{'
             '"screen":"feed",'
@@ -1799,39 +1802,46 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
-#include "{screen_source}"
+const char *screen_browse_get_source_label(void);
 
 int main(void)
 {{
-    screen_feed_show("{feed_payload}");
+    ave_sm_handle_json("{feed_payload}");
     clear_last_json();
-
-    screen_feed_key(AVE_KEY_B);
+    ave_sm_key_press(AVE_KEY_B);
     for (int i = 0; i < 3; i++) {{
-        screen_feed_key(AVE_KEY_DOWN);
+        ave_sm_key_press(AVE_KEY_DOWN);
     }}
-    screen_feed_key(AVE_KEY_A);
-    if (!s_lbl_source || strcmp(s_lbl_source->text, "SIGNALS") != 0) {{
-        fprintf(stderr, "signals title not synced immediately: %s\\n", s_lbl_source ? s_lbl_source->text : "<null>");
+    ave_sm_key_press(AVE_KEY_A);
+    if (ave_sm_get_current_screen_id() != AVE_SCREEN_BROWSE) {{
+        fprintf(stderr, "signals did not open browse screen\\n");
         return 2;
     }}
-    if (!expect_contains("\\"action\\":\\"signals\\"", "signals explore activation")) {{
+    if (!screen_browse_get_source_label() || strcmp(screen_browse_get_source_label(), "SIGNALS") != 0) {{
+        fprintf(stderr, "signals title not synced immediately\\n");
         return 3;
     }}
-
-    clear_last_json();
-    screen_feed_show("{feed_payload}");
-    screen_feed_key(AVE_KEY_B);
-    for (int i = 0; i < 4; i++) {{
-        screen_feed_key(AVE_KEY_DOWN);
-    }}
-    screen_feed_key(AVE_KEY_A);
-    if (!s_lbl_source || strcmp(s_lbl_source->text, "WATCHLIST") != 0) {{
-        fprintf(stderr, "watchlist title not synced immediately: %s\\n", s_lbl_source ? s_lbl_source->text : "<null>");
+    if (!expect_contains("\\"action\\":\\"signals\\"", "signals explore activation")) {{
         return 4;
     }}
-    if (!expect_contains("\\"action\\":\\"watchlist\\"", "watchlist explore activation")) {{
+
+    ave_sm_handle_json("{feed_payload}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_B);
+    for (int i = 0; i < 4; i++) {{
+        ave_sm_key_press(AVE_KEY_DOWN);
+    }}
+    ave_sm_key_press(AVE_KEY_A);
+    if (ave_sm_get_current_screen_id() != AVE_SCREEN_BROWSE) {{
+        fprintf(stderr, "watchlist did not open browse screen\\n");
         return 5;
+    }}
+    if (!screen_browse_get_source_label() || strcmp(screen_browse_get_source_label(), "WATCHLIST") != 0) {{
+        fprintf(stderr, "watchlist title not synced immediately\\n");
+        return 6;
+    }}
+    if (!expect_contains("\\"action\\":\\"watchlist\\"", "watchlist explore activation")) {{
+        return 7;
     }}
     return 0;
 }}
@@ -1842,13 +1852,14 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_explore_panel_signals_watchlist",
+            extra_sources=(feed_source, explorer_source, browse_source),
         )
 
     def test_real_feed_signals_browse_uses_signal_summary_not_headline(self):
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        screen_source = repo_root / "shared/ave_screens/screen_browse.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -1901,11 +1912,22 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 #include "{screen_source}"
 
 int main(void)
 {{
-    screen_feed_show("{signals_payload}");
+    screen_browse_show("{signals_payload}");
     if (!s_rows[0].lbl_sym || strcmp(s_rows[0].lbl_sym->text, "赢麻了") != 0) {{
         fprintf(stderr, "signals symbol not preserved: %s\\n", s_rows[0].lbl_sym ? s_rows[0].lbl_sym->text : "<null>");
         return 2;
@@ -1929,11 +1951,111 @@ int main(void)
             binary_name="verify_feed_signals_browse_summary",
         )
 
-    def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):
+    def test_real_feed_return_from_signals_restores_standard_row_colors(self):
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
         screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        browse_source = repo_root / "shared/ave_screens/screen_browse.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        signals_payload = (
+            '{'
+            '"screen":"feed",'
+            '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
+            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_summary":"BUY 3.5 SOL"},'
+            '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_summary":"BUY 1.2 ETH"}'
+            ']}}'
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        trending_payload = (
+            '{'
+            '"screen":"feed",'
+            '"data":{"source_label":"TRENDING","tokens":['
+            '{"token_id":"feed-1","chain":"solana","symbol":"BONK","price":"$1","change_24h":"+1%","change_positive":true},'
+            '{"token_id":"feed-2","chain":"eth","symbol":"LINK","price":"$9","change_24h":"+2%","change_positive":true}'
+            ']}}'
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+void screen_browse_show(const char *json_data);
+
+int main(void)
+{{
+    screen_feed_show("{trending_payload}");
+    screen_browse_show("{signals_payload}");
+
+    if (s_rows[0].lbl_sym->text_color_full != 0xFFFFFF || s_rows[1].lbl_sym->text_color_full != 0xFFFFFF) {{
+        fprintf(stderr, "browse screen mutated feed symbol colors: row0=%u row1=%u\\n",
+                s_rows[0].lbl_sym->text_color_full,
+                s_rows[1].lbl_sym->text_color_full);
+        return 2;
+    }}
+    if (s_rows[0].lbl_price->text_color_full != 0x9E9E9E || s_rows[1].lbl_price->text_color_full != 0x9E9E9E) {{
+        fprintf(stderr, "browse screen mutated feed price colors: row0=%u row1=%u\\n",
+                s_rows[0].lbl_price->text_color_full,
+                s_rows[1].lbl_price->text_color_full);
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_signals_return_colors",
+            extra_sources=(browse_source,),
+        )
+
+    def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_browse.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -1985,13 +2107,24 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 #include "{screen_source}"
 
 int main(void)
 {{
-    ave_sm_handle_json("{watchlist_payload}");
+    screen_browse_show("{watchlist_payload}");
     clear_last_json();
-    ave_sm_key_press(AVE_KEY_X);
+    screen_browse_key(AVE_KEY_X);
     if (!expect_contains("\\"action\\":\\"watchlist_remove\\"", "watchlist X action")) {{
         return 2;
     }}
@@ -2020,7 +2153,8 @@ int main(void)
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        screen_source = repo_root / "shared/ave_screens/screen_explorer.c"
+        feed_source = repo_root / "shared/ave_screens/screen_feed.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -2075,8 +2209,8 @@ int main(void)
 {{
     ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"SEARCH\\",\\"mode\\":\\"search\\",\\"search_query\\":\\"PEPE\\",\\"cursor\\":1,\\"tokens\\":[{{\\"token_id\\":\\"feed-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$1\\"}},{{\\"token_id\\":\\"feed-2\\",\\"chain\\":\\"base\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$2\\"}}]}}}}");
     ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
-    screen_feed_key(AVE_KEY_B);
-    screen_feed_key(AVE_KEY_A);
+    ave_sm_key_press(AVE_KEY_B);
+    ave_sm_key_press(AVE_KEY_A);
 
     if (!label_contains(s_rows[0].lbl_sym, "Search")) {{
         fprintf(stderr, "search guide title missing\\n");
@@ -2098,13 +2232,15 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_search_guide_last_query",
+            extra_sources=(feed_source,),
         )
 
     def test_real_feed_search_guide_uses_wide_left_aligned_detail_column(self):
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        screen_source = repo_root / "shared/ave_screens/screen_explorer.c"
+        feed_source = repo_root / "shared/ave_screens/screen_feed.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -2154,8 +2290,8 @@ static int label_contains(lv_obj_t *obj, const char *needle)
 int main(void)
 {{
     ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
-    screen_feed_key(AVE_KEY_B);
-    screen_feed_key(AVE_KEY_A);
+    ave_sm_key_press(AVE_KEY_B);
+    ave_sm_key_press(AVE_KEY_A);
 
     if (!label_contains(s_rows[0].lbl_price, "Guided entry")) {{
         fprintf(stderr, "search guide right column text missing\\n");
@@ -2185,13 +2321,15 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_search_guide_overlay_column_layout",
+            extra_sources=(feed_source,),
         )
 
     def test_real_feed_empty_reset_preserves_last_search_query_for_search_guide(self):
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
-        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        screen_source = repo_root / "shared/ave_screens/screen_explorer.c"
+        feed_source = repo_root / "shared/ave_screens/screen_feed.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -2247,8 +2385,8 @@ int main(void)
     ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"SEARCH\\",\\"mode\\":\\"search\\",\\"search_query\\":\\"PEPE\\",\\"tokens\\":[{{\\"token_id\\":\\"feed-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"PEPE\\",\\"price\\":\\"$1\\"}}]}}}}");
     ave_sm_go_to_feed();
     ave_sm_handle_json("{{\\"screen\\":\\"feed\\",\\"data\\":{{\\"source_label\\":\\"TRENDING\\",\\"tokens\\":[{{\\"token_id\\":\\"trend-1\\",\\"chain\\":\\"solana\\",\\"symbol\\":\\"BONK\\",\\"price\\":\\"$1\\"}}]}}}}");
-    screen_feed_key(AVE_KEY_B);
-    screen_feed_key(AVE_KEY_A);
+    ave_sm_key_press(AVE_KEY_B);
+    ave_sm_key_press(AVE_KEY_A);
 
     if (!label_contains(s_rows[3].lbl_price, "PEPE")) {{
         fprintf(stderr, "empty feed reset dropped last-search query\\n");
@@ -2262,6 +2400,7 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_empty_reset_preserves_last_query",
+            extra_sources=(feed_source,),
         )
 
     def test_disambiguation_surface_emits_no_trusted_selection_until_confirmed(self):

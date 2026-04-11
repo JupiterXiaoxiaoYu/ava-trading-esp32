@@ -1368,6 +1368,16 @@ void screen_feed_show(const char *json_data)
     _update_rows();
 }
 
+void screen_feed_reveal(void)
+{
+    if (!s_screen) {
+        screen_feed_show("{}");
+        return;
+    }
+    lv_screen_load(s_screen);
+    _render_feed_surface();
+}
+
 static void _move_selection(int delta)
 {
     if (s_token_count < 1) return;
@@ -1470,7 +1480,7 @@ void screen_feed_key(int key)
     }
 
     if (key == AVE_KEY_B && _is_standard_feed_home()) {
-        _open_explore_panel();
+        ave_sm_open_explorer();
         return;
     }
 
@@ -1568,6 +1578,11 @@ bool screen_feed_should_ignore_live_push(void)
            s_is_search_mode ||
            s_has_special_source_label ||
            _feed_overlay_active();
+}
+
+const char *screen_feed_get_last_search_query(void)
+{
+    return s_last_search_query;
 }
 
 int screen_feed_get_selected_context_json(char *out, size_t out_n)

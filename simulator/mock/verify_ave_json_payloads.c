@@ -104,14 +104,14 @@ void lv_obj_set_style_size(lv_obj_t *obj, int width, int height, int part)
 
 void lv_obj_set_style_text_color(lv_obj_t *obj, lv_color_t color, int part)
 {
-    (void)obj;
+    if (obj) obj->text_color_full = color.full;
     (void)color;
     (void)part;
 }
 
 void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *font, int part)
 {
-    (void)obj;
+    if (obj) obj->text_font = font;
     (void)font;
     (void)part;
 }

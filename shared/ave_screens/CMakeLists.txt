@@ -10,6 +10,8 @@ add_library(shared_ave_screens STATIC
     ave_price_fmt.c
     ave_transport.c
     screen_feed.c
+    screen_explorer.c
+    screen_browse.c
     screen_spotlight.c
     screen_confirm.c
     screen_limit_confirm.c

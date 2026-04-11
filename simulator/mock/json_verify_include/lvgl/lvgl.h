@@ -16,6 +16,8 @@ typedef struct lv_obj_t {
     int x;
     int y;
     int text_align;
+    uint32_t text_color_full;
+    const struct lv_font_t *text_font;
 } lv_obj_t;
 
 typedef struct lv_chart_series_t {
