@@ -148,6 +148,42 @@ static lv_color_t _chain_color(const char *chain)
     return COLOR_GRAY;
 }
 
+static const char *_chain_hex_from_short(const char *chain_short)
+{
+    if (!chain_short || !chain_short[0]) return NULL;
+    if (strcmp(chain_short, "SOL") == 0) return "9945FF";
+    if (strcmp(chain_short, "ETH") == 0) return "627EEA";
+    if (strcmp(chain_short, "BSC") == 0) return "F3BA2F";
+    if (strcmp(chain_short, "BASE") == 0) return "0052FF";
+    return NULL;
+}
+
+static void _set_source_label_text(const char *source_label)
+{
+    char rendered[48];
+    const char *label = (source_label && source_label[0]) ? source_label : "SIGNALS";
+    const char *space = strrchr(label, ' ');
+    const char *chain_hex = NULL;
+
+    if (!s_lbl_source) return;
+
+    if (space && *(space + 1)) {
+        chain_hex = _chain_hex_from_short(space + 1);
+    }
+
+    if (chain_hex && space) {
+        size_t prefix_len = (size_t)(space - label);
+        snprintf(rendered, sizeof(rendered), "%.*s #%s %s#",
+                 (int)prefix_len, label, chain_hex, space + 1);
+        lv_label_set_recolor(s_lbl_source, true);
+        lv_label_set_text(s_lbl_source, rendered);
+        return;
+    }
+
+    lv_label_set_recolor(s_lbl_source, false);
+    lv_label_set_text(s_lbl_source, label);
+}
+
 static const char *_signal_label(const browse_token_t *t)
 {
     if (strcmp(t->signal_label, "BUY") == 0 || strcmp(t->signal_label, "SELL") == 0) {
@@ -267,7 +303,7 @@ static void _set_mode_from_string(const char *mode)
         s_mode = BROWSE_MODE_SIGNALS;
         snprintf(s_source_label, sizeof(s_source_label), "%s", "SIGNALS");
     }
-    if (s_lbl_source) lv_label_set_text(s_lbl_source, s_source_label);
+    _set_source_label_text(s_source_label);
 }
 
 static void _load_placeholder(void)
@@ -476,9 +512,9 @@ static void _build_screen(void)
 
     s_lbl_source = lv_label_create(s_top_bar);
     lv_obj_set_pos(s_lbl_source, 8, 4);
-    lv_label_set_text(s_lbl_source, s_source_label);
     lv_obj_set_style_text_color(s_lbl_source, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_source, &lv_font_montserrat_12, 0);
+    _set_source_label_text(s_source_label);
 
     s_lbl_count = lv_label_create(s_top_bar);
     lv_obj_align(s_lbl_count, LV_ALIGN_RIGHT_MID, -8, 0);
@@ -589,7 +625,7 @@ void screen_browse_show(const char *json_data)
     }
     if (json_data && _get_json_str_field(json_data, "source_label", source_label, sizeof(source_label)) && source_label[0]) {
         snprintf(s_source_label, sizeof(s_source_label), "%s", source_label);
-        if (s_lbl_source) lv_label_set_text(s_lbl_source, s_source_label);
+        _set_source_label_text(s_source_label);
     }
 
     if (!json_data || strcmp(json_data, "{}") == 0) {

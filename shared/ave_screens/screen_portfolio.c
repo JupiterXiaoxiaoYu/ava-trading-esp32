@@ -85,6 +85,10 @@ static lv_obj_t *s_row_pnl[VISIBLE_ROWS];
 #define COLOR_ORANGE  lv_color_hex(0xFF6D00)
 #define COLOR_WHITE   lv_color_hex(0xFFFFFF)
 #define COLOR_GRAY    lv_color_hex(0x9E9E9E)
+#define COLOR_SOL     lv_color_hex(0x9945FF)
+#define COLOR_ETH     lv_color_hex(0x627EEA)
+#define COLOR_BSC     lv_color_hex(0xF3BA2F)
+#define COLOR_BASE    lv_color_hex(0x0052FF)
 #define COLOR_BG      lv_color_hex(0x0A0A0A)
 #define COLOR_BAR     lv_color_hex(0x141414)
 #define COLOR_ROW_ALT lv_color_hex(0x111111)
@@ -133,6 +137,36 @@ static int _machine_raw_exact(const char *o, const char *k, char *out, int n)
     memcpy(out, p + 1, len);
     out[len] = '\0';
     return 1;
+}
+
+static const char *_chain_hex(const char *chain)
+{
+    if (!chain || !chain[0]) return NULL;
+    if (strncmp(chain, "solana", 6) == 0 || strcmp(chain, "SOL") == 0) return "9945FF";
+    if (strncmp(chain, "eth", 3) == 0 || strcmp(chain, "ETH") == 0) return "627EEA";
+    if (strncmp(chain, "bsc", 3) == 0 || strcmp(chain, "BSC") == 0) return "F3BA2F";
+    if (strncmp(chain, "base", 4) == 0 || strcmp(chain, "BASE") == 0) return "0052FF";
+    return NULL;
+}
+
+static void _set_portfolio_title(const char *mode_label, const char *chain_label)
+{
+    char title_buf[64];
+    const char *base_title =
+        (mode_label && strcmp(mode_label, "PAPER") == 0) ? "PAPER PORT" : "PORTFOLIO";
+    const char *chain_hex = _chain_hex(chain_label);
+
+    if (!s_lbl_title) return;
+
+    if (chain_label && chain_label[0] && chain_hex) {
+        lv_label_set_recolor(s_lbl_title, true);
+        snprintf(title_buf, sizeof(title_buf), "%s #%s %s#", base_title, chain_hex, chain_label);
+        lv_label_set_text(s_lbl_title, title_buf);
+        return;
+    }
+
+    lv_label_set_recolor(s_lbl_title, false);
+    lv_label_set_text(s_lbl_title, base_title);
 }
 
 /* Like _str(), but only matches keys at the shallow object level of the payload.
@@ -401,12 +435,26 @@ static void _refresh_rows(void) {
         int is_sel = (idx == s_sel_idx);
         if (idx < s_holding_count) {
             holding_t *h = &s_holdings[idx];
-            char sym_buf[64];
+            char sym_buf[128];
             char chain_tag[8];
             char source_tag[8];
+            const char *chain_hex = NULL;
             _compact_upper_tag(h->chain, chain_tag, sizeof(chain_tag), 3);
             _compact_upper_tag(h->source_tag, source_tag, sizeof(source_tag), 4);
-            if (h->contract_tail[0] && chain_tag[0] && source_tag[0]) {
+            chain_hex = _chain_hex(h->chain);
+            if (h->contract_tail[0] && chain_tag[0] && source_tag[0] && chain_hex) {
+                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#/%s *%s",
+                         h->symbol, chain_hex, chain_tag, source_tag, h->contract_tail);
+            } else if (h->contract_tail[0] && chain_tag[0] && chain_hex) {
+                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s# *%s",
+                         h->symbol, chain_hex, chain_tag, h->contract_tail);
+            } else if (chain_tag[0] && source_tag[0] && chain_hex) {
+                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#/%s",
+                         h->symbol, chain_hex, chain_tag, source_tag);
+            } else if (chain_tag[0] && chain_hex) {
+                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#",
+                         h->symbol, chain_hex, chain_tag);
+            } else if (h->contract_tail[0] && chain_tag[0] && source_tag[0]) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s %s/%s *%s",
                          h->symbol, chain_tag, source_tag, h->contract_tail);
             } else if (h->contract_tail[0] && chain_tag[0]) {
@@ -543,6 +591,7 @@ static void _build(void) {
         lv_obj_set_pos(s_row_sym[i], COL_SYM_X, ROW_TEXT_Y);
         lv_obj_set_width(s_row_sym[i], COL_SYM_W);
         lv_label_set_long_mode(s_row_sym[i], LV_LABEL_LONG_CLIP);
+        lv_label_set_recolor(s_row_sym[i], true);
         lv_obj_set_style_text_color(s_row_sym[i], COLOR_WHITE, 0);
         lv_obj_set_style_text_font(s_row_sym[i], ave_font_cjk_14(), 0);
         lv_obj_set_style_text_align(s_row_sym[i], LV_TEXT_ALIGN_LEFT, 0);
@@ -695,23 +744,7 @@ void screen_portfolio_show(const char *json_data)
     _str_portfolio_top_level(json_data, "mode_label", mode_label, sizeof(mode_label));
     _str_portfolio_top_level(json_data, "chain_label", chain_label, sizeof(chain_label));
 
-    if (s_lbl_title) {
-        char title_buf[32];
-        if (chain_label[0]) {
-            snprintf(
-                title_buf,
-                sizeof(title_buf),
-                "%s %s",
-                (strcmp(mode_label, "PAPER") == 0) ? "PAPER PORT" : "PORTFOLIO",
-                chain_label
-            );
-            lv_label_set_text(s_lbl_title, title_buf);
-        } else if (strcmp(mode_label, "PAPER") == 0) {
-            lv_label_set_text(s_lbl_title, "PAPER PORT");
-        } else {
-            lv_label_set_text(s_lbl_title, "PORTFOLIO");
-        }
-    }
+    _set_portfolio_title(mode_label, chain_label);
 
     lv_label_set_text(s_lbl_total, total[0] ? total : "--");
 
