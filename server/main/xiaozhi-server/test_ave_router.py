@@ -344,6 +344,30 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         open_watchlist.assert_called_once_with(conn)
 
+    async def test_open_orders_routes_without_llm(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders") as list_orders:
+            await handler.handle(conn, {"state": "detect", "text": "查看限价单"})
+
+        start_chat.assert_not_awaited()
+        list_orders.assert_called_once_with(conn)
+
+    async def test_open_orders_english_routes_without_llm(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders") as list_orders:
+            await handler.handle(conn, {"state": "detect", "text": "open orders"})
+
+        start_chat.assert_not_awaited()
+        list_orders.assert_called_once_with(conn)
+
     async def test_spotlight_remove_watchlist_routes_directly(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
@@ -1184,6 +1208,33 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         mock_cancel.assert_called_once_with(conn)
         mock_portfolio.assert_called_once_with(conn)
         self.assertEqual(call_order, [("cancel", conn), ("portfolio", conn)])
+
+    async def test_open_orders_command_on_limit_confirm_cancels_pending_trade_before_opening_orders(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "limit_confirm",
+                "pending_trade": {"trade_id": "trade-2", "symbol": "ROCKET"},
+            }
+        )
+        call_order = []
+
+        def _cancel_side_effect(passed_conn):
+            call_order.append(("cancel", passed_conn))
+
+        def _orders_side_effect(passed_conn):
+            call_order.append(("orders", passed_conn))
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_cancel_trade", side_effect=_cancel_side_effect) as mock_cancel, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders", side_effect=_orders_side_effect) as mock_orders:
+            await handler.handle(conn, {"state": "detect", "text": "我的挂单"})
+
+        start_chat.assert_not_awaited()
+        mock_cancel.assert_called_once_with(conn)
+        mock_orders.assert_called_once_with(conn)
+        self.assertEqual(call_order, [("cancel", conn), ("orders", conn)])
 
     async def test_search_command_uses_selection_screen_to_cancel_pending_trade_before_search(self):
         handler = ListenTextMessageHandler()

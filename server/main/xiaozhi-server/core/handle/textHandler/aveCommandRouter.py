@@ -16,6 +16,14 @@ logger = setup_logging()
 _FEED_COMMANDS = {"看热门", "刷新热门", "热门代币"}
 _PORTFOLIO_COMMANDS = {"我的持仓", "持仓"}
 _OPEN_WATCHLIST_COMMANDS = {"打开观察列表", "查看观察列表", "观察列表", "watchlist"}
+_OPEN_ORDERS_COMMANDS = {
+    "查看限价单",
+    "查看挂单",
+    "我的挂单",
+    "挂单",
+    "openorders",
+    "pendingorders",
+}
 _WATCH_CURRENT_COMMANDS = {"看这个", "详情", "进入"}
 _BUY_CURRENT_COMMANDS = {"买这个"}
 _ADD_WATCHLIST_COMMANDS = {"收藏这个币", "加入观察列表", "收藏它"}
@@ -462,6 +470,12 @@ async def try_route_ave_command(
     if normalized in _OPEN_WATCHLIST_COMMANDS:
         await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
         await _handle_tool_response(conn, ave_tools.ave_open_watchlist(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _OPEN_ORDERS_COMMANDS:
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        await _handle_tool_response(conn, ave_tools.ave_list_orders(conn))
         _refresh_turn_context()
         return True
 

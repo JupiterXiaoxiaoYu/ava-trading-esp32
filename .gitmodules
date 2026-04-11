@@ -1,0 +1,4 @@
+[submodule "server/main/xiaozhi-server/ave-cloud-skill"]
+	path = server/main/xiaozhi-server/ave-cloud-skill
+	url = git@github.com:AveCloud/ave-cloud-skill
+	branch = main
