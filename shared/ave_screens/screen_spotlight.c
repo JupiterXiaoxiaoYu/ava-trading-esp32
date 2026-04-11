@@ -3,7 +3,7 @@
  * @brief SPOTLIGHT screen — token detail with K-line chart and risk info.
  *
  * Layout (320×240 landscape):
- *   y=  0..22   top bar: symbol  price  change%
+ *   y=  0..22   top bar: symbol  price  timeframe  change%
  *   y= 22..145  lv_chart K-line (320×123px)
  *   y=145..214  4-line compact footer stats:
  *               Risk|Mint|Freeze
@@ -11,7 +11,7 @@
  *               Holders|Top100
  *               CA short + page marker
  *   y=214..215  divider
- *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] BUY
+ *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] BUY  [Y] PORTFOLIO
  */
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
@@ -37,6 +37,7 @@ static lv_obj_t *s_lbl_change  = NULL;
 static lv_obj_t *s_chart       = NULL;
 static lv_chart_series_t *s_ser = NULL;
 static lv_obj_t *s_lbl_cmin    = NULL;
+static lv_obj_t *s_lbl_cmid    = NULL;
 static lv_obj_t *s_lbl_cmax    = NULL;
 static lv_obj_t *s_lbl_stats_row1 = NULL;
 static lv_obj_t *s_lbl_stats_row2 = NULL;
@@ -478,6 +479,8 @@ static void _build(void) {
 
     s_lbl_change = lv_label_create(top);
     lv_obj_align(s_lbl_change, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_set_width(s_lbl_change, 54);
+    lv_obj_set_style_text_align(s_lbl_change, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_font(s_lbl_change, &lv_font_montserrat_12, 0);
 
     /* ── K-line chart (276×110, x=44 leaving room for Y labels) ────────── */
@@ -488,20 +491,20 @@ static void _build(void) {
     lv_obj_set_style_border_width(s_chart, 0, 0);
     lv_obj_set_style_pad_all(s_chart, 0, 0);
     lv_chart_set_type(s_chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_div_line_count(s_chart, 3, 1);  /* 3 h-lines, 1 v-line at 12h */
+    lv_chart_set_div_line_count(s_chart, 4, 1);  /* add a clearer middle guide */
     lv_obj_set_style_line_color(s_chart, lv_color_hex(0x1A2A3A), LV_PART_MAIN);
 
     s_ser = lv_chart_add_series(s_chart, COLOR_GREEN, LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_point_count(s_chart, MAX_CHART_PTS);
 
-    /* Timeframe label stays on chart so top bar remains sym/price/change focused. */
-    s_lbl_tf = lv_label_create(s_chart);
-    lv_obj_align(s_lbl_tf, LV_ALIGN_TOP_RIGHT, -4, 2);
-    lv_obj_set_width(s_lbl_tf, 32);
+    s_lbl_tf = lv_label_create(top);
+    lv_obj_align(s_lbl_tf, LV_ALIGN_RIGHT_MID, -64, 0);
+    lv_obj_set_width(s_lbl_tf, 34);
     lv_label_set_long_mode(s_lbl_tf, LV_LABEL_LONG_CLIP);
     lv_label_set_text(s_lbl_tf, INTERVAL_LBLS[s_interval_idx]);
     lv_obj_set_style_text_color(s_lbl_tf, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_tf, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_tf, LV_TEXT_ALIGN_RIGHT, 0);
 
     /* Hide dots (LVGL 9: width + height) */
     lv_obj_set_style_size(s_chart, 0, 0, LV_PART_INDICATOR);
@@ -513,6 +516,13 @@ static void _build(void) {
     lv_label_set_long_mode(s_lbl_cmax, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_cmax, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_cmax, &lv_font_montserrat_12, 0);
+
+    s_lbl_cmid = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_cmid, 2, 71);
+    lv_obj_set_width(s_lbl_cmid, 42);
+    lv_label_set_long_mode(s_lbl_cmid, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_cmid, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_cmid, &lv_font_montserrat_12, 0);
 
     s_lbl_cmin = lv_label_create(s_screen);
     lv_obj_set_pos(s_lbl_cmin, 2, 119);  /* near chart bottom (22+110-13) */
@@ -616,9 +626,9 @@ static void _build(void) {
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Three visible action affordances only; no extra spotlight footer action state. */
+    /* Keep spotlight affordances aligned with the rest of the primary surfaces. */
     lv_obj_t *slot_b = lv_obj_create(bot);
-    lv_obj_set_size(slot_b, 106, 240 - 215);
+    lv_obj_set_size(slot_b, 64, 240 - 215);
     lv_obj_set_pos(slot_b, 0, 0);
     lv_obj_set_style_bg_opa(slot_b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_b, 0, 0);
@@ -626,20 +636,28 @@ static void _build(void) {
     lv_obj_clear_flag(slot_b, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_x = lv_obj_create(bot);
-    lv_obj_set_size(slot_x, 106, 240 - 215);
-    lv_obj_set_pos(slot_x, 106, 0);
+    lv_obj_set_size(slot_x, 64, 240 - 215);
+    lv_obj_set_pos(slot_x, 64, 0);
     lv_obj_set_style_bg_opa(slot_x, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_x, 0, 0);
     lv_obj_set_style_pad_all(slot_x, 0, 0);
     lv_obj_clear_flag(slot_x, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_a = lv_obj_create(bot);
-    lv_obj_set_size(slot_a, 108, 240 - 215);
-    lv_obj_set_pos(slot_a, 212, 0);
+    lv_obj_set_size(slot_a, 64, 240 - 215);
+    lv_obj_set_pos(slot_a, 128, 0);
     lv_obj_set_style_bg_opa(slot_a, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_a, 0, 0);
     lv_obj_set_style_pad_all(slot_a, 0, 0);
     lv_obj_clear_flag(slot_a, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *slot_y = lv_obj_create(bot);
+    lv_obj_set_size(slot_y, 128, 240 - 215);
+    lv_obj_set_pos(slot_y, 192, 0);
+    lv_obj_set_style_bg_opa(slot_y, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(slot_y, 0, 0);
+    lv_obj_set_style_pad_all(slot_y, 0, 0);
+    lv_obj_clear_flag(slot_y, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lbl_back = lv_label_create(slot_b);
     lv_obj_align(lbl_back, LV_ALIGN_CENTER, 0, 0);
@@ -658,6 +676,12 @@ static void _build(void) {
     lv_label_set_text(lbl_buy, "[A] BUY");
     lv_obj_set_style_text_color(lbl_buy, COLOR_GREEN, 0);
     lv_obj_set_style_text_font(lbl_buy, &lv_font_montserrat_12, 0);
+
+    lv_obj_t *lbl_portfolio = lv_label_create(slot_y);
+    lv_obj_align(lbl_portfolio, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(lbl_portfolio, "[Y] PORTFOLIO");
+    lv_obj_set_style_text_color(lbl_portfolio, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(lbl_portfolio, &lv_font_montserrat_12, 0);
 
 }
 
@@ -705,7 +729,7 @@ void screen_spotlight_show(const char *json_data)
 
     /* Parse basic fields */
     char sym[24]={0}, price[24]={0}, change[20]={0}, risk_lvl[12]={0};
-    char holders[20]={0}, liq[20]={0}, cmin[16]={0}, cmax[16]={0};
+    char holders[20]={0}, liq[20]={0}, cmin[16]={0}, cmid[16]={0}, cmax[16]={0};
     char vol24h[20]={0}, mcap[20]={0}, top100[20]={0}, ca_compact[32]={0};
     char contract_addr[160]={0}, mint_addr[160]={0};
     char origin_hint[32]={0};
@@ -739,6 +763,7 @@ void screen_spotlight_show(const char *json_data)
     /* Compact Y-axis labels; fall back to full price strings */
     if (!_str(json_data, "chart_min_y", cmin, sizeof(cmin)))
         _str(json_data, "chart_min", cmin, sizeof(cmin));
+    _str(json_data, "chart_mid_y", cmid, sizeof(cmid));
     if (!_str(json_data, "chart_max_y", cmax, sizeof(cmax)))
         _str(json_data, "chart_max", cmax, sizeof(cmax));
 
@@ -784,6 +809,7 @@ void screen_spotlight_show(const char *json_data)
 
     /* Y-axis price labels — always update so they track the current window */
     lv_label_set_text(s_lbl_cmin, cmin[0] ? cmin : "");
+    lv_label_set_text(s_lbl_cmid, cmid[0] ? cmid : "");
     lv_label_set_text(s_lbl_cmax, cmax[0] ? cmax : "");
 
     /* X-axis time labels */

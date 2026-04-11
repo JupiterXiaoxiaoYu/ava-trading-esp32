@@ -20,10 +20,10 @@
 #define VISIBLE_ROWS  8
 
 #define COL_CHAIN_X    4
-#define COL_OVERLAY_TITLE_X   24
-#define COL_OVERLAY_TITLE_W   84
-#define COL_OVERLAY_DETAIL_X  112
-#define COL_OVERLAY_DETAIL_W  200
+#define COL_OVERLAY_TITLE_X   16
+#define COL_OVERLAY_TITLE_W   106
+#define COL_OVERLAY_DETAIL_X  128
+#define COL_OVERLAY_DETAIL_W  186
 
 #define COLOR_WHITE   lv_color_hex(0xFFFFFF)
 #define COLOR_GRAY    lv_color_hex(0x9E9E9E)

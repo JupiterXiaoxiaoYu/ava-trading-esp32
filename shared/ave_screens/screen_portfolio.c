@@ -7,7 +7,7 @@
  *   y= 22..38   header row (Symbol / Value / P&L)
  *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
- *   y=215..240  bottom bar: [B] BACK  [A] DETAIL  [X] SELL  [Y] PORTFOLIO
+ *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL
  */
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
@@ -593,9 +593,9 @@ static void _build(void) {
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Keep key positions consistent with SPOTLIGHT: B / X / A / Y. */
+    /* Portfolio is already the current destination, so keep only local actions here. */
     lv_obj_t *slot_b = lv_obj_create(bot);
-    lv_obj_set_size(slot_b, 64, 240 - BOTTOM_Y);
+    lv_obj_set_size(slot_b, 106, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_b, 0, 0);
     lv_obj_set_style_bg_opa(slot_b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_b, 0, 0);
@@ -603,28 +603,20 @@ static void _build(void) {
     lv_obj_clear_flag(slot_b, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_x = lv_obj_create(bot);
-    lv_obj_set_size(slot_x, 64, 240 - BOTTOM_Y);
-    lv_obj_set_pos(slot_x, 64, 0);
+    lv_obj_set_size(slot_x, 106, 240 - BOTTOM_Y);
+    lv_obj_set_pos(slot_x, 106, 0);
     lv_obj_set_style_bg_opa(slot_x, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_x, 0, 0);
     lv_obj_set_style_pad_all(slot_x, 0, 0);
     lv_obj_clear_flag(slot_x, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *slot_a = lv_obj_create(bot);
-    lv_obj_set_size(slot_a, 64, 240 - BOTTOM_Y);
-    lv_obj_set_pos(slot_a, 128, 0);
+    lv_obj_set_size(slot_a, 108, 240 - BOTTOM_Y);
+    lv_obj_set_pos(slot_a, 212, 0);
     lv_obj_set_style_bg_opa(slot_a, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(slot_a, 0, 0);
     lv_obj_set_style_pad_all(slot_a, 0, 0);
     lv_obj_clear_flag(slot_a, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *slot_y = lv_obj_create(bot);
-    lv_obj_set_size(slot_y, 128, 240 - BOTTOM_Y);
-    lv_obj_set_pos(slot_y, 192, 0);
-    lv_obj_set_style_bg_opa(slot_y, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(slot_y, 0, 0);
-    lv_obj_set_style_pad_all(slot_y, 0, 0);
-    lv_obj_clear_flag(slot_y, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *lbl_back = lv_label_create(slot_b);
     lv_obj_align(lbl_back, LV_ALIGN_CENTER, 0, 0);
@@ -643,12 +635,6 @@ static void _build(void) {
     lv_label_set_text(lbl_detail, "[A] DETAIL");
     lv_obj_set_style_text_color(lbl_detail, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(lbl_detail, &lv_font_montserrat_12, 0);
-
-    lv_obj_t *lbl_portfolio = lv_label_create(slot_y);
-    lv_obj_align(lbl_portfolio, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(lbl_portfolio, "[Y] PORTFOLIO");
-    lv_obj_set_style_text_color(lbl_portfolio, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(lbl_portfolio, &lv_font_montserrat_12, 0);
 }
 
 /* ─── Public API ──────────────────────────────────────────────────────────── */

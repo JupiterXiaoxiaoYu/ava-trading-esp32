@@ -20,20 +20,20 @@
 
 /* Screen implementations (forward declarations) */
 void screen_feed_show(const char *json_data);
-void screen_feed_reveal(void) __attribute__((weak));
+void screen_feed_reveal(void);
 void screen_feed_key(int key);
 bool screen_feed_should_ignore_live_push(void);
 int screen_feed_get_selected_context_json(char *out, size_t out_n);
 
-void screen_explorer_show(const char *json_data) __attribute__((weak));
-void screen_explorer_key(int key) __attribute__((weak));
-int screen_explorer_get_selected_context_json(char *out, size_t out_n) __attribute__((weak));
+void screen_explorer_show(const char *json_data);
+void screen_explorer_key(int key);
+int screen_explorer_get_selected_context_json(char *out, size_t out_n);
 
-void screen_browse_show(const char *json_data) __attribute__((weak));
-void screen_browse_show_placeholder(const char *mode) __attribute__((weak));
-void screen_browse_reveal(void) __attribute__((weak));
-void screen_browse_key(int key) __attribute__((weak));
-int screen_browse_get_selected_context_json(char *out, size_t out_n) __attribute__((weak));
+void screen_browse_show(const char *json_data);
+void screen_browse_show_placeholder(const char *mode);
+void screen_browse_reveal(void);
+void screen_browse_key(int key);
+int screen_browse_get_selected_context_json(char *out, size_t out_n);
 
 void screen_spotlight_show(const char *json_data);
 void screen_spotlight_key(int key);
@@ -243,16 +243,12 @@ void ave_sm_handle_json(const char *json_str)
         s_back_target = AVE_SCREEN_PORTFOLIO;
     } else if (strcmp(screen_id, "explorer") == 0) {
         _prepare_primary_screen_transition(AVE_SCREEN_EXPLORER);
-        if (screen_explorer_show) {
-            screen_explorer_show(data);
-            s_current = AVE_SCREEN_EXPLORER;
-        }
+        screen_explorer_show(data);
+        s_current = AVE_SCREEN_EXPLORER;
     } else if (strcmp(screen_id, "browse") == 0) {
         _prepare_primary_screen_transition(AVE_SCREEN_BROWSE);
-        if (screen_browse_show) {
-            screen_browse_show(data);
-            s_current = AVE_SCREEN_BROWSE;
-        }
+        screen_browse_show(data);
+        s_current = AVE_SCREEN_BROWSE;
     } else if (strcmp(screen_id, "disambiguation") == 0) {
         _prepare_primary_screen_transition(AVE_SCREEN_DISAMBIGUATION);
         screen_disambiguation_show(data);
@@ -305,8 +301,8 @@ void ave_sm_key_press(int key)
 
     switch (s_current) {
         case AVE_SCREEN_FEED:          screen_feed_key(key);          break;
-        case AVE_SCREEN_EXPLORER:      if (screen_explorer_key) screen_explorer_key(key); break;
-        case AVE_SCREEN_BROWSE:        if (screen_browse_key) screen_browse_key(key); break;
+        case AVE_SCREEN_EXPLORER:      screen_explorer_key(key);      break;
+        case AVE_SCREEN_BROWSE:        screen_browse_key(key);        break;
         case AVE_SCREEN_SPOTLIGHT:     screen_spotlight_key(key);     break;
         case AVE_SCREEN_CONFIRM:       screen_confirm_key(key);       break;
         case AVE_SCREEN_LIMIT_CONFIRM: screen_limit_confirm_key(key); break;
@@ -328,8 +324,7 @@ void ave_sm_go_to_feed(void)
 void ave_sm_open_feed_cached(void)
 {
     _prepare_primary_screen_transition(AVE_SCREEN_FEED);
-    if (screen_feed_reveal) screen_feed_reveal();
-    else screen_feed_show("{}");
+    screen_feed_reveal();
     s_current = AVE_SCREEN_FEED;
     s_back_target = AVE_SCREEN_FEED;
 }
@@ -337,20 +332,16 @@ void ave_sm_open_feed_cached(void)
 void ave_sm_open_explorer(void)
 {
     _prepare_primary_screen_transition(AVE_SCREEN_EXPLORER);
-    if (screen_explorer_show) {
-        screen_explorer_show("{}");
-        s_current = AVE_SCREEN_EXPLORER;
-    }
+    screen_explorer_show("{}");
+    s_current = AVE_SCREEN_EXPLORER;
     ave_send_json("{\"type\":\"key_action\",\"action\":\"explorer_sync\"}");
 }
 
 void ave_sm_open_browse(const char *mode)
 {
     _prepare_primary_screen_transition(AVE_SCREEN_BROWSE);
-    if (screen_browse_show_placeholder) {
-        screen_browse_show_placeholder(mode);
-        s_current = AVE_SCREEN_BROWSE;
-    }
+    screen_browse_show_placeholder(mode);
+    s_current = AVE_SCREEN_BROWSE;
 }
 
 void ave_sm_go_back_fallback(void)
@@ -362,14 +353,11 @@ void ave_sm_go_back_fallback(void)
         return;
     }
     if (s_back_target == AVE_SCREEN_BROWSE) {
-        if (screen_browse_reveal) {
-            screen_browse_reveal();
-            s_current = AVE_SCREEN_BROWSE;
-            return;
-        }
+        screen_browse_reveal();
+        s_current = AVE_SCREEN_BROWSE;
+        return;
     }
-    if (screen_feed_reveal) screen_feed_reveal();
-    else screen_feed_show("{}");
+    screen_feed_reveal();
     s_current = AVE_SCREEN_FEED;
 }
 
@@ -381,9 +369,9 @@ int ave_sm_get_selection_context_json(char *out, size_t out_n)
         case AVE_SCREEN_FEED:
             return screen_feed_get_selected_context_json(out, out_n);
         case AVE_SCREEN_EXPLORER:
-            return screen_explorer_get_selected_context_json ? screen_explorer_get_selected_context_json(out, out_n) : 0;
+            return screen_explorer_get_selected_context_json(out, out_n);
         case AVE_SCREEN_BROWSE:
-            return screen_browse_get_selected_context_json ? screen_browse_get_selected_context_json(out, out_n) : 0;
+            return screen_browse_get_selected_context_json(out, out_n);
         case AVE_SCREEN_PORTFOLIO:
             return screen_portfolio_get_selected_context_json(out, out_n);
         case AVE_SCREEN_SPOTLIGHT:
