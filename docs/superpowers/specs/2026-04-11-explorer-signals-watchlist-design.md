@@ -163,6 +163,29 @@ This design intentionally keeps all token detail continuation paths converging i
 
 Future `tx / holders / pair` work should continue to enrich `SPOTLIGHT`, not create more top-level Explore destinations.
 
+### 5.5 SPOTLIGHT Watchlist Status Indicator
+
+`SPOTLIGHT` should show watchlist membership as a visual state, but not as a new interactive control.
+
+The page adds a star indicator:
+- `☆`: current token is not in watchlist
+- `★`: current token is already in watchlist
+
+Placement:
+- keep the existing third-row market data layout intact
+- place the star on the final information row, aligned to the right side
+- leave the left side of that row for the compact contract identity string
+
+This placement is preferred over adding the star into the third-row data columns because:
+- the third row should remain a clean decision-data row such as `Holders | Top10`
+- the star is status metadata, not market data
+- the final row already serves as token identity / context territory
+
+The star is display-only in this round:
+- it is not focusable
+- it does not introduce a new key action
+- it updates immediately after a successful voice add/remove watchlist action
+
 ---
 
 ## 6. Signals Page Design
@@ -313,6 +336,16 @@ This split keeps the interaction model clean:
 - voice handles secondary but still useful intents that are naturally phrased
 
 This avoids introducing a fragile overloaded key on the most important action page in the product.
+
+### 8.4 Visual Feedback In SPOTLIGHT
+
+Voice add/remove should not feel invisible.
+
+After a successful watchlist change:
+- the `SPOTLIGHT` star indicator updates immediately from `☆` to `★` or back
+- the page may also show lightweight confirmation feedback, but the star state is the durable confirmation
+
+This gives the user a persistent saved/not-saved signal without spending an extra button.
 
 ---
 
