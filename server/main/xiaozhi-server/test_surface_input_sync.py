@@ -1811,8 +1811,12 @@ int main(void)
         screen_feed_key(AVE_KEY_DOWN);
     }}
     screen_feed_key(AVE_KEY_A);
-    if (!expect_contains("\\"action\\":\\"signals\\"", "signals explore activation")) {{
+    if (!s_lbl_source || strcmp(s_lbl_source->text, "SIGNALS") != 0) {{
+        fprintf(stderr, "signals title not synced immediately: %s\\n", s_lbl_source ? s_lbl_source->text : "<null>");
         return 2;
+    }}
+    if (!expect_contains("\\"action\\":\\"signals\\"", "signals explore activation")) {{
+        return 3;
     }}
 
     clear_last_json();
@@ -1822,8 +1826,12 @@ int main(void)
         screen_feed_key(AVE_KEY_DOWN);
     }}
     screen_feed_key(AVE_KEY_A);
+    if (!s_lbl_source || strcmp(s_lbl_source->text, "WATCHLIST") != 0) {{
+        fprintf(stderr, "watchlist title not synced immediately: %s\\n", s_lbl_source ? s_lbl_source->text : "<null>");
+        return 4;
+    }}
     if (!expect_contains("\\"action\\":\\"watchlist\\"", "watchlist explore activation")) {{
-        return 3;
+        return 5;
     }}
     return 0;
 }}
@@ -1834,6 +1842,91 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_explore_panel_signals_watchlist",
+        )
+
+    def test_real_feed_signals_browse_uses_signal_summary_not_headline(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        signals_payload = (
+            '{'
+            '"screen":"feed",'
+            '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
+            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal",'
+            '"signal_summary":"BUY 3.5 SOL","headline":"THIS_HEADLINE_MUST_NOT_RENDER"}'
+            ']}}'
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+int main(void)
+{{
+    screen_feed_show("{signals_payload}");
+    if (!s_rows[0].lbl_sym || strcmp(s_rows[0].lbl_sym->text, "赢麻了") != 0) {{
+        fprintf(stderr, "signals symbol not preserved: %s\\n", s_rows[0].lbl_sym ? s_rows[0].lbl_sym->text : "<null>");
+        return 2;
+    }}
+    if (!s_rows[0].lbl_subtitle || strcmp(s_rows[0].lbl_subtitle->text, "BUY 3.5 SOL") != 0) {{
+        fprintf(stderr, "signals subtitle should use summary: %s\\n", s_rows[0].lbl_subtitle ? s_rows[0].lbl_subtitle->text : "<null>");
+        return 3;
+    }}
+    if (strstr(s_rows[0].lbl_subtitle->text, "HEADLINE") != NULL) {{
+        fprintf(stderr, "signals subtitle leaked headline: %s\\n", s_rows[0].lbl_subtitle->text);
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_signals_browse_summary",
         )
 
     def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):

@@ -29,10 +29,14 @@ class SignalsWatchlistToolTests(unittest.TestCase):
                         "token": "Token111",
                         "chain": "solana",
                         "signal_type": "SMART_MONEY",
-                        "headline": "Smart buy x12",
+                        "headline": "Should not be shown in browse row",
                         "action_type": "BUY",
                         "price_change_24h": 12.34,
                         "mc_cur": 120000,
+                        "actions": [
+                            {"action_type": "buy", "quote_token_volume": "1.25"},
+                            {"action_type": "buy", "quote_token_volume": "2.25"},
+                        ],
                     }
                 ]
             }
@@ -50,7 +54,32 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "signals")
         self.assertEqual(payload["source_label"], "SIGNALS")
         self.assertEqual(payload["tokens"][0]["token_id"], "Token111")
+        self.assertEqual(payload["tokens"][0]["signal_summary"], "BUY 3.5 SOL")
         self.assertEqual(self.conn.ave_state["feed_mode"], "signals")
+
+    def test_ave_list_signals_invalidates_live_feed_session_before_fetch(self):
+        signal_payload = {"data": {"list": []}}
+        order = []
+
+        def _invalidate(conn, **kwargs):
+            order.append("invalidate")
+            conn.ave_state["feed_session"] = 77
+            return 77
+
+        def _data_get(*args, **kwargs):
+            order.append("data_get")
+            return signal_payload
+
+        with patch.object(ave_tools, "_invalidate_live_feed_session", side_effect=_invalidate), patch.object(
+            ave_tools, "_data_get", side_effect=_data_get
+        ), patch.object(ave_tools, "_send_display", new=AsyncMock()) as send_display:
+            ave_tools.ave_list_signals(self.conn)
+            self.loop.run_until_complete(asyncio.sleep(0))
+
+        self.assertEqual(order[:2], ["invalidate", "data_get"])
+        _, _, payload = send_display.await_args.args
+        self.assertEqual(payload["feed_session"], 77)
+        self.assertEqual(self.conn.ave_state["feed_session"], 77)
 
     def test_ave_open_watchlist_renders_watchlist_feed(self):
         with patch.object(

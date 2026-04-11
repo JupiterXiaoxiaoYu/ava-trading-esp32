@@ -66,6 +66,7 @@ typedef struct {
     char market_cap[16];
     char source[24];
     char signal_type[32];
+    char signal_summary[64];
     char headline[64];
 } feed_token_t;
 
@@ -453,11 +454,21 @@ static void _render_feed_surface(void)
     _update_rows();
 }
 
+static void _sync_remote_browse_mode(feed_mode_t mode, const char *source_label)
+{
+    _set_feed_mode(mode);
+    _apply_source_label(source_label, 0);
+    if (s_top_bar) {
+        lv_obj_set_style_bg_color(s_top_bar, s_is_orders_mode ? COLOR_ORANGE : COLOR_BAR, 0);
+    }
+}
+
 static void _activate_current_explore_item(void)
 {
     const feed_explore_item_t *item = _current_explore_item();
 
     if (item->id == FEED_EXPLORE_ITEM_ORDERS) {
+        _sync_remote_browse_mode(FEED_MODE_ORDERS, "ORDERS");
         ave_send_json("{\"type\":\"key_action\",\"action\":\"orders\"}");
         s_cleanup_special_mode = 0;
         _close_feed_overlay();
@@ -472,6 +483,7 @@ static void _activate_current_explore_item(void)
     }
 
     if (item->id == FEED_EXPLORE_ITEM_SIGNALS) {
+        _sync_remote_browse_mode(FEED_MODE_SIGNALS, "SIGNALS");
         ave_send_json("{\"type\":\"key_action\",\"action\":\"signals\"}");
         s_cleanup_special_mode = 0;
         _close_feed_overlay();
@@ -479,6 +491,7 @@ static void _activate_current_explore_item(void)
     }
 
     if (item->id == FEED_EXPLORE_ITEM_WATCHLIST) {
+        _sync_remote_browse_mode(FEED_MODE_WATCHLIST, "WATCHLIST");
         ave_send_json("{\"type\":\"key_action\",\"action\":\"watchlist\"}");
         s_cleanup_special_mode = 0;
         _close_feed_overlay();
@@ -684,6 +697,7 @@ static void _parse_tokens_from_json(const char *json)
         _get_json_str_field(obj, "market_cap", t->market_cap, sizeof(t->market_cap));
         _get_json_str_field(obj, "source",     t->source,     sizeof(t->source));
         _get_json_str_field(obj, "signal_type", t->signal_type, sizeof(t->signal_type));
+        _get_json_str_field(obj, "signal_summary", t->signal_summary, sizeof(t->signal_summary));
         _get_json_str_field(obj, "headline",    t->headline,    sizeof(t->headline));
         t->change_positive = _get_json_tristate_field(obj, "change_positive", -1);
         if (!t->symbol[0]) strcpy(t->symbol, "???");
@@ -778,7 +792,7 @@ static void _apply_browse_row_layout(feed_row_ui_t *ui)
     if (!ui) return;
     int first_line_y = _browse_first_line_y();
     lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
     lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
@@ -962,7 +976,7 @@ static void _update_browse_rows(void)
 
         const char *sym_text = t->symbol[0] ? t->symbol : "???";
         lv_label_set_text(ui->lbl_sym, sym_text);
-        lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
         lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
         lv_color_t text_color = selected ? COLOR_WHITE : COLOR_GRAY;
@@ -971,8 +985,8 @@ static void _update_browse_rows(void)
 
         if (s_feed_mode == FEED_MODE_SIGNALS) {
             lv_label_set_text(ui->lbl_price, t->signal_type[0] ? t->signal_type : "");
-            const char *headline = t->headline[0] ? t->headline : "";
-            lv_label_set_text(ui->lbl_subtitle, headline);
+            const char *summary = t->signal_summary[0] ? t->signal_summary : (t->headline[0] ? t->headline : "");
+            lv_label_set_text(ui->lbl_subtitle, summary);
             lv_label_set_text(ui->lbl_chg, "");
             lv_obj_set_style_text_color(ui->lbl_subtitle, text_color, 0);
             lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);

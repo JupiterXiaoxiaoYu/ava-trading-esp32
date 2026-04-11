@@ -260,6 +260,76 @@ def _contract_short(addr: str) -> str:
     return f"{text[:4]}...{text[-4:]}"
 
 
+def _signal_default_quote_symbol(chain: str) -> str:
+    normalized = _normalize_chain_name(chain, "solana")
+    if normalized == "solana":
+        return "SOL"
+    if normalized == "bsc":
+        return "BNB"
+    return "ETH"
+
+
+def _fmt_signal_amount(value) -> str:
+    amount = _parse_numeric_value(value)
+    if amount is None:
+        return "0"
+    amount = abs(float(amount))
+    if amount >= 1_000_000:
+        return f"{amount / 1_000_000:.1f}M"
+    if amount >= 1_000:
+        return f"{amount / 1_000:.1f}K"
+    if amount >= 100:
+        return f"{amount:.1f}".rstrip("0").rstrip(".")
+    if amount >= 1:
+        return f"{amount:.2f}".rstrip("0").rstrip(".")
+    return f"{amount:.4f}".rstrip("0").rstrip(".")
+
+
+def _build_signal_summary(item: dict, chain: str) -> str:
+    actions = item.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return "NO FLOWS"
+
+    buy_total = 0.0
+    sell_total = 0.0
+    unit = ""
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("action_type") or "").strip().lower()
+        volume = _parse_numeric_value(action.get("quote_token_volume"))
+        if volume is None:
+            volume = _parse_numeric_value(action.get("volume_usd"))
+        if volume is None:
+            volume = _parse_numeric_value(action.get("base_token_volume"))
+        if volume is None:
+            continue
+
+        quote_token = str(action.get("quote_token") or "").strip()
+        base_token = str(action.get("base_token") or "").strip()
+        if not unit:
+            if quote_token and len(quote_token) <= 12 and quote_token.isascii():
+                unit = quote_token.upper()
+            elif base_token and len(base_token) <= 12 and base_token.isascii():
+                unit = base_token.upper()
+
+        if action_type == "sell":
+            sell_total += volume
+        else:
+            buy_total += volume
+
+    if not unit:
+        unit = _signal_default_quote_symbol(chain)
+
+    if buy_total > 0 and sell_total > 0:
+        return f"B {_fmt_signal_amount(buy_total)} / S {_fmt_signal_amount(sell_total)} {unit}"
+    if buy_total > 0:
+        return f"BUY {_fmt_signal_amount(buy_total)} {unit}"
+    if sell_total > 0:
+        return f"SELL {_fmt_signal_amount(sell_total)} {unit}"
+    return "NO FLOWS"
+
+
 def _balance_ratio_to_percent_points(raw_value):
     """
     Convert a top-holder share value into percent points.
@@ -1208,6 +1278,7 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
                 "change_24h": _fmt_change(change_value if change_value is not None else 0),
                 "change_positive": True if change_value is None else change_value >= 0,
                 "signal_type": str(item.get("signal_type") or "").strip(),
+                "signal_summary": _build_signal_summary(item, chain),
                 "headline": str(item.get("headline") or "").strip(),
                 "signal_time": str(item.get("signal_time") or "").strip(),
                 "source": "signals",
@@ -2335,6 +2406,10 @@ ave_open_watchlist_desc = {
 @register_function("ave_list_signals", ave_list_signals_desc, ToolType.SYSTEM_CTL)
 def ave_list_signals(conn: "ConnectionHandler"):
     try:
+        # Cut over FEED session before REST fetch so pending/stale live pushes
+        # cannot repaint the previous feed while Signals is loading.
+        feed_session = _invalidate_live_feed_session(conn, clear_tokens=True)
+
         resp = _data_get("/signals/public/list", {"limit": 20})
         raw = resp.get("data", {})
         if isinstance(raw, dict):
@@ -2350,7 +2425,7 @@ def ave_list_signals(conn: "ConnectionHandler"):
         state.pop("order_list", None)
         _clear_search_state(state)
         _set_feed_navigation_state(state, rows, cursor=0)
-        feed_session = _next_feed_session(state)
+        state["feed_session"] = feed_session
 
         conn.loop.create_task(
             _send_display(
