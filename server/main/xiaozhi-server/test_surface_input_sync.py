@@ -56,9 +56,18 @@ def _build_disambiguation_listen_harness():
 
 void ave_send_json(const char *json) { (void)json; }
 void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_reveal(void) { }
 void screen_feed_key(int key) { (void)key; }
 bool screen_feed_should_ignore_live_push(void) { (void)0; return false; }
 int screen_feed_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_explorer_show(const char *json_data) { (void)json_data; }
+void screen_explorer_key(int key) { (void)key; }
+int screen_explorer_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
+void screen_browse_show(const char *json_data) { (void)json_data; }
+void screen_browse_show_placeholder(const char *mode) { (void)mode; }
+void screen_browse_reveal(void) { }
+void screen_browse_key(int key) { (void)key; }
+int screen_browse_get_selected_context_json(char *out, size_t out_n) { (void)out; (void)out_n; return 0; }
 void screen_spotlight_show(const char *json_data) { (void)json_data; }
 void screen_spotlight_key(int key) { (void)key; }
 void screen_spotlight_cancel_back_timer(void) { }
@@ -429,6 +438,7 @@ int main(void)
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
         feed_source = repo_root / "shared/ave_screens/screen_feed.c"
         explorer_source = repo_root / "shared/ave_screens/screen_explorer.c"
+        browse_source = repo_root / "shared/ave_screens/screen_browse.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -497,7 +507,7 @@ int main(void)
             include_dir,
             manager_src,
             binary_name=binary_name,
-            extra_sources=(feed_source,),
+            extra_sources=(feed_source, browse_source),
         )
 
     def _assert_real_confirm_screen_locks_inputs_after_first_submit(
@@ -1922,7 +1932,14 @@ int screen_feed_get_selected_context_json(char *out, size_t out_n)
     (void)out_n;
     return 0;
 }}
-
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
 #include "{screen_source}"
 
 int main(void)
@@ -1957,6 +1974,7 @@ int main(void)
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
         screen_source = repo_root / "shared/ave_screens/screen_feed.c"
         browse_source = repo_root / "shared/ave_screens/screen_browse.c"
+        explorer_source = repo_root / "shared/ave_screens/screen_explorer.c"
         verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
             encoding="utf-8"
         ).split("#if defined(VERIFY_FEED)", 1)[0]
@@ -2048,7 +2066,7 @@ int main(void)
             include_dir,
             manager_src,
             binary_name="verify_feed_signals_return_colors",
-            extra_sources=(browse_source,),
+            extra_sources=(browse_source, explorer_source),
         )
 
     def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):
@@ -2117,7 +2135,14 @@ int screen_feed_get_selected_context_json(char *out, size_t out_n)
     (void)out_n;
     return 0;
 }}
-
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
 #include "{screen_source}"
 
 int main(void)
@@ -2567,6 +2592,7 @@ int main(void)
 void ave_send_json(const char *json) { (void)json; }
 
 void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_reveal(void) { }
 void screen_feed_key(int key) { (void)key; }
 bool screen_feed_should_ignore_live_push(void) { return false; }
 int screen_feed_get_selected_context_json(char *out, size_t out_n)
@@ -2728,6 +2754,7 @@ int main(void)
 void ave_send_json(const char *json) { (void)json; }
 
 void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_reveal(void) { }
 void screen_feed_key(int key) { (void)key; }
 bool screen_feed_should_ignore_live_push(void) { return false; }
 int screen_feed_get_selected_context_json(char *out, size_t out_n)

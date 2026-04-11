@@ -18,28 +18,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__GNUC__)
-#define AVE_WEAK __attribute__((weak))
-#else
-#define AVE_WEAK
-#endif
-
 /* Screen implementations (forward declarations) */
 void screen_feed_show(const char *json_data);
-void AVE_WEAK screen_feed_reveal(void);
+void screen_feed_reveal(void);
 void screen_feed_key(int key);
 bool screen_feed_should_ignore_live_push(void);
 int screen_feed_get_selected_context_json(char *out, size_t out_n);
 
-void AVE_WEAK screen_explorer_show(const char *json_data);
-void AVE_WEAK screen_explorer_key(int key);
-int AVE_WEAK screen_explorer_get_selected_context_json(char *out, size_t out_n);
+void screen_explorer_show(const char *json_data);
+void screen_explorer_key(int key);
+int screen_explorer_get_selected_context_json(char *out, size_t out_n);
 
-void AVE_WEAK screen_browse_show(const char *json_data);
-void AVE_WEAK screen_browse_show_placeholder(const char *mode);
-void AVE_WEAK screen_browse_reveal(void);
-void AVE_WEAK screen_browse_key(int key);
-int AVE_WEAK screen_browse_get_selected_context_json(char *out, size_t out_n);
+void screen_browse_show(const char *json_data);
+void screen_browse_show_placeholder(const char *mode);
+void screen_browse_reveal(void);
+void screen_browse_key(int key);
+int screen_browse_get_selected_context_json(char *out, size_t out_n);
 
 void screen_spotlight_show(const char *json_data);
 void screen_spotlight_key(int key);
