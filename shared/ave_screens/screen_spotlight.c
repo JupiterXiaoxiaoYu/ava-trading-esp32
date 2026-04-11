@@ -66,7 +66,7 @@ static lv_obj_t *s_lbl_watch_star = NULL;
 #define FOOTER_PAGE_W 72
 #define FOOTER_ROW4_GAP 6
 #define FOOTER_ROW4_HINT_GAP 4
-#define FOOTER_ROW4_STAR_W 14
+#define FOOTER_ROW4_STAR_W 18
 #define FOOTER_COL1_X 4
 #define FOOTER_COL1_W 112
 #define FOOTER_COL2_X 118
@@ -585,7 +585,8 @@ static void _build(void) {
     lv_obj_set_width(s_lbl_watch_star, FOOTER_ROW4_STAR_W);
     lv_label_set_long_mode(s_lbl_watch_star, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(s_lbl_watch_star, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(s_lbl_watch_star, &lv_font_montserrat_12, 0);
+    /* Montserrat doesn't contain the watchlist star glyphs, so render them with the CJK font. */
+    lv_obj_set_style_text_font(s_lbl_watch_star, ave_font_cjk_14(), 0);
     lv_obj_set_style_text_color(s_lbl_watch_star, COLOR_GRAY, 0);
     lv_label_set_text(s_lbl_watch_star, "☆");
 
