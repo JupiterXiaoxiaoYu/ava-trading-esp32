@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import tempfile
 import unittest
@@ -96,13 +97,14 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
             result = ave_tools.ave_portfolio(conn)
             await asyncio.sleep(0)
 
-        self.assertEqual(result.result, "paper_portfolio:4tokens")
+        self.assertEqual(result.result, "paper_portfolio:1tokens")
         self.assertTrue(sent)
         screen, payload = sent[-1]
         self.assertEqual(screen, "portfolio")
         self.assertEqual(payload["pnl_reason"], "Paper account")
         self.assertEqual(payload["mode_label"], "PAPER")
-        self.assertEqual(len(payload["holdings"]), 4)
+        self.assertEqual(payload["chain_label"], "SOL")
+        self.assertEqual(len(payload["holdings"]), 1)
         self.assertEqual(payload["holdings"][0]["symbol"], "SOL")
 
     async def test_paper_orders_feed_uses_paper_label(self):
@@ -185,6 +187,186 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(position["symbol"], "BONK")
         self.assertEqual(position["amount"], "50")
 
+    async def test_paper_buy_without_symbol_uses_current_token_symbol(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        conn.ave_state["current_token"] = {
+            "addr": "token-9",
+            "chain": "solana",
+            "symbol": "WIF",
+        }
+
+        def _fake_data_post(path, payload):
+            self.assertEqual(path, "/tokens/price")
+            data = {}
+            for token_id in payload.get("token_ids", []):
+                if token_id == f"{ave_tools.NATIVE_SOL}-solana":
+                    data[token_id] = {"current_price_usd": 100}
+                else:
+                    data[token_id] = {"current_price_usd": 2}
+            return {"data": data}
+
+        with patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post):
+            result = ave_tools._execute_paper_trade(
+                conn,
+                "market_buy",
+                {
+                    "chain": "solana",
+                    "outTokenAddress": "token-9",
+                    "paper_native_amount": "1",
+                },
+            )
+
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["data"]["outTokenSymbol"], "WIF")
+
+        account = get_paper_account(self.paper_store, "default")
+        position = account["positions"]["token-9-solana"]
+        self.assertEqual(position["symbol"], "WIF")
+
+    async def test_paper_portfolio_shows_position_symbol_and_pnl(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        sent = []
+        price_call = {"count": 0}
+
+        async def _fake_send_display(conn_obj, screen, data):
+            sent.append((screen, data))
+
+        def _fake_data_post(path, payload):
+            self.assertEqual(path, "/tokens/price")
+            price_call["count"] += 1
+            token_price = 2.0 if price_call["count"] == 1 else 3.0
+            data = {}
+            for token_id in payload.get("token_ids", []):
+                if token_id == f"{ave_tools.NATIVE_SOL}-solana":
+                    data[token_id] = {"current_price_usd": 100}
+                elif token_id == "token-1-solana":
+                    data[token_id] = {"current_price_usd": token_price}
+                else:
+                    data[token_id] = {"current_price_usd": 1}
+            return {"data": data}
+
+        with patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post):
+            buy_result = ave_tools._execute_paper_trade(
+                conn,
+                "market_buy",
+                {
+                    "chain": "solana",
+                    "outTokenAddress": "token-1",
+                    "paper_native_amount": "1",
+                    "paper_symbol": "BONK",
+                },
+            )
+        self.assertEqual(buy_result["status"], "confirmed")
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=_fake_send_display), patch(
+            "plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post
+        ):
+            result = ave_tools.ave_portfolio(conn, chain_filter="solana")
+            await asyncio.sleep(0)
+
+        self.assertEqual(result.result, "paper_portfolio:2tokens")
+        self.assertTrue(sent)
+        screen, payload = sent[-1]
+        self.assertEqual(screen, "portfolio")
+        target = next(row for row in payload["holdings"] if row.get("addr") == "token-1")
+        self.assertEqual(target["symbol"], "BONK")
+        self.assertEqual(target["avg_cost_usd"], "$2.0000")
+        self.assertEqual(target["pnl"], "+$50")
+        self.assertEqual(payload["pnl"], "+$50")
+        self.assertEqual(payload["pnl_pct"], "+50.00%")
+        self.assertEqual(payload["pnl_reason"], "")
+
+    async def test_paper_portfolio_repairs_historical_symbol_and_cost_basis(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        self.paper_store.write_text(
+            json.dumps(
+                {
+                    "default": {
+                        "selected_mode": "paper",
+                        "seeded": True,
+                        "updated_at": 1,
+                        "realized_pnl_usd": "0",
+                        "balances": {
+                            "solana": {"symbol": "SOL", "amount": "1"},
+                            "eth": {"symbol": "ETH", "amount": "1"},
+                            "base": {"symbol": "ETH", "amount": "1"},
+                            "bsc": {"symbol": "BNB", "amount": "1"},
+                        },
+                        "open_orders": [],
+                        "fills": [
+                            {
+                                "id": "paper-old-buy",
+                                "trade_type": "market_buy",
+                                "chain": "eth",
+                                "addr": "0xoldtoken",
+                                "symbol": "TOKEN",
+                                "token_amount": "200",
+                                "amount_usd": "100",
+                                "price_usd": "0.5",
+                                "created_at": 1,
+                            }
+                        ],
+                        "positions": {
+                            "0xoldtoken-eth": {
+                                "addr": "0xoldtoken",
+                                "chain": "eth",
+                                "symbol": "TOKEN",
+                                "token_id": "0xoldtoken-eth",
+                                "amount": "200",
+                                "amount_raw": "200",
+                            }
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        sent = []
+
+        async def _fake_send_display(conn_obj, screen, data):
+            sent.append((screen, data))
+
+        def _fake_data_get(path, params=None):
+            if path == "/tokens/0xoldtoken-eth":
+                return {"data": {"token": {"symbol": "LDO"}}}
+            raise AssertionError(path)
+
+        def _fake_data_post(path, payload):
+            self.assertEqual(path, "/tokens/price")
+            data = {}
+            for token_id in payload.get("token_ids", []):
+                if token_id == f"{ave_tools.NATIVE_SOL}-solana":
+                    data[token_id] = {"current_price_usd": 100}
+                elif token_id == "0xoldtoken-eth":
+                    data[token_id] = {"current_price_usd": 0.75}
+                else:
+                    data[token_id] = {"current_price_usd": 1}
+            return {"data": data}
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=_fake_send_display), patch(
+            "plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get
+        ), patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post):
+            result = ave_tools.ave_portfolio(conn, chain_filter="eth")
+            await asyncio.sleep(0)
+
+        self.assertEqual(result.result, "paper_portfolio:2tokens")
+        screen, payload = sent[-1]
+        self.assertEqual(screen, "portfolio")
+        row = next(item for item in payload["holdings"] if item.get("addr") == "0xoldtoken")
+        self.assertEqual(row["symbol"], "LDO")
+        self.assertEqual(row["avg_cost_usd"], "$0.500000")
+        self.assertEqual(row["pnl"], "+$50")
+        self.assertEqual(payload["pnl"], "+$50")
+
+        account = get_paper_account(self.paper_store, "default")
+        repaired = account["positions"]["0xoldtoken-eth"]
+        self.assertEqual(repaired["symbol"], "LDO")
+        self.assertEqual(repaired["avg_cost_usd"], "0.5")
+        self.assertEqual(repaired["cost_basis_usd"], "100")
+
     async def test_paper_sell_confirm_reduces_position_and_returns_native_balance(self):
         conn = self._conn()
         ave_tools.ave_set_trade_mode(conn, "paper")
@@ -239,6 +421,69 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(account["balances"]["solana"]["amount"], "0.5")
         position = account["positions"]["token-1-solana"]
         self.assertEqual(position["amount"], "25")
+
+    async def test_paper_portfolio_top_pnl_includes_realized_and_unrealized(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        sent = []
+        price_call = {"count": 0}
+
+        async def _fake_send_display(conn_obj, screen, data):
+            sent.append((screen, data))
+
+        def _fake_data_post(path, payload):
+            self.assertEqual(path, "/tokens/price")
+            price_call["count"] += 1
+            if price_call["count"] == 1:
+                token_price = 2.0
+            elif price_call["count"] == 2:
+                token_price = 4.0
+            else:
+                token_price = 6.0
+            data = {}
+            for token_id in payload.get("token_ids", []):
+                if token_id == f"{ave_tools.NATIVE_SOL}-solana":
+                    data[token_id] = {"current_price_usd": 100}
+                elif token_id == "token-1-solana":
+                    data[token_id] = {"current_price_usd": token_price}
+                else:
+                    data[token_id] = {"current_price_usd": 1}
+            return {"data": data}
+
+        with patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post):
+            ave_tools._execute_paper_trade(
+                conn,
+                "market_buy",
+                {
+                    "chain": "solana",
+                    "outTokenAddress": "token-1",
+                    "paper_native_amount": "1",
+                    "paper_symbol": "BONK",
+                },
+            )
+            ave_tools._execute_paper_trade(
+                conn,
+                "market_sell",
+                {
+                    "chain": "solana",
+                    "inTokenAddress": "token-1",
+                    "paper_sell_ratio": "0.5",
+                    "paper_position_amount": "50",
+                    "paper_symbol": "BONK",
+                },
+            )
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=_fake_send_display), patch(
+            "plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post
+        ):
+            result = ave_tools.ave_portfolio(conn, chain_filter="solana")
+            await asyncio.sleep(0)
+
+        self.assertEqual(result.result, "paper_portfolio:2tokens")
+        _, payload = sent[-1]
+        target = next(row for row in payload["holdings"] if row.get("addr") == "token-1")
+        self.assertEqual(target["pnl"], "+$100")
+        self.assertEqual(payload["pnl"], "+$150")
 
     async def test_paper_limit_order_create_list_cancel_restores_balance(self):
         conn = self._conn()

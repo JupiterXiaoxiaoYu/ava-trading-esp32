@@ -241,6 +241,14 @@ def _fmt_volume(vol) -> str:
     return f"${vol:.0f}"
 
 
+def _fmt_signed_volume(vol) -> str:
+    numeric = _parse_numeric_value(vol)
+    if numeric is None:
+        return "N/A"
+    sign = "+" if numeric >= 0 else "-"
+    return f"{sign}{_fmt_volume(abs(numeric))}"
+
+
 def _parse_numeric_value(value):
     if value is None:
         return None
@@ -715,6 +723,28 @@ def _resolve_spotlight_symbol(state: dict, addr: str, chain: str, symbol: str = 
                     return resolved_symbol
 
     return addr[:8] if addr else "?"
+
+
+def _resolve_trade_symbol(conn: "ConnectionHandler", addr: str, chain: str, symbol: str = "") -> str:
+    resolved_symbol = str(symbol or "").strip()
+    if resolved_symbol and resolved_symbol != "TOKEN":
+        return resolved_symbol
+
+    state = _ensure_ave_state(conn)
+    spotlight_symbol = _resolve_spotlight_symbol(state, addr, chain, "")
+    if spotlight_symbol and spotlight_symbol not in {"?", addr[:8] if addr else ""}:
+        return spotlight_symbol
+
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    positions = account.get("positions", {})
+    if isinstance(positions, dict):
+        existing = positions.get(_paper_position_key(addr, chain))
+        if isinstance(existing, dict):
+            existing_symbol = str(existing.get("symbol") or "").strip()
+            if existing_symbol and existing_symbol != "TOKEN":
+                return existing_symbol
+
+    return resolved_symbol or "TOKEN"
 
 
 def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
@@ -2206,8 +2236,103 @@ def _paper_positions_rows(account: dict) -> tuple[list[dict], list[str]]:
     return rows, token_ids
 
 
-def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str = "all") -> dict:
+def _load_token_symbol(addr: str, chain: str) -> str:
+    if not addr or not chain:
+        return ""
+    try:
+        token_resp = _data_get(f"/tokens/{addr}-{chain}")
+    except Exception:
+        return ""
+
+    token_data = token_resp.get("data", token_resp) if isinstance(token_resp, dict) else token_resp
+    token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
+    if isinstance(token, list):
+        token = token[0] if token else {}
+    if not isinstance(token, dict):
+        return ""
+    return str(
+        token.get("symbol")
+        or token.get("base_symbol")
+        or token.get("token_symbol")
+        or ""
+    ).strip()
+
+
+def _repair_paper_positions(conn: "ConnectionHandler", account: dict) -> bool:
+    positions = account.get("positions", {})
+    fills = account.get("fills", [])
+    if not isinstance(positions, dict) or not isinstance(fills, list):
+        return False
+
+    changed = False
+    for _, position in positions.items():
+        if not isinstance(position, dict):
+            continue
+        addr, chain = _split_token_reference(position.get("addr", ""), position.get("chain", ""))
+        if not addr or not chain:
+            continue
+
+        if not str(position.get("token_id") or "").strip():
+            position["token_id"] = f"{addr}-{chain}"
+            changed = True
+
+        symbol = str(position.get("symbol") or "").strip()
+        if not symbol or symbol == "TOKEN":
+            resolved_symbol = ""
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+                if fill_addr != addr or fill_chain != chain:
+                    continue
+                fill_symbol = str(fill.get("symbol") or "").strip()
+                if fill_symbol and fill_symbol != "TOKEN":
+                    resolved_symbol = fill_symbol
+                    break
+            if not resolved_symbol:
+                resolved_symbol = _load_token_symbol(addr, chain)
+            if resolved_symbol:
+                position["symbol"] = resolved_symbol
+                changed = True
+
+        amount = _parse_decimal_amount(position.get("amount")) or Decimal("0")
+        avg_cost = _parse_decimal_amount(position.get("avg_cost_usd"))
+        cost_basis = _parse_decimal_amount(position.get("cost_basis_usd"))
+        if amount > 0 and (avg_cost is None or avg_cost <= 0 or cost_basis is None or cost_basis <= 0):
+            total_buy_amount = Decimal("0")
+            total_buy_usd = Decimal("0")
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+                if fill_addr != addr or fill_chain != chain:
+                    continue
+                trade_type = str(fill.get("trade_type") or "").strip().lower()
+                if trade_type not in {"market_buy", "limit_buy"}:
+                    continue
+                token_amount = _parse_decimal_amount(fill.get("token_amount"))
+                amount_usd = _parse_decimal_amount(fill.get("amount_usd"))
+                if token_amount is None or token_amount <= 0 or amount_usd is None or amount_usd <= 0:
+                    continue
+                total_buy_amount += token_amount
+                total_buy_usd += amount_usd
+
+            if total_buy_amount > 0 and total_buy_usd > 0:
+                repaired_avg_cost = total_buy_usd / total_buy_amount
+                position["avg_cost_usd"] = _decimal_to_string(repaired_avg_cost)
+                position["cost_basis_usd"] = _decimal_to_string(repaired_avg_cost * amount)
+                changed = True
+
+    return changed
+
+
+def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str = "solana") -> dict:
     account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    if _repair_paper_positions(conn, account):
+        def _persist_repair(stored: dict):
+            stored["positions"] = account.get("positions", {})
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _persist_repair)
+
     token_ids = [meta["token_id"] for meta in _PAPER_NATIVE_TOKEN_META.values()]
     paper_positions, position_token_ids = _paper_positions_rows(account)
     token_ids.extend(position_token_ids)
@@ -2215,12 +2340,14 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
 
     holdings = []
     total_usd = 0.0
-    normalized_chain_filter = _normalize_surface_chain(chain_filter, "all", allow_all=True)
+    total_pnl_usd = _parse_numeric_value(account.get("realized_pnl_usd")) or 0.0
+    total_cost_basis_usd = 0.0
+    normalized_chain_filter = _normalize_surface_chain(chain_filter, "solana", allow_all=False)
 
     for chain, balance in (account.get("balances") or {}).items():
         if chain not in _PAPER_NATIVE_TOKEN_META or not isinstance(balance, dict):
             continue
-        if normalized_chain_filter != "all" and chain != normalized_chain_filter:
+        if chain != normalized_chain_filter:
             continue
         token_meta = _PAPER_NATIVE_TOKEN_META[chain]
         symbol = str(balance.get("symbol") or token_meta["symbol"])
@@ -2244,6 +2371,8 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
             "value_usd": _fmt_volume(value),
             "_value_raw": value,
             "price": _fmt_price(price),
+            "avg_cost_usd": "N/A",
+            "pnl": "N/A",
             "pnl_pct": "N/A",
             "pnl_positive": None,
         })
@@ -2251,7 +2380,7 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
     for position in paper_positions:
         symbol = str(position.get("symbol") or "TOKEN").strip() or "TOKEN"
         chain = _normalize_chain_name(position.get("chain"), "solana")
-        if normalized_chain_filter != "all" and chain != normalized_chain_filter:
+        if chain != normalized_chain_filter:
             continue
         addr = str(position.get("addr") or "").strip()
         token_id = str(position.get("token_id") or f"{addr}-{chain}").strip()
@@ -2263,6 +2392,17 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
         value = amount * price
         total_usd += value
         balance_raw = str(position.get("amount_raw") or "").strip()
+        cost_basis = _parse_numeric_value(position.get("cost_basis_usd"))
+        avg_cost = _parse_numeric_value(position.get("avg_cost_usd"))
+        pnl_value = None
+        pnl_pct_value = None
+        pnl_positive = None
+        if cost_basis is not None and cost_basis > 0:
+            pnl_value = value - float(cost_basis)
+            pnl_pct_value = (pnl_value / float(cost_basis)) * 100.0
+            pnl_positive = pnl_value >= 0
+            total_pnl_usd += pnl_value
+            total_cost_basis_usd += float(cost_basis)
         holdings.append({
             "symbol": symbol,
             "addr": addr,
@@ -2276,13 +2416,17 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
             "value_usd": _fmt_volume(value),
             "_value_raw": value,
             "price": _fmt_price(price),
-            "pnl_pct": "N/A",
-            "pnl_positive": None,
+            "avg_cost_usd": _fmt_price(avg_cost) if avg_cost is not None and avg_cost > 0 else "N/A",
+            "cost_basis_usd": _fmt_volume(cost_basis) if cost_basis is not None and cost_basis > 0 else "N/A",
+            "pnl": _fmt_signed_volume(pnl_value) if pnl_value is not None else "N/A",
+            "pnl_pct": _fmt_change(pnl_pct_value) if pnl_pct_value is not None else "N/A",
+            "pnl_positive": pnl_positive,
         })
 
     holdings.sort(key=lambda row: row.get("_value_raw", 0), reverse=True)
     state = _ensure_ave_state(conn)
     cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
+    has_pnl = total_cost_basis_usd > 0
     return {
         "holdings": holdings,
         "cursor": cursor,
@@ -2292,9 +2436,9 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
         "mode_label": "PAPER",
         "chain_label": _surface_chain_label(normalized_chain_filter),
         "total_usd": _fmt_volume(total_usd),
-        "pnl": "N/A",
-        "pnl_pct": "N/A",
-        "pnl_reason": "Paper account",
+        "pnl": _fmt_signed_volume(total_pnl_usd) if has_pnl else "N/A",
+        "pnl_pct": _fmt_change((total_pnl_usd / total_cost_basis_usd) * 100.0) if has_pnl else "N/A",
+        "pnl_reason": "" if has_pnl else "Paper account",
     }
 
 
@@ -2480,7 +2624,12 @@ def _paper_market_buy(conn: "ConnectionHandler", trade_type: str, params: dict) 
     if native_amount is None or native_amount <= 0:
         return {"trade_type": trade_type, "status": "failed", "error": "Invalid trade amount"}
 
-    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
     prices = _price_map_for_token_ids([native_meta["token_id"], f"{token_addr}-{token_chain}"])
     native_price = Decimal(str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0))
     token_price = Decimal(str(prices.get(_normalize_batch_price_token_id(f"{token_addr}-{token_chain}"), 0) or 0))
@@ -2568,7 +2717,12 @@ def _paper_market_sell(conn: "ConnectionHandler", trade_type: str, params: dict)
     if not native_meta:
         return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
 
-    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
     sell_ratio = _parse_decimal_amount(params.get("paper_sell_ratio")) or Decimal("1")
     requested_amount = _parse_decimal_amount(params.get("paper_position_amount"))
     position_key = _paper_position_key(token_addr, token_chain)
@@ -2684,7 +2838,12 @@ def _paper_limit_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -
     if limit_price is None or limit_price <= 0:
         return {"trade_type": trade_type, "status": "failed", "error": "Invalid limit price"}
 
-    symbol = str(params.get("paper_symbol") or params.get("symbol") or "TOKEN").strip() or "TOKEN"
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
     order_id = f"paper-order-{int(time.time() * 1000)}"
 
     def _mutate(account: dict):
@@ -4385,8 +4544,7 @@ def ave_buy_token(
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请先查看一个代币详情，或告诉我买哪个代币")
 
-        if not symbol:
-            symbol = "TOKEN"
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
 
         # 1. Risk check
         import concurrent.futures
@@ -4574,6 +4732,7 @@ def ave_limit_order(
     """推送限价单确认屏幕"""
     try:
         addr, chain = _split_token_reference(addr, chain)
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
         try:
             risk_resp = _data_get(f"/contracts/{addr}-{chain}")
             flags = _risk_flags(risk_resp)
@@ -4695,6 +4854,7 @@ def ave_sell_token(
     """市价卖出，推送 CONFIRM 屏幕"""
     try:
         addr, chain = _split_token_reference(addr, chain)
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
 
         # Calculate in_amount from holdings
@@ -4788,8 +4948,8 @@ def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
         state = _ensure_ave_state(conn)
         selected_chain = _normalize_surface_chain(
             chain_filter or state.get("portfolio_chain"),
-            "all",
-            allow_all=True,
+            "solana",
+            allow_all=False,
         )
         state["portfolio_chain"] = selected_chain
 
@@ -4898,18 +5058,19 @@ def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
                 "value_usd": _fmt_volume(value),
                 "_value_raw": value,
                 "price": _fmt_price(price),
+                "avg_cost_usd": "N/A",
+                "pnl": "N/A",
                 "pnl_pct": "N/A",  # Would need cost basis; keep deliberate/neutral
                 "pnl_positive": None,
             })
 
         # Sort by value descending using raw float to avoid suffix parsing errors
         holdings.sort(key=lambda h: h.get("_value_raw", 0), reverse=True)
-        if selected_chain != "all":
-            holdings = [
-                row for row in holdings
-                if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
-            ]
-            total_usd = sum(float(row.get("_value_raw", 0) or 0) for row in holdings)
+        holdings = [
+            row for row in holdings
+            if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
+        ]
+        total_usd = sum(float(row.get("_value_raw", 0) or 0) for row in holdings)
         cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
         if isinstance(selection_hint, dict):
             selected_idx = _portfolio_holding_index(

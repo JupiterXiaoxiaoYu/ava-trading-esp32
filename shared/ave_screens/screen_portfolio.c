@@ -4,7 +4,7 @@
  *
  * Layout (320×240 landscape):
  *   y=  0..22   top bar: "PORTFOLIO  $1,247  +4.1%"
- *   y= 22..38   header row (Symbol / Value / P&L)
+ *   y= 22..38   header row (Symbol / Avg / Value / P&L)
  *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
  *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL  [Y] CHAIN
@@ -33,17 +33,21 @@
 #define BOTTOM_Y      217
 
 #define COL_SYM_X     6
-#define COL_SYM_W     102
-#define COL_VAL_X     118
-#define COL_VAL_W     88
-#define COL_PNL_X     220
-#define COL_PNL_W     52
+#define COL_SYM_W     74
+#define COL_AVG_X     84
+#define COL_AVG_W     72
+#define COL_VAL_X     162
+#define COL_VAL_W     72
+#define COL_PNL_X     240
+#define COL_PNL_W     74
 #define COL_TEXT_Y    2
 #define ROW_TEXT_Y    7
 
 typedef struct {
     char symbol[24];
+    char avg_cost_usd[20];
     char value_usd[20];
+    char pnl[20];
     char pnl_pct[16];
     int  pnl_positive;   /* 1=green, 0=red, -1=neutral (null) */
     char addr[64];        /* token address */
@@ -74,9 +78,10 @@ void screen_portfolio_cancel_back_timer(void)
     }
 }
 
-/* Row containers and labels [row][col]:  0=symbol, 1=value, 2=pnl */
+/* Row containers and labels [row][col]:  0=symbol, 1=avg, 2=value, 3=pnl */
 static lv_obj_t *s_row_bg[VISIBLE_ROWS];
 static lv_obj_t *s_row_sym[VISIBLE_ROWS];
+static lv_obj_t *s_row_avg[VISIBLE_ROWS];
 static lv_obj_t *s_row_val[VISIBLE_ROWS];
 static lv_obj_t *s_row_pnl[VISIBLE_ROWS];
 
@@ -154,18 +159,15 @@ static void _set_portfolio_title(const char *mode_label, const char *chain_label
     char title_buf[64];
     const char *base_title =
         (mode_label && strcmp(mode_label, "PAPER") == 0) ? "PAPER PORT" : "PORTFOLIO";
-    const char *chain_hex = _chain_hex(chain_label);
 
     if (!s_lbl_title) return;
 
-    if (chain_label && chain_label[0] && chain_hex) {
-        lv_label_set_recolor(s_lbl_title, true);
-        snprintf(title_buf, sizeof(title_buf), "%s #%s %s#", base_title, chain_hex, chain_label);
+    if (chain_label && chain_label[0] && _chain_hex(chain_label)) {
+        snprintf(title_buf, sizeof(title_buf), "%s %s", base_title, chain_label);
         lv_label_set_text(s_lbl_title, title_buf);
         return;
     }
 
-    lv_label_set_recolor(s_lbl_title, false);
     lv_label_set_text(s_lbl_title, base_title);
 }
 
@@ -407,7 +409,9 @@ static void _parse(const char *json) {
         holding_t *h = &s_holdings[s_holding_count];
         memset(h, 0, sizeof(*h));
         _str(obj, "symbol",      h->symbol,      sizeof(h->symbol));
+        _str(obj, "avg_cost_usd", h->avg_cost_usd, sizeof(h->avg_cost_usd));
         _str(obj, "value_usd",   h->value_usd,   sizeof(h->value_usd));
+        _str(obj, "pnl",         h->pnl,         sizeof(h->pnl));
         _str(obj, "pnl_pct",     h->pnl_pct,     sizeof(h->pnl_pct));
         h->pnl_positive = _bool(obj, "pnl_positive", -1);
         _str(obj, "addr",        h->addr,        sizeof(h->addr));
@@ -435,55 +439,36 @@ static void _refresh_rows(void) {
         int is_sel = (idx == s_sel_idx);
         if (idx < s_holding_count) {
             holding_t *h = &s_holdings[idx];
-            char sym_buf[128];
-            char chain_tag[8];
+            char sym_buf[64];
             char source_tag[8];
-            const char *chain_hex = NULL;
-            _compact_upper_tag(h->chain, chain_tag, sizeof(chain_tag), 3);
             _compact_upper_tag(h->source_tag, source_tag, sizeof(source_tag), 4);
-            chain_hex = _chain_hex(h->chain);
-            if (h->contract_tail[0] && chain_tag[0] && source_tag[0] && chain_hex) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#/%s *%s",
-                         h->symbol, chain_hex, chain_tag, source_tag, h->contract_tail);
-            } else if (h->contract_tail[0] && chain_tag[0] && chain_hex) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s# *%s",
-                         h->symbol, chain_hex, chain_tag, h->contract_tail);
-            } else if (chain_tag[0] && source_tag[0] && chain_hex) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#/%s",
-                         h->symbol, chain_hex, chain_tag, source_tag);
-            } else if (chain_tag[0] && chain_hex) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s #%s %s#",
-                         h->symbol, chain_hex, chain_tag);
-            } else if (h->contract_tail[0] && chain_tag[0] && source_tag[0]) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s %s/%s *%s",
-                         h->symbol, chain_tag, source_tag, h->contract_tail);
-            } else if (h->contract_tail[0] && chain_tag[0]) {
+            if (h->contract_tail[0] && source_tag[0]) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s %s *%s",
-                         h->symbol, chain_tag, h->contract_tail);
-            } else if (chain_tag[0] && source_tag[0]) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s %s/%s",
-                         h->symbol, chain_tag, source_tag);
-            } else if (chain_tag[0]) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s %s", h->symbol, chain_tag);
+                         h->symbol, source_tag, h->contract_tail);
+            } else if (source_tag[0]) {
+                snprintf(sym_buf, sizeof(sym_buf), "%s %s",
+                         h->symbol, source_tag);
             } else if (h->contract_tail[0]) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s *%s", h->symbol, h->contract_tail);
             } else {
                 snprintf(sym_buf, sizeof(sym_buf), "%s", h->symbol);
             }
             lv_label_set_text(s_row_sym[i], sym_buf);
+            lv_label_set_text(s_row_avg[i], h->avg_cost_usd[0] ? h->avg_cost_usd : "N/A");
             lv_label_set_text(s_row_val[i], h->value_usd[0] ? h->value_usd : "--");
-            /* Missing cost basis => P&L intentionally unavailable. Show neutral N/A (not a "broken" blank). */
-            lv_label_set_text(s_row_pnl[i], h->pnl_pct[0]   ? h->pnl_pct   : "N/A");
+            lv_label_set_text(s_row_pnl[i], h->pnl[0] ? h->pnl : "N/A");
             lv_color_t pnl_color;
             if      (h->pnl_positive == 1)  pnl_color = COLOR_GREEN;
             else if (h->pnl_positive == 0)  pnl_color = COLOR_RED;
             else                             pnl_color = COLOR_GRAY;
             lv_obj_set_style_text_color(s_row_pnl[i], pnl_color, 0);
             lv_obj_clear_flag(s_row_sym[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(s_row_avg[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(s_row_val[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(s_row_pnl[i], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_label_set_text(s_row_sym[i], "");
+            lv_label_set_text(s_row_avg[i], "");
             lv_label_set_text(s_row_val[i], "");
             lv_label_set_text(s_row_pnl[i], "");
             lv_obj_set_style_bg_color(s_row_bg[i], (i % 2 == 0) ? COLOR_BG : COLOR_ROW_ALT, 0);
@@ -557,6 +542,15 @@ static void _build(void) {
     lv_obj_set_style_text_font(hdr_sym, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(hdr_sym, LV_TEXT_ALIGN_LEFT, 0);
 
+    lv_obj_t *hdr_avg = lv_label_create(hdr);
+    lv_obj_set_pos(hdr_avg, COL_AVG_X, COL_TEXT_Y);
+    lv_obj_set_width(hdr_avg, COL_AVG_W);
+    lv_label_set_long_mode(hdr_avg, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(hdr_avg, "Avg");
+    lv_obj_set_style_text_color(hdr_avg, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(hdr_avg, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(hdr_avg, LV_TEXT_ALIGN_RIGHT, 0);
+
     lv_obj_t *hdr_val = lv_label_create(hdr);
     lv_obj_set_pos(hdr_val, COL_VAL_X, COL_TEXT_Y);
     lv_obj_set_width(hdr_val, COL_VAL_W);
@@ -591,24 +585,31 @@ static void _build(void) {
         lv_obj_set_pos(s_row_sym[i], COL_SYM_X, ROW_TEXT_Y);
         lv_obj_set_width(s_row_sym[i], COL_SYM_W);
         lv_label_set_long_mode(s_row_sym[i], LV_LABEL_LONG_CLIP);
-        lv_label_set_recolor(s_row_sym[i], true);
         lv_obj_set_style_text_color(s_row_sym[i], COLOR_WHITE, 0);
         lv_obj_set_style_text_font(s_row_sym[i], ave_font_cjk_14(), 0);
         lv_obj_set_style_text_align(s_row_sym[i], LV_TEXT_ALIGN_LEFT, 0);
+
+        s_row_avg[i] = lv_label_create(s_row_bg[i]);
+        lv_obj_set_pos(s_row_avg[i], COL_AVG_X, ROW_TEXT_Y);
+        lv_obj_set_width(s_row_avg[i], COL_AVG_W);
+        lv_label_set_long_mode(s_row_avg[i], LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_text_color(s_row_avg[i], COLOR_WHITE, 0);
+        lv_obj_set_style_text_font(s_row_avg[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_align(s_row_avg[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         s_row_val[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_val[i], COL_VAL_X, ROW_TEXT_Y);
         lv_obj_set_width(s_row_val[i], COL_VAL_W);
         lv_label_set_long_mode(s_row_val[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_color(s_row_val[i], COLOR_WHITE, 0);
-        lv_obj_set_style_text_font(s_row_val[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(s_row_val[i], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_align(s_row_val[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         s_row_pnl[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_pnl[i], COL_PNL_X, ROW_TEXT_Y);
         lv_obj_set_width(s_row_pnl[i], COL_PNL_W);
         lv_label_set_long_mode(s_row_pnl[i], LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_font(s_row_pnl[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(s_row_pnl[i], &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_align(s_row_pnl[i], LV_TEXT_ALIGN_RIGHT, 0);
     }
 
@@ -749,7 +750,7 @@ void screen_portfolio_show(const char *json_data)
     lv_label_set_text(s_lbl_total, total[0] ? total : "--");
 
     if (pnl[0]) {
-        const char *pnl_display = pnl_pct[0] ? pnl_pct : pnl;
+        const char *pnl_display = pnl;
         lv_label_set_text(s_lbl_pnl, pnl_display);
         lv_color_t pnl_color = COLOR_GRAY;
         if (pnl_display[0] == '+') pnl_color = COLOR_GREEN;
@@ -770,8 +771,13 @@ void screen_portfolio_show(const char *json_data)
             snprintf(sum_buf, sizeof(sum_buf), "%s", pnl_reason);
         }
     } else {
-        snprintf(sum_buf, sizeof(sum_buf), "P&L: %s (%s)",
-                 pnl[0] ? pnl : "N/A", pnl_pct[0] ? pnl_pct : "N/A");
+        if (pnl_pct[0]) {
+            snprintf(sum_buf, sizeof(sum_buf), "P&L: %s | ROI %s",
+                     pnl[0] ? pnl : "N/A", pnl_pct);
+        } else {
+            snprintf(sum_buf, sizeof(sum_buf), "P&L: %s",
+                     pnl[0] ? pnl : "N/A");
+        }
     }
     lv_label_set_text(s_lbl_summary, sum_buf);
 

@@ -4,6 +4,65 @@ from unittest.mock import MagicMock, patch
 
 from plugins_func.functions import ave_tools
 
+PORTFOLIO_SURFACE_C_STUBS = """
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+void screen_feed_reveal(void) { }
+
+void screen_explorer_show(const char *json_data) { (void)json_data; }
+void screen_explorer_key(int key) { (void)key; }
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_browse_show(const char *json_data) { (void)json_data; }
+void screen_browse_show_placeholder(const char *mode) { (void)mode; }
+void screen_browse_reveal(void) { }
+void screen_browse_key(int key) { (void)key; }
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_disambiguation_show(const char *json_data) { (void)json_data; }
+void screen_disambiguation_key(int key) { (void)key; }
+void screen_disambiguation_cancel_timers(void) { }
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+
 
 class _FakeLoop:
     def __init__(self, loop):
@@ -160,14 +219,15 @@ class PortfolioSurfaceTests(unittest.IsolatedAsyncioTestCase):
             resp = ave_tools.ave_portfolio(conn)
             await asyncio.sleep(0)
 
-        self.assertEqual(resp.result, "portfolio:2tokens")
+        self.assertEqual(resp.result, "portfolio:1tokens")
         self.assertEqual(sent[0][0], "portfolio")
         payload = sent[0][1]
 
         # Frozen policy: do not fabricate cost basis / P&L. Use neutral N/A.
         self.assertEqual(payload["pnl"], "N/A")
         self.assertEqual(payload["pnl_pct"], "N/A")
-        self.assertEqual(len(payload["holdings"]), 2)
+        self.assertEqual(len(payload["holdings"]), 1)
+        self.assertEqual(payload["holdings"][0]["symbol"], "SOL")
         for row in payload["holdings"]:
             self.assertEqual(row["pnl_pct"], "N/A")
             self.assertIsNone(row["pnl_positive"])
@@ -260,41 +320,7 @@ class PortfolioSurfaceTests(unittest.IsolatedAsyncioTestCase):
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 lv_obj_t *screen_portfolio__verify_get_top_pnl_label(void);
 lv_obj_t *screen_portfolio__verify_get_summary_label(void);
@@ -393,41 +419,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -512,45 +504,13 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
 #ifndef LV_TEXT_ALIGN_LEFT
 #define LV_TEXT_ALIGN_LEFT 0
 #define LV_TEXT_ALIGN_CENTER 1
 #define LV_TEXT_ALIGN_RIGHT 2
 #endif
 
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -643,41 +603,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -765,41 +691,7 @@ int main(void)
 
 /* screen_portfolio.c doesn't depend on these today, but keep compatibility with
  * newer LVGL usage patterns across screens. */
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 lv_obj_t *screen_portfolio__verify_get_top_pnl_label(void);
 lv_obj_t *screen_portfolio__verify_get_summary_label(void);
@@ -896,41 +788,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 lv_obj_t *screen_portfolio__verify_get_top_pnl_label(void);
 lv_obj_t *screen_portfolio__verify_get_summary_label(void);
@@ -948,8 +806,8 @@ int main(void)
         fprintf(stderr, "top pnl expected N/A, got: %s\\n", top_pnl ? top_pnl->text : "<null>");
         return 2;
     }}
-    if (!summary || strcmp(summary->text, "P&L: N/A (N/A)") != 0) {{
-        fprintf(stderr, "summary expected exactly P&L: N/A (N/A), got: %s\\n", summary ? summary->text : "<null>");
+    if (!summary || strcmp(summary->text, "P&L: N/A") != 0) {{
+        fprintf(stderr, "summary expected exactly P&L: N/A, got: %s\\n", summary ? summary->text : "<null>");
         return 3;
     }}
     return 0;
@@ -1020,41 +878,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -1145,41 +969,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -1267,41 +1057,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 
@@ -1384,41 +1140,7 @@ int main(void)
 #define VERIFY_PORTFOLIO
 {verifier_prefix}
 
-#ifndef LV_OPA_TRANSP
-#define LV_OPA_TRANSP 0
-#endif
-
-
-int screen_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-int screen_result_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
-void screen_disambiguation_key(int key) {{ (void)key; }}
-void screen_disambiguation_cancel_timers(void) {{ }}
-int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
+{PORTFOLIO_SURFACE_C_STUBS}
 
 #include "{repo_root / 'shared/ave_screens/screen_portfolio.c'}"
 

@@ -303,7 +303,7 @@ class KeyActionHandler(TextMessageHandler):
 
         elif action == "portfolio_chain_cycle":
             state = getattr(conn, "ave_state", {})
-            next_chain = _cycle_action_chain(state.get("portfolio_chain"), allow_all=True)
+            next_chain = _cycle_action_chain(state.get("portfolio_chain"), allow_all=False)
             logger.bind(tag=TAG).info(f"key_action portfolio_chain_cycle -> {next_chain}")
             try:
                 ave_portfolio(conn, chain_filter=next_chain)
