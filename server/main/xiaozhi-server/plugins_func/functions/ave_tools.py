@@ -20,10 +20,18 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.logger import setup_logging
+from plugins_func.functions.ave_watchlist_store import (
+    add_watchlist_entry,
+    list_watchlist_entries,
+    remove_watchlist_entry,
+    watchlist_contains,
+)
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from plugins_func.functions.ave_trade_mgr import (
     TRADE_CONFIRM_TIMEOUT_SEC,
@@ -57,6 +65,7 @@ _SUPPORTED_FEED_CHAINS = frozenset(_CHAIN_SUFFIXES)
 _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
+_WATCHLIST_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_watchlists.json"
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +548,8 @@ def _resolve_spotlight_symbol(state: dict, addr: str, chain: str, symbol: str = 
 
 
 def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
-                                     interval: str = "60", feed_cursor=None, feed_total=None) -> dict:
+                                     interval: str = "60", feed_cursor=None, feed_total=None,
+                                     origin_hint: str = "", is_watchlisted: bool = False) -> dict:
     resolved_symbol = str(symbol or "").strip() or (addr[:8] if addr else "?")
     identity = _asset_identity_fields(
         {
@@ -576,6 +586,8 @@ def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
         "is_mintable": False,
         "is_freezable": False,
         "risk_level": "LOADING",
+        "origin_hint": str(origin_hint or "").strip(),
+        "is_watchlisted": bool(is_watchlisted),
     }
     if feed_cursor is not None and feed_total is not None:
         spotlight_data["cursor"] = feed_cursor
@@ -609,7 +621,7 @@ def _normalized_interval_value(interval: str) -> str:
 
 async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain: str, symbol: str = "",
                                   interval: str = "60", feed_cursor=None, feed_total=None,
-                                  request_seq: int = 0):
+                                  request_seq: int = 0, previous_screen: str = ""):
     try:
         interval = str(interval or "60").strip().lower() or "60"
         is_live_second = interval == "s1"
@@ -696,6 +708,8 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
                 "token_id": f"{addr}-{chain}",
             }
         )
+        origin_hint = _resolve_spotlight_origin_hint(state, addr, chain, previous_screen=previous_screen)
+        is_watchlisted = _is_watchlisted_for_token(conn, addr, chain)
         spotlight_data = {
             **identity,
             "addr": addr,
@@ -733,6 +747,8 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             "is_mintable": flags["is_mintable"],
             "is_freezable": flags["is_freezable"],
             "risk_level": flags["risk_level"],
+            "origin_hint": origin_hint,
+            "is_watchlisted": bool(is_watchlisted),
         }
         if feed_cursor is not None and feed_total is not None:
             spotlight_data["cursor"] = feed_cursor
@@ -766,7 +782,10 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             "token_id": identity.get("token_id", f"{addr}-{chain}"),
             "contract_tail": identity.get("contract_tail", ""),
             "source_tag": identity.get("source_tag", ""),
+            "origin_hint": origin_hint,
         }
+        state["spotlight_origin_hint"] = origin_hint
+        state["spotlight_is_watchlisted"] = bool(is_watchlisted)
         if "nav_from" not in state:
             state["nav_from"] = "feed"
     except Exception as e:
@@ -1009,6 +1028,259 @@ def _set_feed_navigation_state(state: dict, items, *, cursor: int = 0) -> list[d
     state["feed_tokens"] = feed_tokens
     state["feed_symbol_entries"] = feed_symbol_entries
     return feed_token_list
+
+
+def _watchlist_namespace(conn: "ConnectionHandler") -> str:
+    wallet_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+    if wallet_id:
+        return wallet_id
+    state = _ensure_ave_state(conn)
+    fallback_wallet = str(state.get("wallet_id") or "").strip()
+    return fallback_wallet or "default"
+
+
+def _watchlist_store_path() -> Path:
+    override = str(os.environ.get("AVE_WATCHLIST_STORE_PATH", "") or "").strip()
+    return Path(override) if override else _WATCHLIST_STORE_PATH
+
+
+def _resolve_feed_total(state: dict) -> int | None:
+    feed_list = state.get("feed_token_list")
+    if not isinstance(feed_list, list) or not feed_list:
+        return None
+    return len(feed_list)
+
+
+def _resolve_spotlight_origin_hint(
+    state: dict,
+    addr: str,
+    chain: str,
+    *,
+    previous_screen: str = "",
+) -> str:
+    previous_screen = str(previous_screen or "").strip().lower()
+    feed_mode = str(state.get("feed_mode") or "").strip().lower()
+
+    current_token = state.get("current_token")
+    if isinstance(current_token, dict):
+        current_addr, current_chain = _split_token_reference(
+            current_token.get("addr", ""),
+            current_token.get("chain", chain),
+        )
+        nav_from = str(state.get("nav_from") or "").strip().lower()
+        keep_existing_hint = (
+            previous_screen == "spotlight" and nav_from == "feed"
+        )
+        if current_addr == addr and current_chain == chain and keep_existing_hint:
+            hint = str(
+                state.get("spotlight_origin_hint")
+                or current_token.get("origin_hint")
+                or ""
+            ).strip()
+            if hint:
+                return hint
+
+    nav_from = str(state.get("nav_from") or "").strip().lower()
+    allow_feed_origin = previous_screen in {"feed", "disambiguation"}
+    if previous_screen == "spotlight" and nav_from == "feed":
+        allow_feed_origin = True
+    if allow_feed_origin and feed_mode == "signals":
+        return "From Signal"
+    if allow_feed_origin and feed_mode == "watchlist":
+        return "In Watchlist"
+    return ""
+
+
+def _is_watchlisted_for_token(conn: "ConnectionHandler", addr: str, chain: str) -> bool:
+    if not addr or not chain:
+        return False
+    try:
+        return watchlist_contains(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            addr,
+            chain,
+        )
+    except Exception as exc:
+        logger.bind(tag=TAG).warning(f"watchlist_contains failed for {addr}-{chain}: {exc}")
+        return False
+
+
+def _resolve_watchlist_target(
+    state: dict,
+    token: dict | None = None,
+    *,
+    cursor=None,
+) -> dict | None:
+    if isinstance(token, dict):
+        addr, chain = _split_token_reference(
+            token.get("addr") or token.get("token_id") or "",
+            token.get("chain") or "solana",
+        )
+        if addr and chain:
+            return {
+                "addr": addr,
+                "chain": chain,
+                "symbol": str(token.get("symbol") or "").strip(),
+            }
+
+    current = state.get("current_token")
+    if isinstance(current, dict):
+        addr, chain = _split_token_reference(
+            current.get("addr", ""),
+            current.get("chain", "solana"),
+        )
+        if addr and chain:
+            return {
+                "addr": addr,
+                "chain": chain,
+                "symbol": str(current.get("symbol") or "").strip(),
+            }
+
+    feed_rows = state.get("feed_token_list")
+    if isinstance(feed_rows, list) and feed_rows:
+        try:
+            idx = int(cursor if cursor is not None else state.get("feed_cursor", 0))
+        except (TypeError, ValueError):
+            idx = 0
+        idx = max(0, min(idx, len(feed_rows) - 1))
+        row = feed_rows[idx]
+        if isinstance(row, dict):
+            addr, chain = _split_token_reference(
+                row.get("addr", ""),
+                row.get("chain", "solana"),
+            )
+            if addr and chain:
+                return {
+                    "addr": addr,
+                    "chain": chain,
+                    "symbol": str(row.get("symbol") or "").strip(),
+                }
+    return None
+
+
+def _refresh_spotlight_for_token(conn: "ConnectionHandler", token: dict) -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    nav_from = str(state.get("nav_from") or "").strip().lower()
+    feed_total = None
+    feed_cursor = None
+    if nav_from == "feed":
+        feed_total = _resolve_feed_total(state)
+        if feed_total is not None:
+            feed_cursor = state.get("feed_cursor")
+    return ave_token_detail(
+        conn,
+        addr=token.get("addr", ""),
+        chain=token.get("chain", "solana"),
+        symbol=token.get("symbol", ""),
+        feed_cursor=feed_cursor,
+        feed_total=feed_total,
+    )
+
+
+def _build_signals_rows(items: list[dict]) -> list[dict]:
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        token_id = str(
+            item.get("token")
+            or item.get("token_id")
+            or item.get("address")
+            or ""
+        ).strip()
+        chain = _normalize_chain_name(item.get("chain"), "solana")
+        if not token_id or chain not in _SUPPORTED_FEED_CHAINS:
+            continue
+        identity = _asset_identity_fields(
+            {
+                "token_id": token_id,
+                "chain": chain,
+                "symbol": item.get("symbol"),
+                "source": "signals",
+            }
+        )
+        change_value = _parse_numeric_value(item.get("price_change_24h"))
+        rows.append(
+            {
+                **identity,
+                "price": _fmt_volume(_coalesce_numeric_value(item.get("mc_cur"), item.get("market_cap"))),
+                "change_24h": _fmt_change(change_value if change_value is not None else 0),
+                "change_positive": True if change_value is None else change_value >= 0,
+                "signal_type": str(item.get("signal_type") or "").strip(),
+                "headline": str(item.get("headline") or "").strip(),
+                "signal_time": str(item.get("signal_time") or "").strip(),
+                "source": "signals",
+            }
+        )
+    return rows[:20]
+
+
+def _build_watchlist_rows(saved_rows: list[dict]) -> list[dict]:
+    rows = []
+    for row in saved_rows[:20]:
+        if not isinstance(row, dict):
+            continue
+        addr, chain = _split_token_reference(
+            row.get("addr", ""),
+            row.get("chain", "solana"),
+        )
+        chain = _normalize_chain_name(chain, "solana")
+        if not addr or chain not in _SUPPORTED_FEED_CHAINS:
+            continue
+        identity = _asset_identity_fields(
+            {
+                "token_id": addr,
+                "chain": chain,
+                "symbol": row.get("symbol"),
+                "source": "watchlist",
+            }
+        )
+        rows.append(
+            {
+                **identity,
+                "price": "--",
+                "change_24h": "--",
+                "change_positive": True,
+                "headline": "Saved token",
+                "source": "watchlist",
+            }
+        )
+    return rows
+
+
+def _empty_feed_row(symbol: str, subtitle: str) -> dict:
+    return {
+        "token_id": "",
+        "chain": "solana",
+        "symbol": symbol,
+        "price": "--",
+        "change_24h": "--",
+        "change_positive": True,
+        "headline": subtitle,
+        "source": "local",
+    }
+
+
+def _watchlist_store_error_response(
+    conn: "ConnectionHandler",
+    *,
+    user_message: str,
+    exc: Exception,
+) -> ActionResponse:
+    logger.bind(tag=TAG).error(f"watchlist store operation failed: {exc}")
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "error",
+                "title": "Watchlist unavailable",
+                "body": user_message,
+            },
+        )
+    )
+    return ActionResponse(action=Action.RESPONSE, result=str(exc), response=user_message)
 
 
 def _restore_search_session_payload(state: dict) -> dict | None:
@@ -2037,6 +2309,248 @@ def _normalize_kline(points: list) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: ave_list_signals / ave_open_watchlist
+# ---------------------------------------------------------------------------
+
+ave_list_signals_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_list_signals",
+        "description": "查看公开 Signals 列表并展示到 FEED。用于 Explore->Signals 或语音打开信号页。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+ave_open_watchlist_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_open_watchlist",
+        "description": "打开本地 Watchlist 并展示到 FEED。用于 Explore->Watchlist 或语音打开观察列表。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+@register_function("ave_list_signals", ave_list_signals_desc, ToolType.SYSTEM_CTL)
+def ave_list_signals(conn: "ConnectionHandler"):
+    try:
+        resp = _data_get("/signals/public/list", {"limit": 20})
+        raw = resp.get("data", {})
+        if isinstance(raw, dict):
+            raw = raw.get("list", raw.get("items", []))
+        rows = _build_signals_rows(raw if isinstance(raw, list) else [])
+
+        state = _ensure_ave_state(conn)
+        state["screen"] = "feed"
+        state["feed_source"] = "signals"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "signals"
+        state.pop("nav_from", None)
+        state.pop("order_list", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, rows, cursor=0)
+        feed_session = _next_feed_session(state)
+
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "feed",
+                {
+                    "tokens": rows or [_empty_feed_row("SIGNALS", "No signals now")],
+                    "mode": "signals",
+                    "source_label": "SIGNALS",
+                    "cursor": state.get("feed_cursor", 0),
+                    "feed_session": feed_session,
+                },
+            )
+        )
+        return ActionResponse(action=Action.NONE, result=f"signals:{len(rows)}", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_list_signals error: {exc}")
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "notify",
+                {
+                    "level": "error",
+                    "title": "Signals unavailable",
+                    "body": str(exc)[:60],
+                },
+            )
+        )
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="Signals 暂时不可用")
+
+
+@register_function("ave_open_watchlist", ave_open_watchlist_desc, ToolType.SYSTEM_CTL)
+def ave_open_watchlist(conn: "ConnectionHandler", cursor=None):
+    try:
+        state = _ensure_ave_state(conn)
+        if cursor is None:
+            cursor = state.get("feed_cursor", 0)
+        try:
+            cursor = int(cursor)
+        except (TypeError, ValueError):
+            cursor = 0
+
+        saved_rows = list_watchlist_entries(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+        )
+        rows = _build_watchlist_rows(saved_rows)
+
+        state["screen"] = "feed"
+        state["feed_source"] = "watchlist"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "watchlist"
+        state.pop("nav_from", None)
+        state.pop("order_list", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, rows, cursor=cursor)
+        feed_session = _next_feed_session(state)
+
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "feed",
+                {
+                    "tokens": rows or [_empty_feed_row("WATCHLIST", "Watchlist empty")],
+                    "mode": "watchlist",
+                    "source_label": "WATCHLIST",
+                    "cursor": state.get("feed_cursor", 0),
+                    "feed_session": feed_session,
+                },
+            )
+        )
+        return ActionResponse(action=Action.NONE, result=f"watchlist:{len(rows)}", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_open_watchlist error: {exc}")
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "notify",
+                {
+                    "level": "error",
+                    "title": "Watchlist unavailable",
+                    "body": str(exc)[:60],
+                },
+            )
+        )
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="观察列表暂时不可用")
+
+
+def ave_add_current_watchlist_token(conn: "ConnectionHandler", token: dict | None = None):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    state["current_token"] = {
+        "addr": target["addr"],
+        "chain": target["chain"],
+        "symbol": target["symbol"],
+        "token_id": f"{target['addr']}-{target['chain']}",
+        "contract_tail": target["addr"][-4:] if len(target["addr"]) >= 4 else target["addr"],
+        "source_tag": "",
+    }
+    try:
+        add_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            {
+                "addr": target["addr"],
+                "chain": target["chain"],
+                "symbol": target["symbol"] or "?",
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {"level": "info", "title": "Watchlist", "body": "Added to watchlist"},
+        )
+    )
+    return _refresh_spotlight_for_token(conn, target)
+
+
+def ave_remove_current_watchlist_voice(conn: "ConnectionHandler", token: dict | None = None):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    try:
+        removed = remove_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            target["addr"],
+            target["chain"],
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "info",
+                "title": "Watchlist",
+                "body": "Removed from watchlist" if removed else "Token not in watchlist",
+            },
+        )
+    )
+    return _refresh_spotlight_for_token(conn, target)
+
+
+def ave_remove_current_watchlist_token(
+    conn: "ConnectionHandler",
+    token: dict | None = None,
+    cursor=None,
+):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token, cursor=cursor)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    try:
+        removed = remove_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            target["addr"],
+            target["chain"],
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "info",
+                "title": "Watchlist",
+                "body": "Removed from watchlist" if removed else "Token not in watchlist",
+            },
+        )
+    )
+    return ave_open_watchlist(conn, cursor=cursor)
+
+
+# ---------------------------------------------------------------------------
 # Tool: ave_get_trending
 # ---------------------------------------------------------------------------
 
@@ -2690,8 +3204,17 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
         interval = str(interval or "60").strip().lower() or "60"
         resolved_symbol = _resolve_spotlight_symbol(state, addr, chain, symbol, feed_cursor)
         is_refreshing_current_spotlight = _is_same_spotlight_token(state, addr, chain)
+        origin_hint = _resolve_spotlight_origin_hint(
+            state,
+            addr,
+            chain,
+            previous_screen=previous_screen,
+        )
+        is_watchlisted = _is_watchlisted_for_token(conn, addr, chain)
         request_seq = int(state.get("spotlight_request_seq", 0) or 0) + 1
         state["spotlight_request_seq"] = request_seq
+        state["spotlight_origin_hint"] = origin_hint
+        state["spotlight_is_watchlisted"] = bool(is_watchlisted)
         state["screen"] = "spotlight"
         state["current_token"] = {
             "addr": addr,
@@ -2700,8 +3223,13 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
             "token_id": f"{addr}-{chain}",
             "contract_tail": addr[-4:] if len(addr) >= 4 else addr,
             "source_tag": "",
+            "origin_hint": origin_hint,
         }
-        if "nav_from" not in state:
+        if previous_screen == "portfolio":
+            state["nav_from"] = "portfolio"
+        elif previous_screen in {"feed", "disambiguation"}:
+            state["nav_from"] = "feed"
+        elif "nav_from" not in state:
             state["nav_from"] = "feed"
         loading_payload = _build_spotlight_loading_payload(
             addr,
@@ -2710,6 +3238,8 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
             interval=interval,
             feed_cursor=feed_cursor,
             feed_total=feed_total,
+            origin_hint=origin_hint,
+            is_watchlisted=is_watchlisted,
         )
         if is_refreshing_current_spotlight and hasattr(conn, "ave_wss"):
             transition_payload = {
@@ -2756,6 +3286,7 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
                 feed_cursor=feed_cursor,
                 feed_total=feed_total,
                 request_seq=request_seq,
+                previous_screen=previous_screen,
             )
         )
 

@@ -15,8 +15,11 @@ logger = setup_logging()
 
 _FEED_COMMANDS = {"看热门", "刷新热门", "热门代币"}
 _PORTFOLIO_COMMANDS = {"我的持仓", "持仓"}
+_OPEN_WATCHLIST_COMMANDS = {"打开观察列表", "查看观察列表", "观察列表", "watchlist"}
 _WATCH_CURRENT_COMMANDS = {"看这个", "详情", "进入"}
 _BUY_CURRENT_COMMANDS = {"买这个"}
+_ADD_WATCHLIST_COMMANDS = {"收藏这个币", "加入观察列表", "收藏它"}
+_REMOVE_WATCHLIST_COMMANDS = {"取消收藏", "从观察列表移除", "移除这个币"}
 _CONFIRM_COMMANDS = {"确认", "确认购买", "执行"}
 _CANCEL_COMMANDS = {"取消", "算了", "不买了"}
 _BACK_COMMANDS = {"返回", "回去", "首页", "回到热门"}
@@ -162,6 +165,56 @@ def _resolve_effective_feed_cursor(
     return state_cursor
 
 
+def _resolve_selection_feed_nav(
+    state: Dict[str, Any],
+    selection_payload: Optional[Dict[str, Any]],
+    token: Optional[Dict[str, str]],
+) -> tuple[Optional[int], Optional[int]]:
+    if _extract_selection_screen(selection_payload) != "feed":
+        return None, None
+
+    feed_rows = state.get("feed_token_list")
+    if not isinstance(feed_rows, list) or not feed_rows:
+        return None, None
+    feed_total = len(feed_rows)
+
+    cursor = None
+    if isinstance(selection_payload, dict) and selection_payload.get("cursor") is not None:
+        try:
+            cursor = int(selection_payload.get("cursor"))
+        except (TypeError, ValueError):
+            cursor = None
+    if cursor is None:
+        try:
+            cursor = int(state.get("feed_cursor", 0))
+        except (TypeError, ValueError):
+            cursor = 0
+    cursor = max(0, min(cursor, feed_total - 1))
+
+    if token:
+        try:
+            row = feed_rows[cursor]
+        except IndexError:
+            row = None
+        row_addr = str(row.get("addr") or "").strip() if isinstance(row, dict) else ""
+        row_chain = str(row.get("chain") or "").strip() if isinstance(row, dict) else ""
+        if row_addr != token.get("addr") or row_chain != token.get("chain"):
+            for idx, entry in enumerate(feed_rows):
+                if not isinstance(entry, dict):
+                    continue
+                if (
+                    str(entry.get("addr") or "").strip() == token.get("addr")
+                    and str(entry.get("chain") or "").strip() == token.get("chain")
+                ):
+                    cursor = idx
+                    break
+
+    state["feed_cursor"] = cursor
+    if str(state.get("feed_mode") or "") == "search":
+        state["search_cursor"] = cursor
+    return cursor, feed_total
+
+
 def has_trusted_selection(selection_payload: Optional[Dict[str, Any]]) -> bool:
     return bool(_extract_selection_screen(selection_payload)) and _resolve_selection_token(
         selection_payload
@@ -178,7 +231,12 @@ def requires_trusted_selection(
     utterance = _extract_utterance_text(raw_text)
     normalized = _normalize_utterance(utterance)
 
-    if normalized in _WATCH_CURRENT_COMMANDS or normalized in _BUY_CURRENT_COMMANDS:
+    if (
+        normalized in _WATCH_CURRENT_COMMANDS
+        or normalized in _BUY_CURRENT_COMMANDS
+        or normalized in _ADD_WATCHLIST_COMMANDS
+        or normalized in _REMOVE_WATCHLIST_COMMANDS
+    ):
         return True
     if normalized in _DEICTIC_RISK_PHRASES:
         return True
@@ -275,10 +333,13 @@ def _build_allowed_actions(
 ) -> list[str]:
     actions = {"search_symbol"}
 
+    actions.add("open_watchlist")
     if screen in {"feed", "portfolio", "spotlight"} and current_token and has_trusted_selection:
         actions.add("watch_current")
     if screen == "spotlight" and current_token and has_trusted_selection:
         actions.add("buy_current")
+        actions.add("add_to_watchlist")
+        actions.add("remove_from_watchlist")
     if screen in {"confirm", "limit_confirm"} and pending_trade.get("trade_id"):
         actions.add("confirm_trade")
         actions.add("cancel_trade")
@@ -394,11 +455,22 @@ async def try_route_ave_command(
         _refresh_turn_context()
         return True
 
+    if normalized in _OPEN_WATCHLIST_COMMANDS:
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        await _handle_tool_response(conn, ave_tools.ave_open_watchlist(conn))
+        _refresh_turn_context()
+        return True
+
     if normalized in _WATCH_CURRENT_COMMANDS:
         token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
         if not token:
             await _send_router_reply(conn, missing_selection_reply(utterance))
             return True
+        if effective_screen == "portfolio":
+            state["nav_from"] = "portfolio"
+        elif effective_screen in {"feed", "disambiguation"}:
+            state["nav_from"] = "feed"
+        feed_cursor, feed_total = _resolve_selection_feed_nav(state, selection_payload, token)
         await _handle_tool_response(
             conn,
             ave_tools.ave_token_detail(
@@ -406,6 +478,8 @@ async def try_route_ave_command(
                 addr=token["addr"],
                 chain=token["chain"],
                 symbol=token.get("symbol", ""),
+                feed_cursor=feed_cursor,
+                feed_total=feed_total,
             ),
         )
         _refresh_turn_context()
@@ -428,6 +502,30 @@ async def try_route_ave_command(
                 symbol=token.get("symbol", ""),
             ),
         )
+        _refresh_turn_context()
+        return True
+
+    if normalized in _ADD_WATCHLIST_COMMANDS:
+        token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+        if not token:
+            await _send_router_reply(conn, missing_selection_reply(utterance))
+            return True
+        if effective_screen != "spotlight":
+            await _send_router_reply(conn, "请先进入代币详情页，再说收藏这个币。")
+            return True
+        await _handle_tool_response(conn, ave_tools.ave_add_current_watchlist_token(conn, token=token))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _REMOVE_WATCHLIST_COMMANDS:
+        token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+        if not token:
+            await _send_router_reply(conn, missing_selection_reply(utterance))
+            return True
+        if effective_screen != "spotlight":
+            await _send_router_reply(conn, "请先进入代币详情页，再说取消收藏。")
+            return True
+        await _handle_tool_response(conn, ave_tools.ave_remove_current_watchlist_voice(conn, token=token))
         _refresh_turn_context()
         return True
 
@@ -464,6 +562,27 @@ async def try_route_ave_command(
         nav_from = str(state.pop("nav_from", "") or "")
         if nav_from == "portfolio":
             await _handle_tool_response(conn, ave_tools.ave_portfolio(conn))
+        elif str(state.get("feed_mode") or "") == "search":
+            payload = ave_tools._restore_search_session_payload(state)
+            if payload:
+                conn.ave_state = state
+                await ave_tools._send_display(conn, "feed", payload)
+            else:
+                source = str(state.get("feed_source") or "trending") or "trending"
+                platform = str(state.get("feed_platform") or "")
+                if platform:
+                    await _handle_tool_response(
+                        conn, ave_tools.ave_get_trending(conn, topic="", platform=platform)
+                    )
+                else:
+                    await _handle_tool_response(conn, ave_tools.ave_get_trending(conn, topic=source))
+        elif str(state.get("feed_mode") or "") == "signals" or str(state.get("feed_source") or "") == "signals":
+            await _handle_tool_response(conn, ave_tools.ave_list_signals(conn))
+        elif str(state.get("feed_mode") or "") == "watchlist" or str(state.get("feed_source") or "") == "watchlist":
+            await _handle_tool_response(
+                conn,
+                ave_tools.ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0)),
+            )
         else:
             source = str(state.get("feed_source") or "trending") or "trending"
             platform = str(state.get("feed_platform") or "")
