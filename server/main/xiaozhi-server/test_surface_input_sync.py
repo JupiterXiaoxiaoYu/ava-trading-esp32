@@ -190,31 +190,9 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
-void screen_feed_show(const char *json_data) {{ (void)json_data; }}
-void screen_feed_reveal(void) {{ }}
-void screen_feed_key(int key) {{ (void)key; }}
-bool screen_feed_should_ignore_live_push(void) {{ return false; }}
-int screen_feed_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
 void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
 void screen_explorer_key(int key) {{ (void)key; }}
 int screen_explorer_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
-void screen_browse_show(const char *json_data) {{ (void)json_data; }}
-void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
-void screen_browse_reveal(void) {{ }}
-void screen_browse_key(int key) {{ (void)key; }}
-int screen_browse_get_selected_context_json(char *out, size_t out_n)
 {{
     (void)out;
     (void)out_n;
@@ -505,17 +483,6 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
-void screen_feed_show(const char *json_data) {{ (void)json_data; }}
-void screen_feed_reveal(void) {{ }}
-void screen_feed_key(int key) {{ (void)key; }}
-bool screen_feed_should_ignore_live_push(void) {{ return false; }}
-int screen_feed_get_selected_context_json(char *out, size_t out_n)
-{{
-    (void)out;
-    (void)out_n;
-    return 0;
-}}
-
 void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
 void screen_explorer_key(int key) {{ (void)key; }}
 int screen_explorer_get_selected_context_json(char *out, size_t out_n)
@@ -546,8 +513,6 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
-#include "{explorer_source}"
-
 int main(void)
 {{
     char out[1024];
@@ -569,7 +534,7 @@ int main(void)
             include_dir,
             manager_src,
             binary_name=binary_name,
-            extra_sources=(feed_source, browse_source),
+            extra_sources=(feed_source,),
         )
 
     def _assert_real_confirm_screen_locks_inputs_after_first_submit(

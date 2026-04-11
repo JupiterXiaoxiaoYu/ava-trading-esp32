@@ -65,15 +65,6 @@ typedef struct {
     char volume_24h[16];
     char market_cap[16];
     char source[24];
-    char signal_label[8];
-    char signal_value[32];
-    char signal_first[20];
-    char signal_last[20];
-    char signal_count[20];
-    char signal_vol[20];
-    char signal_type[32];
-    char signal_summary[64];
-    char headline[64];
 } feed_token_t;
 
 static feed_token_t s_tokens[MAX_FEED_TOKENS];
@@ -90,8 +81,6 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 /* ─── Layout ──────────────────────────────────────────────────────────────── */
 #define VISIBLE_ROWS  8
 #define ROW_H        24
-#define BROWSE_ROW_H  32
-#define BROWSE_VISIBLE_ROWS 6
 #define TOP_BAR_H    22
 #define BOTTOM_Y     215
 #define BOTTOM_BAR_H (240 - BOTTOM_Y)
@@ -153,8 +142,6 @@ typedef enum {
     FEED_MODE_STANDARD = 0,
     FEED_MODE_SEARCH,
     FEED_MODE_ORDERS,
-    FEED_MODE_SIGNALS,
-    FEED_MODE_WATCHLIST,
 } feed_mode_t;
 
 static feed_mode_t s_feed_mode = FEED_MODE_STANDARD;
@@ -163,8 +150,6 @@ typedef enum {
     FEED_EXPLORE_ITEM_SEARCH = 0,
     FEED_EXPLORE_ITEM_ORDERS,
     FEED_EXPLORE_ITEM_SOURCES,
-    FEED_EXPLORE_ITEM_SIGNALS,
-    FEED_EXPLORE_ITEM_WATCHLIST,
     FEED_EXPLORE_ITEM_COUNT,
 } feed_explore_item_id_t;
 
@@ -206,8 +191,6 @@ static const feed_explore_item_t EXPLORE_ITEMS[FEED_EXPLORE_ITEM_COUNT] = {
     {FEED_EXPLORE_ITEM_SEARCH,    "Search",    "Say token",                   FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
     {FEED_EXPLORE_ITEM_ORDERS,    "Orders",    "Open current orders list",    FEED_SURFACE_STANDARD},
     {FEED_EXPLORE_ITEM_SOURCES,   "Sources",   "Choose topic or platform",    FEED_SURFACE_STANDARD},
-    {FEED_EXPLORE_ITEM_SIGNALS,   "Signals",   "Browse public signal flow",  FEED_SURFACE_STANDARD},
-    {FEED_EXPLORE_ITEM_WATCHLIST, "Watchlist", "Open saved tokens",          FEED_SURFACE_STANDARD},
 };
 
 static const feed_source_entry_t SOURCE_MENU[] = {
@@ -228,21 +211,6 @@ static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
     {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
 };
 
-static const feed_surface_model_t SIGNALS_SURFACE_MODEL = {
-    FEED_SURFACE_STANDARD,
-    "^ v MOVE",
-    " | B BACK TO EXPLORE",
-    "> Detail | B Back",
-    0,
-};
-
-static const feed_surface_model_t WATCHLIST_SURFACE_MODEL = {
-    FEED_SURFACE_STANDARD,
-    "^ v MOVE",
-    " | B BACK TO EXPLORE",
-    "> Detail | X Remove | B Back",
-    0,
-};
 
 typedef struct {
     lv_obj_t *row;
@@ -313,8 +281,6 @@ static feed_mode_t _feed_mode_from_mode_string(const char *mode_str)
     if (!mode_str) return FEED_MODE_STANDARD;
     if (strcmp(mode_str, "orders") == 0) return FEED_MODE_ORDERS;
     if (strcmp(mode_str, "search") == 0) return FEED_MODE_SEARCH;
-    if (strcmp(mode_str, "signals") == 0) return FEED_MODE_SIGNALS;
-    if (strcmp(mode_str, "watchlist") == 0) return FEED_MODE_WATCHLIST;
     return FEED_MODE_STANDARD;
 }
 
@@ -323,8 +289,6 @@ static feed_mode_t _feed_mode_from_source_label(const char *label)
     if (!label) return FEED_MODE_STANDARD;
     if (strcmp(label, "ORDERS") == 0) return FEED_MODE_ORDERS;
     if (strcmp(label, "SEARCH") == 0) return FEED_MODE_SEARCH;
-    if (strcmp(label, "SIGNALS") == 0) return FEED_MODE_SIGNALS;
-    if (strcmp(label, "WATCHLIST") == 0) return FEED_MODE_WATCHLIST;
     return FEED_MODE_STANDARD;
 }
 
@@ -388,12 +352,6 @@ static const feed_surface_model_t *_surface_model_for(feed_surface_t surface)
 
 static const feed_surface_model_t *_current_surface_model(void)
 {
-    if (s_feed_mode == FEED_MODE_SIGNALS) {
-        return &SIGNALS_SURFACE_MODEL;
-    }
-    if (s_feed_mode == FEED_MODE_WATCHLIST) {
-        return &WATCHLIST_SURFACE_MODEL;
-    }
     if (s_is_orders_mode) {
         static const feed_surface_model_t orders_model = {
             FEED_SURFACE_STANDARD,
@@ -492,21 +450,6 @@ static void _activate_current_explore_item(void)
         return;
     }
 
-    if (item->id == FEED_EXPLORE_ITEM_SIGNALS) {
-        _sync_remote_browse_mode(FEED_MODE_SIGNALS, "SIGNALS");
-        ave_send_json("{\"type\":\"key_action\",\"action\":\"signals\"}");
-        s_cleanup_special_mode = 0;
-        _close_feed_overlay();
-        return;
-    }
-
-    if (item->id == FEED_EXPLORE_ITEM_WATCHLIST) {
-        _sync_remote_browse_mode(FEED_MODE_WATCHLIST, "WATCHLIST");
-        ave_send_json("{\"type\":\"key_action\",\"action\":\"watchlist\"}");
-        s_cleanup_special_mode = 0;
-        _close_feed_overlay();
-        return;
-    }
 
     if (item->surface == FEED_SURFACE_STANDARD) {
         return;
@@ -603,53 +546,6 @@ static lv_color_t _chain_color(const char *chain)
     return COLOR_GRAY;
 }
 
-static const char *_signal_label(const feed_token_t *t)
-{
-    if (strcmp(t->signal_label, "BUY") == 0 || strcmp(t->signal_label, "SELL") == 0) {
-        return t->signal_label;
-    }
-    if (strncmp(t->signal_value, "BUY", 3) == 0) return "BUY";
-    if (strncmp(t->signal_value, "SELL", 4) == 0) return "SELL";
-    if (strncmp(t->signal_summary, "Total bought", strlen("Total bought")) == 0) return "BUY";
-    if (strncmp(t->signal_summary, "Total sold", strlen("Total sold")) == 0) return "SELL";
-    return "";
-}
-
-static const char *_signal_value(const feed_token_t *t)
-{
-    if (t->signal_value[0]) return t->signal_value;
-    if (strcmp(_signal_label(t), "BUY") == 0) return "BUY";
-    if (strcmp(_signal_label(t), "SELL") == 0) return "SELL";
-    return "SIGNAL";
-}
-
-static const char *_signal_summary(const feed_token_t *t)
-{
-    if (t->signal_summary[0]) return t->signal_summary;
-    if (strcmp(_signal_label(t), "BUY") == 0) return "Buy signal";
-    if (strcmp(_signal_label(t), "SELL") == 0) return "Sell signal";
-    return "Signal updating";
-}
-
-static const char *_signal_first(const feed_token_t *t)
-{
-    return t->signal_first[0] ? t->signal_first : "First -";
-}
-
-static const char *_signal_last(const feed_token_t *t)
-{
-    return t->signal_last[0] ? t->signal_last : "Last -";
-}
-
-static const char *_signal_count(const feed_token_t *t)
-{
-    return t->signal_count[0] ? t->signal_count : "Count -";
-}
-
-static const char *_signal_vol(const feed_token_t *t)
-{
-    return t->signal_vol[0] ? t->signal_vol : "Vol -";
-}
 
 /* ─── JSON parsing ────────────────────────────────────────────────────────── */
 static int _get_json_str_field(const char *obj, const char *key, char *out, int n)
@@ -754,15 +650,6 @@ static void _parse_tokens_from_json(const char *json)
         _get_json_str_field(obj, "volume_24h", t->volume_24h, sizeof(t->volume_24h));
         _get_json_str_field(obj, "market_cap", t->market_cap, sizeof(t->market_cap));
         _get_json_str_field(obj, "source",     t->source,     sizeof(t->source));
-        _get_json_str_field(obj, "signal_label", t->signal_label, sizeof(t->signal_label));
-        _get_json_str_field(obj, "signal_value", t->signal_value, sizeof(t->signal_value));
-        _get_json_str_field(obj, "signal_first", t->signal_first, sizeof(t->signal_first));
-        _get_json_str_field(obj, "signal_last", t->signal_last, sizeof(t->signal_last));
-        _get_json_str_field(obj, "signal_count", t->signal_count, sizeof(t->signal_count));
-        _get_json_str_field(obj, "signal_vol", t->signal_vol, sizeof(t->signal_vol));
-        _get_json_str_field(obj, "signal_type", t->signal_type, sizeof(t->signal_type));
-        _get_json_str_field(obj, "signal_summary", t->signal_summary, sizeof(t->signal_summary));
-        _get_json_str_field(obj, "headline",    t->headline,    sizeof(t->headline));
         t->change_positive = _get_json_tristate_field(obj, "change_positive", -1);
         if (!t->symbol[0]) strcpy(t->symbol, "???");
         free(obj);
@@ -840,70 +727,6 @@ static void _apply_token_row_layout(feed_row_ui_t *ui)
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
-static int _browse_first_line_y(void)
-{
-    /* Keep the first line slightly below the top edge so the second line can
-     * sit in its own lane inside the 32px browse row without overlap. */
-    return 1;
-}
-
-static int _browse_second_line_y(void)
-{
-    int line_height = lv_font_get_line_height(&lv_font_montserrat_12);
-    int y = BROWSE_ROW_H - line_height;
-    if (y < 0) y = 0;
-    return y;
-}
-
-static void _apply_browse_row_layout(feed_row_ui_t *ui)
-{
-    if (!ui) return;
-    int first_line_y = _browse_first_line_y();
-    int second_line_y = _browse_second_line_y();
-    int meta_x = COL_SYM_X;
-    int meta_w = (320 - COL_SYM_X - 4) / 4;
-    lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-    lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_meta1, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_meta2, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_meta3, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_meta4, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, first_line_y);
-    lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, first_line_y);
-    lv_obj_set_width(ui->lbl_sym, 120);
-    lv_obj_set_style_text_align(ui->lbl_sym, LV_TEXT_ALIGN_LEFT, 0);
-
-    lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, first_line_y);
-    lv_obj_set_width(ui->lbl_price, 90);
-    lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
-
-    lv_obj_set_pos(ui->lbl_subtitle, COL_SYM_X, second_line_y);
-    lv_obj_set_width(ui->lbl_subtitle, COL_CHG_X - COL_SYM_X);
-    lv_obj_set_style_text_align(ui->lbl_subtitle, LV_TEXT_ALIGN_LEFT, 0);
-
-    lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, second_line_y);
-    lv_obj_set_width(ui->lbl_chg, 60);
-    lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
-
-    lv_obj_set_pos(ui->lbl_meta1, meta_x, second_line_y);
-    lv_obj_set_width(ui->lbl_meta1, meta_w);
-    lv_obj_set_style_text_align(ui->lbl_meta1, LV_TEXT_ALIGN_CENTER, 0);
-
-    lv_obj_set_pos(ui->lbl_meta2, meta_x + meta_w, second_line_y);
-    lv_obj_set_width(ui->lbl_meta2, meta_w);
-    lv_obj_set_style_text_align(ui->lbl_meta2, LV_TEXT_ALIGN_CENTER, 0);
-
-    lv_obj_set_pos(ui->lbl_meta3, meta_x + meta_w * 2, second_line_y);
-    lv_obj_set_width(ui->lbl_meta3, meta_w);
-    lv_obj_set_style_text_align(ui->lbl_meta3, LV_TEXT_ALIGN_CENTER, 0);
-
-    lv_obj_set_pos(ui->lbl_meta4, meta_x + meta_w * 3, second_line_y);
-    lv_obj_set_width(ui->lbl_meta4, meta_w);
-    lv_obj_set_style_text_align(ui->lbl_meta4, LV_TEXT_ALIGN_CENTER, 0);
-}
 
 static void _update_overlay_rows(void)
 {
@@ -1022,89 +845,9 @@ static void _refresh_count_hint(void)
     }
 }
 
-static int _browse_mode_active(void)
-{
-    return s_feed_mode == FEED_MODE_SIGNALS || s_feed_mode == FEED_MODE_WATCHLIST;
-}
-
 static int _visible_row_count(void)
 {
-    return _browse_mode_active() ? BROWSE_VISIBLE_ROWS : VISIBLE_ROWS;
-}
-
-static void _update_browse_rows(void)
-{
-    int visible_rows = _visible_row_count();
-
-    for (int r = 0; r < VISIBLE_ROWS; r++) {
-        feed_row_ui_t *ui = &s_rows[r];
-        if (r >= visible_rows) {
-            lv_obj_set_size(ui->row, 320, ROW_H);
-            lv_obj_set_pos(ui->row, 0, BOTTOM_Y);
-            _clear_row(ui);
-            continue;
-        }
-
-        lv_obj_set_size(ui->row, 320, BROWSE_ROW_H);
-        lv_obj_set_pos(ui->row, 0, TOP_BAR_H + r * BROWSE_ROW_H);
-        _apply_browse_row_layout(ui);
-
-        int tok_idx = s_scroll_top + r;
-        if (tok_idx >= s_token_count) {
-            _clear_row(ui);
-            continue;
-        }
-
-        const feed_token_t *t = &s_tokens[tok_idx];
-        lv_color_t row_bg;
-        int selected = (tok_idx == s_token_idx);
-        row_bg = selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG);
-        lv_obj_set_style_bg_color(ui->row, row_bg, 0);
-
-        lv_label_set_text(ui->lbl_chain, _chain_short(t->chain));
-        lv_obj_set_style_text_color(ui->lbl_chain, _chain_color(t->chain), 0);
-
-        const char *sym_text = t->symbol[0] ? t->symbol : "???";
-        lv_label_set_text(ui->lbl_sym, sym_text);
-        lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
-        lv_color_t text_color = selected ? COLOR_WHITE : COLOR_GRAY;
-        lv_obj_set_style_text_color(ui->lbl_sym, text_color, 0);
-        lv_obj_set_style_text_color(ui->lbl_price, text_color, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta1, text_color, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta2, text_color, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta3, text_color, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta4, text_color, 0);
-
-        if (s_feed_mode == FEED_MODE_SIGNALS) {
-            lv_label_set_text(ui->lbl_price, _signal_value(t));
-            lv_label_set_text(ui->lbl_subtitle, "");
-            lv_label_set_text(ui->lbl_chg, "");
-            lv_label_set_text(ui->lbl_meta1, _signal_first(t));
-            lv_label_set_text(ui->lbl_meta2, _signal_last(t));
-            lv_label_set_text(ui->lbl_meta3, _signal_count(t));
-            lv_label_set_text(ui->lbl_meta4, _signal_vol(t));
-        } else {
-            lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-            lv_label_set_text(ui->lbl_price, "");
-            lv_label_set_text(ui->lbl_subtitle, t->price[0] ? t->price : "--");
-            const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
-            lv_label_set_text(ui->lbl_chg, chg_text);
-            lv_obj_set_style_text_color(ui->lbl_subtitle, text_color, 0);
-            lv_label_set_text(ui->lbl_meta1, "");
-            lv_label_set_text(ui->lbl_meta2, "");
-            lv_label_set_text(ui->lbl_meta3, "");
-            lv_label_set_text(ui->lbl_meta4, "");
-            lv_color_t chg_color = COLOR_GRAY;
-            if (t->change_24h[0]) {
-                if (t->change_positive > 0) chg_color = COLOR_GREEN;
-                else if (t->change_positive == 0) chg_color = COLOR_RED;
-            }
-            lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
-        }
-    }
-
-    _refresh_count_hint();
+    return VISIBLE_ROWS;
 }
 
 static void _update_token_rows(void)
@@ -1163,10 +906,6 @@ static void _update_rows(void)
 {
     if (_feed_overlay_active()) {
         _update_overlay_rows();
-        return;
-    }
-    if (_browse_mode_active()) {
-        _update_browse_rows();
         return;
     }
     _update_token_rows();
@@ -1394,10 +1133,6 @@ void screen_feed_show(const char *json_data)
             _apply_source_label("ORDERS", 0);
         } else if (s_feed_mode == FEED_MODE_SEARCH) {
             _apply_source_label("SEARCH", 0);
-        } else if (s_feed_mode == FEED_MODE_SIGNALS) {
-            _apply_source_label("SIGNALS", 0);
-        } else if (s_feed_mode == FEED_MODE_WATCHLIST) {
-            _apply_source_label("WATCHLIST", 0);
         } else if (!s_is_orders_mode && has_tokens) {
             _apply_source_label(NULL, 0);
         }
@@ -1531,28 +1266,6 @@ static void _enter_selected_detail(void)
     printf("[FEED] WATCH -> %s (%s)\n", t->symbol, t->chain);
 }
 
-static void _emit_watchlist_remove(void)
-{
-    char cmd[384];
-    char cursor_buf[16];
-    ave_sm_json_field_t fields[] = {
-        {"token_id", ""},
-        {"chain", ""},
-        {"cursor", cursor_buf},
-    };
-
-    if (s_token_count < 1) return;
-    const feed_token_t *t = &s_tokens[s_token_idx];
-    if (!t->token_id[0] || !t->chain[0]) return;
-
-    snprintf(cursor_buf, sizeof(cursor_buf), "%d", s_token_idx);
-    fields[0].value = t->token_id;
-    fields[1].value = t->chain;
-    if (ave_sm_build_key_action_json("watchlist_remove", fields, 3, cmd, sizeof(cmd))) {
-        ave_send_json(cmd);
-    }
-}
-
 void screen_feed_key(int key)
 {
     if (_feed_overlay_active()) {
@@ -1642,10 +1355,6 @@ void screen_feed_key(int key)
             screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"SEARCH 模式不支持刷新/切换来源，请按 B 回到 FEED\"}");
             return;
         }
-        if (s_feed_mode == FEED_MODE_WATCHLIST) {
-            _emit_watchlist_remove();
-            return;
-        }
         if (s_has_special_source_label) {
             screen_notify_show("{\"level\":\"info\",\"title\":\"提示\",\"body\":\"当前列表不支持切换来源，请按 B 回到 FEED\"}");
             return;
@@ -1658,11 +1367,6 @@ void screen_feed_key(int key)
                  SOURCE_KEYS[s_source_idx]);
         ave_send_json(cmd);
     } else if (key == AVE_KEY_B) {
-        if (s_feed_mode == FEED_MODE_SIGNALS || s_feed_mode == FEED_MODE_WATCHLIST) {
-            s_cleanup_special_mode = 1;
-            _open_explore_panel();
-            return;
-        }
         if (s_is_orders_mode) {
             ave_send_json("{\"type\":\"key_action\",\"action\":\"back\"}");
             ave_sm_go_to_feed();

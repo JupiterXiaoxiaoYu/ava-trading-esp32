@@ -943,131 +943,6 @@ static int run_case_feed_orders_back_unchanged(void)
     return ok;
 }
 
-static int run_case_feed_watchlist_remove_key_emits_watchlist_remove(void)
-{
-    const char *watchlist_feed =
-        "{"
-        "\"mode\":\"watchlist\","
-        "\"source_label\":\"WATCHLIST\","
-        "\"tokens\":["
-        "{"
-        "\"token_id\":\"tok-watch-1\","
-        "\"chain\":\"solana\","
-        "\"symbol\":\"WATCH1\","
-        "\"price\":\"$1\","
-        "\"change_24h\":\"+1%\","
-        "\"change_positive\":1"
-        "}"
-        "]"
-        "}";
-
-    feed_under_test_show(watchlist_feed);
-
-    clear_last_io();
-    feed_under_test_key(AVE_KEY_X);
-    int ok = 1;
-    ok &= expect_json_contains("\"action\":\"watchlist_remove\"",
-                               "watchlist X should emit watchlist_remove");
-    ok &= expect_json_contains("\"token_id\":\"tok-watch-1\"",
-                               "watchlist X should include the selected token id");
-    return ok;
-}
-
-static int run_case_feed_signals_b_returns_to_explore(void)
-{
-    int ok = 1;
-    const char *signals_feed =
-        "{"
-        "\"mode\":\"signals\","
-        "\"source_label\":\"SIGNALS\","
-        "\"tokens\":[{"
-        "\"token_id\":\"signal-1\","
-        "\"chain\":\"solana\","
-        "\"symbol\":\"SIGNL\","
-        "\"price\":\"$3\","
-        "\"change_24h\":\"+3%\","
-        "\"change_positive\":1"
-        "}]"
-        "}";
-
-    feed_under_test_show(signals_feed);
-    clear_last_io();
-    feed_under_test_key(AVE_KEY_B);
-    ok &= expect_equal_int(s_feed_surface, FEED_SURFACE_EXPLORE_PANEL,
-                           "signals B should reopen Explore panel");
-    ok &= expect_equal_int(s_feed_mode, FEED_MODE_STANDARD,
-                           "signals B should reset feed mode to standard");
-    return ok;
-}
-
-static int run_case_feed_subtitle_clears_after_standard_transition(void)
-{
-    int ok = 1;
-    const char *signals_feed =
-        "{"
-        "\"mode\":\"signals\","
-        "\"source_label\":\"SIGNALS\","
-        "\"tokens\":[{"
-        "\"token_id\":\"signal-1\","
-        "\"chain\":\"solana\","
-        "\"symbol\":\"SIGNL\","
-        "\"price\":\"$3\","
-        "\"change_24h\":\"+3%\","
-        "\"change_positive\":1"
-        "}]"
-        "}";
-    const char *standard_feed =
-        "{"
-        "\"source_label\":\"TRENDING\","
-        "\"tokens\":[{"
-        "\"token_id\":\"feed-1\","
-        "\"chain\":\"solana\","
-        "\"symbol\":\"FEED\","
-        "\"price\":\"$1\","
-        "\"change_24h\":\"+1%\","
-        "\"change_positive\":1"
-        "}]"
-        "}";
-
-    feed_under_test_show(signals_feed);
-    feed_under_test_show(standard_feed);
-    const char *subtitle_text = label_text(s_rows[0].lbl_subtitle);
-    ok &= expect_string_equal(subtitle_text, "",
-                              "subtitle should clear after returning to standard feed");
-    return ok;
-}
-
-static int run_case_feed_browse_mode_close_restores_standard_source(void)
-{
-    int ok = 1;
-    const char *signals_feed =
-        "{"
-        "\"mode\":\"signals\","
-        "\"source_label\":\"SIGNALS\","
-        "\"tokens\":[{"
-        "\"token_id\":\"signal-1\","
-        "\"chain\":\"solana\","
-        "\"symbol\":\"SIGNL\","
-        "\"price\":\"$3\","
-        "\"change_24h\":\"+3%\","
-        "\"change_positive\":1"
-        "}]"
-        "}";
-
-    feed_under_test_show(signals_feed);
-    clear_last_io();
-    feed_under_test_key(AVE_KEY_B);
-    feed_under_test_key(AVE_KEY_LEFT);
-    ok &= expect_equal_int(s_feed_surface, FEED_SURFACE_STANDARD,
-                           "closing explore from browse mode should go back to standard surface");
-    ok &= expect_equal_int(s_feed_mode, FEED_MODE_STANDARD,
-                           "closing explore from browse mode should reset feed mode");
-    ok &= expect_json_contains("\"action\":\"feed_source\"",
-                               "closing explore from browse mode should re-request standard source");
-    ok &= expect_json_contains("\"source\":\"trending\"",
-                               "closing explore from browse mode should refresh remembered source");
-    return ok;
-}
 
 static int run_case_feed_symbol_hides_contract_tail_suffix(void)
 {
@@ -1226,14 +1101,8 @@ int main(void)
     int ok14 = run_case_feed_symbol_hides_contract_tail_suffix();
     int ok15 = run_case_feed_symbol_hides_source_tag_suffix();
     int ok16 = run_case_feed_live_update_preserves_cursor();
-    int ok17 = run_case_feed_watchlist_remove_key_emits_watchlist_remove();
-    int ok18 = run_case_feed_signals_b_returns_to_explore();
-    int ok19 = run_case_feed_subtitle_clears_after_standard_transition();
-    int ok20 = run_case_feed_browse_mode_close_restores_standard_source();
-
     if (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 &&
-        ok12 && ok13 && ok14 && ok15 && ok16 && ok17 &&
-        ok18 && ok19 && ok20) {
+        ok12 && ok13 && ok14 && ok15 && ok16) {
         printf("PASS: P3-5 minimal simulator fallback verification succeeded.\n");
         return 0;
     }
