@@ -42,15 +42,33 @@ static lv_obj_t *s_lbl_stats_row1 = NULL;
 static lv_obj_t *s_lbl_stats_row2 = NULL;
 static lv_obj_t *s_lbl_stats_row3 = NULL;
 static lv_obj_t *s_lbl_stats_row4 = NULL;
+static lv_obj_t *s_lbl_stats_row1_l = NULL;
+static lv_obj_t *s_lbl_stats_row1_c = NULL;
+static lv_obj_t *s_lbl_stats_row1_r = NULL;
+static lv_obj_t *s_lbl_stats_row2_l = NULL;
+static lv_obj_t *s_lbl_stats_row2_c = NULL;
+static lv_obj_t *s_lbl_stats_row2_r = NULL;
+static lv_obj_t *s_lbl_stats_row3_l = NULL;
+static lv_obj_t *s_lbl_stats_row3_c = NULL;
+static lv_obj_t *s_lbl_stats_row3_r = NULL;
 static lv_obj_t *s_lbl_t_start  = NULL;
 static lv_obj_t *s_lbl_t_mid    = NULL;
 static lv_obj_t *s_lbl_t_end    = NULL;
 
 #define FOOTER_X 4
 #define FOOTER_W 312
-#define FOOTER_ROW4_Y 189
+#define FOOTER_ROW1_Y 148
+#define FOOTER_ROW2_Y 165
+#define FOOTER_ROW3_Y 182
+#define FOOTER_ROW4_Y 199
 #define FOOTER_PAGE_W 72
 #define FOOTER_ROW4_GAP 6
+#define FOOTER_COL1_X 4
+#define FOOTER_COL1_W 112
+#define FOOTER_COL2_X 118
+#define FOOTER_COL2_W 88
+#define FOOTER_COL3_X 208
+#define FOOTER_COL3_W 108
 
 static int _copy_contract_candidate(const char *src, char *out, size_t out_n)
 {
@@ -253,6 +271,40 @@ static lv_obj_t *s_lbl_pos = NULL;
 #define COLOR_BAR     lv_color_hex(0x141414)
 #define COLOR_CHART   lv_color_hex(0x0D1B2A)
 #define COLOR_DIVIDER lv_color_hex(0x2A2A2A)
+
+static void _footer_triplet_build(
+    lv_obj_t **left,
+    lv_obj_t **center,
+    lv_obj_t **right,
+    int y
+)
+{
+    if (!left || !center || !right) return;
+
+    *left = lv_label_create(s_screen);
+    lv_obj_set_pos(*left, FOOTER_COL1_X, y);
+    lv_obj_set_width(*left, FOOTER_COL1_W);
+    lv_label_set_long_mode(*left, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(*left, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(*left, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(*left, LV_TEXT_ALIGN_LEFT, 0);
+
+    *center = lv_label_create(s_screen);
+    lv_obj_set_pos(*center, FOOTER_COL2_X, y);
+    lv_obj_set_width(*center, FOOTER_COL2_W);
+    lv_label_set_long_mode(*center, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(*center, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(*center, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(*center, LV_TEXT_ALIGN_CENTER, 0);
+
+    *right = lv_label_create(s_screen);
+    lv_obj_set_pos(*right, FOOTER_COL3_X, y);
+    lv_obj_set_width(*right, FOOTER_COL3_W);
+    lv_label_set_long_mode(*right, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(*right, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(*right, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(*right, LV_TEXT_ALIGN_RIGHT, 0);
+}
 
 /* ─── JSON helpers ───────────────────────────────────────────────────────── */
 static int _str(const char *o, const char *k, char *out, int n) {
@@ -465,24 +517,27 @@ static void _build(void) {
 
     /* ── Four-line compact footer stats ──────────────────────────────── */
     s_lbl_stats_row1 = lv_label_create(s_screen);
-    lv_obj_set_pos(s_lbl_stats_row1, 4, 148);
-    lv_obj_set_width(s_lbl_stats_row1, 312);
+    lv_obj_set_pos(s_lbl_stats_row1, -1000, FOOTER_ROW1_Y);
+    lv_obj_set_width(s_lbl_stats_row1, 1);
     lv_label_set_long_mode(s_lbl_stats_row1, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(s_lbl_stats_row1, &lv_font_montserrat_12, 0);
+    _footer_triplet_build(&s_lbl_stats_row1_l, &s_lbl_stats_row1_c, &s_lbl_stats_row1_r, FOOTER_ROW1_Y);
 
     s_lbl_stats_row2 = lv_label_create(s_screen);
-    lv_obj_set_pos(s_lbl_stats_row2, 4, 161);
-    lv_obj_set_width(s_lbl_stats_row2, 312);
+    lv_obj_set_pos(s_lbl_stats_row2, -1000, FOOTER_ROW2_Y);
+    lv_obj_set_width(s_lbl_stats_row2, 1);
     lv_label_set_long_mode(s_lbl_stats_row2, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_stats_row2, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_stats_row2, &lv_font_montserrat_12, 0);
+    _footer_triplet_build(&s_lbl_stats_row2_l, &s_lbl_stats_row2_c, &s_lbl_stats_row2_r, FOOTER_ROW2_Y);
 
     s_lbl_stats_row3 = lv_label_create(s_screen);
-    lv_obj_set_pos(s_lbl_stats_row3, 4, 175);
-    lv_obj_set_width(s_lbl_stats_row3, 312);
+    lv_obj_set_pos(s_lbl_stats_row3, -1000, FOOTER_ROW3_Y);
+    lv_obj_set_width(s_lbl_stats_row3, 1);
     lv_label_set_long_mode(s_lbl_stats_row3, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_stats_row3, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_stats_row3, &lv_font_montserrat_12, 0);
+    _footer_triplet_build(&s_lbl_stats_row3_l, &s_lbl_stats_row3_c, &s_lbl_stats_row3_r, FOOTER_ROW3_Y);
 
     s_lbl_stats_row4 = lv_label_create(s_screen);
     lv_obj_set_pos(s_lbl_stats_row4, FOOTER_X, FOOTER_ROW4_Y);
@@ -715,6 +770,12 @@ void screen_spotlight_show(const char *json_data)
         is_freezable ? "YES" : "NO"
     );
     lv_obj_set_style_text_color(s_lbl_stats_row1, risk_color, 0);
+    lv_label_set_text_fmt(s_lbl_stats_row1_l, "Risk:%s", risk_text);
+    lv_label_set_text_fmt(s_lbl_stats_row1_c, "Mint:%s", is_mintable ? "YES" : "NO");
+    lv_label_set_text_fmt(s_lbl_stats_row1_r, "Freeze:%s", is_freezable ? "YES" : "NO");
+    lv_obj_set_style_text_color(s_lbl_stats_row1_l, risk_color, 0);
+    lv_obj_set_style_text_color(s_lbl_stats_row1_c, COLOR_GRAY, 0);
+    lv_obj_set_style_text_color(s_lbl_stats_row1_r, COLOR_GRAY, 0);
 
     /* Footer line 2-4: Vol/Liq/Mcap, Holders/Top100, and compact CA + page marker. */
     lv_label_set_text_fmt(
@@ -724,12 +785,18 @@ void screen_spotlight_show(const char *json_data)
         liq[0] ? liq : "N/A",
         mcap[0] ? mcap : "N/A"
     );
+    lv_label_set_text_fmt(s_lbl_stats_row2_l, "Vol24h:%s", vol24h[0] ? vol24h : "N/A");
+    lv_label_set_text_fmt(s_lbl_stats_row2_c, "Liq:%s", liq[0] ? liq : "N/A");
+    lv_label_set_text_fmt(s_lbl_stats_row2_r, "Mcap:%s", mcap[0] ? mcap : "N/A");
     lv_label_set_text_fmt(
         s_lbl_stats_row3,
         "Holders:%s | Top100:%s",
         holders[0] ? holders : "N/A",
         top100[0] ? top100 : "N/A"
     );
+    lv_label_set_text_fmt(s_lbl_stats_row3_l, "Holders:%s", holders[0] ? holders : "N/A");
+    lv_label_set_text(s_lbl_stats_row3_c, "");
+    lv_label_set_text_fmt(s_lbl_stats_row3_r, "Top100:%s", top100[0] ? top100 : "N/A");
     lv_label_set_text_fmt(
         s_lbl_stats_row4,
         "CA:%s",

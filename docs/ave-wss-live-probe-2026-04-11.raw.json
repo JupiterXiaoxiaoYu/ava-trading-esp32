@@ -1,0 +1,384 @@
+{
+  "seed": {
+    "symbol": "SNIGGA",
+    "chain": "solana",
+    "token_masked": "7c5gm5...pump",
+    "pair_masked": "4Yu8Bi...RuyA"
+  },
+  "results": [
+    {
+      "name": "price",
+      "params": [
+        "price",
+        [
+          "7c5gm5fqvQuyteJ9G4pFaubqRVHuegsFXtfHJXBBpump-solana"
+        ]
+      ],
+      "message_count": 1,
+      "messages": [
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.prices",
+            "result.prices[]",
+            "result.topic",
+            "sent_time"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "kline",
+      "params": [
+        "kline",
+        "4Yu8BiAw6MFmSNzeLJgVDgNjsbBYKj9gNjM31fwZRuyA",
+        "k60",
+        "solana"
+      ],
+      "message_count": 0,
+      "messages": []
+    },
+    {
+      "name": "tx",
+      "params": [
+        "tx",
+        "4Yu8BiAw6MFmSNzeLJgVDgNjsbBYKj9gNjM31fwZRuyA",
+        "solana"
+      ],
+      "message_count": 4,
+      "messages": [
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.interval",
+            "result.kline",
+            "result.kline.eth",
+            "result.kline.usd",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.interval",
+            "result.kline",
+            "result.kline.eth",
+            "result.kline.usd",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.topic",
+            "result.tx",
+            "result.tx.amm",
+            "result.tx.amount_eth",
+            "result.tx.amount_usd",
+            "result.tx.block_number",
+            "result.tx.chain",
+            "result.tx.direction",
+            "result.tx.from_address",
+            "result.tx.from_amount",
+            "result.tx.from_price_eth",
+            "result.tx.from_price_usd",
+            "result.tx.from_reserve",
+            "result.tx.from_symbol",
+            "result.tx.id",
+            "result.tx.pair_address",
+            "result.tx.pair_liquidity_eth",
+            "result.tx.pair_liquidity_usd",
+            "result.tx.pair_type",
+            "result.tx.profile",
+            "result.tx.sender",
+            "result.tx.target_token",
+            "result.tx.time",
+            "result.tx.to",
+            "result.tx.to_address",
+            "result.tx.to_amount",
+            "result.tx.to_price_eth",
+            "result.tx.to_price_usd",
+            "result.tx.to_reserve",
+            "result.tx.to_symbol",
+            "result.tx.transaction",
+            "result.tx.tvl",
+            "result.tx.tx_seq",
+            "result.tx.wallet_address",
+            "result.tx.wallet_tag",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.prices",
+            "result.prices[]",
+            "result.topic",
+            "sent_time"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "multi_tx",
+      "params": [
+        "multi_tx",
+        "4Yu8BiAw6MFmSNzeLJgVDgNjsbBYKj9gNjM31fwZRuyA",
+        "solana"
+      ],
+      "message_count": 3,
+      "messages": [
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.topic",
+            "result.tx",
+            "result.tx.amm",
+            "result.tx.amount_eth",
+            "result.tx.amount_usd",
+            "result.tx.block_number",
+            "result.tx.chain",
+            "result.tx.direction",
+            "result.tx.from_address",
+            "result.tx.from_amount",
+            "result.tx.from_price_eth",
+            "result.tx.from_price_usd",
+            "result.tx.from_reserve",
+            "result.tx.from_symbol",
+            "result.tx.id",
+            "result.tx.pair_address",
+            "result.tx.pair_liquidity_eth",
+            "result.tx.pair_liquidity_usd",
+            "result.tx.pair_type",
+            "result.tx.profile",
+            "result.tx.sender",
+            "result.tx.target_token",
+            "result.tx.time",
+            "result.tx.to",
+            "result.tx.to_address",
+            "result.tx.to_amount",
+            "result.tx.to_price_eth",
+            "result.tx.to_price_usd",
+            "result.tx.to_reserve",
+            "result.tx.to_symbol",
+            "result.tx.transaction",
+            "result.tx.tvl",
+            "result.tx.tx_seq",
+            "result.tx.wallet_address",
+            "result.tx.wallet_tag",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.interval",
+            "result.kline",
+            "result.kline.eth",
+            "result.kline.usd",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.prices",
+            "result.prices[]",
+            "result.topic",
+            "sent_time"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "liq",
+      "params": [
+        "liq",
+        "4Yu8BiAw6MFmSNzeLJgVDgNjsbBYKj9gNjM31fwZRuyA",
+        "solana"
+      ],
+      "message_count": 4,
+      "messages": [
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.interval",
+            "result.kline",
+            "result.kline.eth",
+            "result.kline.usd",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.prices",
+            "result.prices[]",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.interval",
+            "result.kline",
+            "result.kline.eth",
+            "result.kline.usd",
+            "result.topic",
+            "sent_time"
+          ]
+        },
+        {
+          "top_keys": [
+            "id",
+            "jsonrpc",
+            "result",
+            "sent_time"
+          ],
+          "paths": [
+            "id",
+            "jsonrpc",
+            "result",
+            "result.id",
+            "result.topic",
+            "result.tx",
+            "result.tx.amm",
+            "result.tx.amount_eth",
+            "result.tx.amount_usd",
+            "result.tx.block_number",
+            "result.tx.chain",
+            "result.tx.direction",
+            "result.tx.from_address",
+            "result.tx.from_amount",
+            "result.tx.from_price_eth",
+            "result.tx.from_price_usd",
+            "result.tx.from_reserve",
+            "result.tx.from_symbol",
+            "result.tx.id",
+            "result.tx.pair_address",
+            "result.tx.pair_liquidity_eth",
+            "result.tx.pair_liquidity_usd",
+            "result.tx.pair_type",
+            "result.tx.profile",
+            "result.tx.sender",
+            "result.tx.target_token",
+            "result.tx.time",
+            "result.tx.to",
+            "result.tx.to_address",
+            "result.tx.to_amount",
+            "result.tx.to_price_eth",
+            "result.tx.to_price_usd",
+            "result.tx.to_reserve",
+            "result.tx.to_symbol",
+            "result.tx.transaction",
+            "result.tx.tvl",
+            "result.tx.tx_seq",
+            "result.tx.wallet_address",
+            "result.tx.wallet_tag",
+            "sent_time"
+          ]
+        }
+      ]
+    }
+  ]
+}
