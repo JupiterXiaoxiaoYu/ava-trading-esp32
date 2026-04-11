@@ -66,6 +66,8 @@ static const screenshot_case_t k_cases[] = {
     {"feed_explore_panel", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_panel.ppm", k_keys_feed_open_explore, 1, 4, 0, NULL, 1},
     {"feed_explore_search_guide", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_search_guide.ppm", k_keys_feed_open_search_guide, 2, 4, 0, NULL, 1},
     {"feed_explore_sources", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_sources.ppm", k_keys_feed_open_sources, 4, 4, 0, NULL, 1},
+    {"feed_signals", "mock/mock_scenes/16_feed_signals.json", "mock/screenshot/baselines/feed_signals.ppm", NULL, 0, 2, -1, NULL, 0},
+    {"feed_watchlist", "mock/mock_scenes/17_feed_watchlist.json", "mock/screenshot/baselines/feed_watchlist.ppm", NULL, 0, 2, -1, NULL, 0},
     /* Orders mode: A/RIGHT must be disabled (no outbound "watch" key_action). */
     {"feed_orders_press_a", "mock/mock_scenes/12_feed_orders.json", "mock/screenshot/baselines/feed_orders.ppm", k_keys_press_a, 1, 0, 0, NULL, 0},
     /* Orders mode: B must exit orders (emit key_action back). */
@@ -97,6 +99,7 @@ static void print_usage(const char *program)
             "  --screen names: feed feed_search feed_special_source feed_orders"
             " disambiguation disambiguation_overflow"
             " feed_explore_panel feed_explore_search_guide feed_explore_sources"
+            " feed_signals feed_watchlist"
             " feed_orders_press_a feed_orders_press_b spotlight confirm limit_confirm"
             " result result_fail portfolio\n",
             program);
@@ -451,6 +454,28 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
             }
             return 1;
         }
+        if (strcmp(test_case->screen_name, "feed_signals") == 0) {
+            if (count_labels_containing_text_recursive(scr, "Smart Money Buy") <= 0 ||
+                count_labels_containing_text_recursive(scr, "Rebalance Alert") <= 0 ||
+                count_labels_containing_text_recursive(scr, "SMART_MONEY") <= 0 ||
+                count_labels_containing_text_recursive(scr, "REBALANCE") <= 0) {
+                fprintf(stderr,
+                        "FAIL: [feed_signals] expected signal type & headline lines in browse rows\n");
+                return 0;
+            }
+            return 1;
+        }
+        if (strcmp(test_case->screen_name, "feed_watchlist") == 0) {
+            if (count_labels_containing_text_recursive(scr, "$2.11") <= 0 ||
+                count_labels_containing_text_recursive(scr, "+0.9%") <= 0 ||
+                count_labels_containing_text_recursive(scr, "$0.88") <= 0 ||
+                count_labels_containing_text_recursive(scr, "-1.5%") <= 0) {
+                fprintf(stderr,
+                        "FAIL: [feed_watchlist] expected price & change on the browse rows\n");
+                return 0;
+            }
+            return 1;
+        }
         if (count_labels_containing_text_recursive(scr, "<- REFRESH | X CHANGE") <= 0) {
             fprintf(stderr, "FAIL: [%s] expected top hint mentioning '<- REFRESH | X CHANGE'\n", test_case->screen_name);
             return 0;
@@ -465,11 +490,25 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
     if (strcmp(test_case->screen_name, "spotlight") == 0) {
         if (count_labels_with_text_recursive(scr, "[B] BACK") <= 0 ||
             count_labels_with_text_recursive(scr, "[X] SELL") <= 0 ||
-            count_labels_with_text_recursive(scr, "[A] BUY") <= 0 ||
-            count_labels_with_text_recursive(scr, "[Y] PORTFOLIO") <= 0) {
+            count_labels_with_text_recursive(scr, "[A] BUY") <= 0) {
             fprintf(stderr,
                     "FAIL: [spotlight] expected bottom-bar affordances: "
-                    "'[B] BACK' '[X] SELL' '[A] BUY' '[Y] PORTFOLIO'\n");
+                    "'[B] BACK' '[X] SELL' '[A] BUY'\n");
+            return 0;
+        }
+        if (count_labels_containing_text_recursive(scr, "★") <= 0) {
+            fprintf(stderr,
+                    "FAIL: [spotlight] expected a watchlist star in the spotlight screenshot\n");
+            return 0;
+        }
+        if (count_labels_containing_text_recursive(scr, "From Signal Watchlist") <= 0) {
+            fprintf(stderr,
+                    "FAIL: [spotlight] origin hint missing from spotlight screenshot\n");
+            return 0;
+        }
+        if (count_labels_containing_text_recursive(scr, "<2/3>") <= 0) {
+            fprintf(stderr,
+                    "FAIL: [spotlight] expected page marker '<2/3>' in spotlight screenshot\n");
             return 0;
         }
         return 1;

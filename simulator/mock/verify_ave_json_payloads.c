@@ -724,6 +724,14 @@ int main(void)
         fprintf(stderr, "FAIL: spotlight row4 missing compact CA (first6/last6): %s\n", s_lbl_stats_row4->text);
         ok = 0;
     }
+    if (s_lbl_origin->text[0] != '\0') {
+        fprintf(stderr, "FAIL: spotlight origin hint should be empty by default: %s\n", s_lbl_origin->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_watch_star->text, "☆") != 0) {
+        fprintf(stderr, "FAIL: spotlight star should default to unwatchlisted: %s\n", s_lbl_watch_star->text);
+        ok = 0;
+    }
     if (strcmp(s_lbl_pos->text, "<1/20>") != 0) {
         fprintf(stderr, "FAIL: spotlight row4 missing page marker text: %s\n", s_lbl_pos->text);
         ok = 0;
@@ -744,6 +752,13 @@ int main(void)
                 "FAIL: spotlight row4 CA overlaps page marker (ca_right=%d pos_left=%d)\n",
                 s_lbl_stats_row4->x + s_lbl_stats_row4->width,
                 s_lbl_pos->x);
+        ok = 0;
+    }
+    if (s_lbl_watch_star->x <= (s_lbl_stats_row4->x + s_lbl_stats_row4->width)) {
+        fprintf(stderr,
+                "FAIL: spotlight watchlist star overlaps CA (star_x=%d ca_right=%d)\n",
+                s_lbl_watch_star->x,
+                s_lbl_stats_row4->x + s_lbl_stats_row4->width);
         ok = 0;
     }
 
@@ -791,8 +806,73 @@ int main(void)
         fprintf(stderr, "FAIL: spotlight page marker should be empty without cursor/total: %s\n", s_lbl_pos->text);
         ok = 0;
     }
-    if (s_lbl_stats_row4->width != 312) {
-        fprintf(stderr, "FAIL: spotlight CA row should reclaim full width when page marker hidden: w=%d\n", s_lbl_stats_row4->width);
+    const int expected_row4_width = FOOTER_W - FOOTER_ROW4_STAR_W - FOOTER_ROW4_HINT_GAP;
+    if (s_lbl_stats_row4->width != expected_row4_width) {
+        fprintf(stderr, "FAIL: spotlight CA row should reclaim width while reserving star column (w=%d want=%d)\n",
+                s_lbl_stats_row4->width, expected_row4_width);
+        ok = 0;
+    }
+
+    g_last_json[0] = '\0';
+    const char *spotlight_watchlist_cursor_json =
+        "{"
+        "\"symbol\":\"BONK\","
+        "\"token_id\":\"spot-watchlist\","
+        "\"chain\":\"sol\","
+        "\"cursor\":1,"
+        "\"total\":3,"
+        "\"price\":\"$1.23\","
+        "\"change_24h\":\"+2.2%\","
+        "\"change_positive\":true,"
+        "\"risk_level\":\"LOW\","
+        "\"is_honeypot\":false,"
+        "\"is_mintable\":false,"
+        "\"is_freezable\":false,"
+        "\"holders\":\"1,234\","
+        "\"liquidity\":\"$120K\","
+        "\"volume_24h\":\"$88K\","
+        "\"market_cap\":\"$5M\","
+        "\"top100_concentration\":\"33.3%\","
+        "\"contract\":\"0x2299f25A95A9539f25A95A9539f25A95A953C599\","
+        "\"is_watchlisted\":true,"
+        "\"origin_hint\":\"From Signal Watchlist\","
+        "\"chart\":[200,400,600,800],"
+        "\"chart_min\":\"$1.00\","
+        "\"chart_max\":\"$2.00\""
+        "}";
+    screen_spotlight_show(spotlight_watchlist_cursor_json);
+    if (strcmp(s_lbl_watch_star->text, "★") != 0) {
+        fprintf(stderr, "FAIL: spotlight watchlist star missing on combined layout: %s\n", s_lbl_watch_star->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_origin->text, "From Signal Watchlist") != 0) {
+        fprintf(stderr, "FAIL: spotlight origin hint missing on combined layout: %s\n", s_lbl_origin->text);
+        ok = 0;
+    }
+    if (strcmp(s_lbl_pos->text, "<2/3>") != 0) {
+        fprintf(stderr, "FAIL: spotlight page marker not showing with watchlist star: %s\n", s_lbl_pos->text);
+        ok = 0;
+    }
+    const int expected_row4_width_with_marker =
+        FOOTER_W - FOOTER_ROW4_STAR_W - FOOTER_ROW4_HINT_GAP - FOOTER_PAGE_W - FOOTER_ROW4_GAP;
+    if (s_lbl_stats_row4->width != expected_row4_width_with_marker) {
+        fprintf(stderr,
+                "FAIL: spotlight row4 width without marker should match reservation: w=%d want=%d\n",
+                s_lbl_stats_row4->width, expected_row4_width_with_marker);
+        ok = 0;
+    }
+    if (s_lbl_watch_star->x <= (s_lbl_stats_row4->x + s_lbl_stats_row4->width)) {
+        fprintf(stderr,
+                "FAIL: spotlight star overlaps CA on combined layout: star_x=%d ca_right=%d\n",
+                s_lbl_watch_star->x,
+                s_lbl_stats_row4->x + s_lbl_stats_row4->width);
+        ok = 0;
+    }
+    if ((s_lbl_origin->x + s_lbl_origin->width) >= (s_lbl_tf->x - 4)) {
+        fprintf(stderr,
+                "FAIL: spotlight origin hint overlaps timeframe badge: origin_right=%d tf_x=%d\n",
+                s_lbl_origin->x + s_lbl_origin->width,
+                s_lbl_tf->x);
         ok = 0;
     }
 

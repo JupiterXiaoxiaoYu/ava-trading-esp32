@@ -1,0 +1,37 @@
+{
+  "type": "display",
+  "screen": "feed",
+  "ts": 1775462000,
+    "data": {
+      "mode": "signals",
+      "source_label": "SIGNALS",
+      "tokens": [
+        {
+          "token_id": "signal-001",
+          "chain": "solana",
+          "symbol": "SMART",
+          "signal_type": "SMART_MONEY",
+          "price": "$0.42",
+          "change_24h": "+3.8%",
+          "change_positive": 1,
+          "headline": "Smart Money Buy",
+        "volume_24h": "$1.2M",
+        "market_cap": "$12M",
+        "source": "signals"
+      },
+      {
+          "token_id": "signal-002",
+          "chain": "base",
+          "symbol": "HODL",
+          "signal_type": "REBALANCE",
+          "price": "$1.05",
+        "change_24h": "▼ -2.4%",
+        "change_positive": 0,
+        "headline": "Rebalance Alert",
+        "volume_24h": "$800K",
+        "market_cap": "$9M",
+        "source": "signals"
+      }
+    ]
+  }
+}

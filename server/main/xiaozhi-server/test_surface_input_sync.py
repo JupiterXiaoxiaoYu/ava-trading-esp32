@@ -1602,6 +1602,114 @@ int main(void)
             ),
         )
 
+    def test_real_spotlight_watchlist_star_layout(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        payload = (
+            '{"screen":"spotlight","data":{'
+            '"symbol":"SIG","token_id":"signal-spot","chain":"solana",'
+            '"cursor":1,"total":3,'
+            '"price":"$1.23","change_24h":"+2.1%","holders":"1,200",'
+            '"liquidity":"$100K","volume_24h":"$90K","market_cap":"$4M",'
+            '"top100_concentration":"12.3%","contract":"0xABCDEF1234567890ABCDEF1234567890ABCDEF12",'
+            '"is_watchlisted":true,"origin_hint":"From Signal Watchlist",'
+            '"chart":[500,520,530],'
+            '"chart_min":"$1.00","chart_max":"$2.00"'
+            "}}"
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_SPOTLIGHT
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
+
+int main(void)
+{{
+    screen_spotlight_show("{payload}");
+    if (strcmp(s_lbl_watch_star->text, "★") != 0) {{
+        fprintf(stderr, "unexpected watchlist star: %s\\n", s_lbl_watch_star->text);
+        return 2;
+    }}
+    if (strcmp(s_lbl_origin->text, "From Signal Watchlist") != 0) {{
+        fprintf(stderr, "origin hint missing: %s\\n", s_lbl_origin->text);
+        return 3;
+    }}
+    if (strcmp(s_lbl_pos->text, "<2/3>") != 0) {{
+        fprintf(stderr, "page marker missing: %s\\n", s_lbl_pos->text);
+        return 4;
+    }}
+    const int expected_row4_width_with_marker =
+        FOOTER_W - FOOTER_ROW4_STAR_W - FOOTER_ROW4_HINT_GAP - FOOTER_PAGE_W - FOOTER_ROW4_GAP;
+    if (s_lbl_stats_row4->width != expected_row4_width_with_marker) {{
+        fprintf(stderr, "unexpected row4 width: %d (want %d)\\n",
+                s_lbl_stats_row4->width, expected_row4_width_with_marker);
+        return 5;
+    }}
+    if (s_lbl_watch_star->x <= (s_lbl_stats_row4->x + s_lbl_stats_row4->width)) {{
+        fprintf(stderr, "watchlist star overlaps CA: star_x=%d ca_right=%d\\n",
+                s_lbl_watch_star->x, s_lbl_stats_row4->x + s_lbl_stats_row4->width);
+        return 6;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            extra_sources=(repo_root / "shared/ave_screens/ave_price_fmt.c",),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+                "-lm",
+            ),
+            binary_name="verify_spotlight_watchlist_star_layout",
+        )
+
     def test_real_portfolio_key_action_omits_missing_chain(self):
         repo_root = Path(__file__).resolve().parents[3]
         self._assert_real_key_action_missing_chain_fails_closed(
@@ -1633,6 +1741,179 @@ int main(void)
             key_sequence=("AVE_KEY_B",),
             binary_name="verify_feed_explore_panel_selection",
             failure_label="explore panel",
+        )
+
+    def test_real_feed_explore_panel_signals_watchlist_actions(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        feed_payload = (
+            '{'
+            '"screen":"feed",'
+            '"data":{"source_label":"TRENDING","tokens":['
+            '{"token_id":"feed-1","chain":"solana","symbol":"BONK","price":"$1","change_24h":"+1%"}'
+            ']}}'
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+int main(void)
+{{
+    screen_feed_show("{feed_payload}");
+    clear_last_json();
+
+    screen_feed_key(AVE_KEY_B);
+    for (int i = 0; i < 3; i++) {{
+        screen_feed_key(AVE_KEY_DOWN);
+    }}
+    screen_feed_key(AVE_KEY_A);
+    if (!expect_contains("\\"action\\":\\"signals\\"", "signals explore activation")) {{
+        return 2;
+    }}
+
+    clear_last_json();
+    screen_feed_show("{feed_payload}");
+    screen_feed_key(AVE_KEY_B);
+    for (int i = 0; i < 4; i++) {{
+        screen_feed_key(AVE_KEY_DOWN);
+    }}
+    screen_feed_key(AVE_KEY_A);
+    if (!expect_contains("\\"action\\":\\"watchlist\\"", "watchlist explore activation")) {{
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_explore_panel_signals_watchlist",
+        )
+
+    def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        screen_source = repo_root / "shared/ave_screens/screen_feed.c"
+        verifier_prefix = (repo_root / "simulator/mock/verify_ave_json_payloads.c").read_text(
+            encoding="utf-8"
+        ).split("#if defined(VERIFY_FEED)", 1)[0]
+
+        watchlist_payload = (
+            '{'
+            '"screen":"feed",'
+            '"data":{"mode":"watchlist","source_label":"WATCHLIST","tokens":['
+            '{"token_id":"wl-001","chain":"solana","symbol":"KEEP","price":"$2.11","change_24h":"+0.9%"}'
+            ']}}'
+        ).replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_FEED
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+#include "{screen_source}"
+
+int main(void)
+{{
+    ave_sm_handle_json("{watchlist_payload}");
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_X);
+    if (!expect_contains("\\"action\\":\\"watchlist_remove\\"", "watchlist X action")) {{
+        return 2;
+    }}
+    if (!expect_contains("\\"token_id\\":\\"wl-001\\"", "watchlist token id")) {{
+        return 3;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_feed_watchlist_mode_x_remove",
         )
 
     def test_real_feed_explore_search_guide_omits_trusted_selection_in_listen_payload(self):

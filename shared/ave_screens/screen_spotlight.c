@@ -54,6 +54,8 @@ static lv_obj_t *s_lbl_stats_row3_r = NULL;
 static lv_obj_t *s_lbl_t_start  = NULL;
 static lv_obj_t *s_lbl_t_mid    = NULL;
 static lv_obj_t *s_lbl_t_end    = NULL;
+static lv_obj_t *s_lbl_origin   = NULL;
+static lv_obj_t *s_lbl_watch_star = NULL;
 
 #define FOOTER_X 4
 #define FOOTER_W 312
@@ -63,12 +65,17 @@ static lv_obj_t *s_lbl_t_end    = NULL;
 #define FOOTER_ROW4_Y 199
 #define FOOTER_PAGE_W 72
 #define FOOTER_ROW4_GAP 6
+#define FOOTER_ROW4_HINT_GAP 4
+#define FOOTER_ROW4_STAR_W 14
 #define FOOTER_COL1_X 4
 #define FOOTER_COL1_W 112
 #define FOOTER_COL2_X 118
 #define FOOTER_COL2_W 88
 #define FOOTER_COL3_X 208
 #define FOOTER_COL3_W 108
+#define ORIGIN_HINT_X 8
+#define ORIGIN_HINT_RIGHT_MARGIN 88
+#define ORIGIN_HINT_WIDTH (320 - ORIGIN_HINT_X - ORIGIN_HINT_RIGHT_MARGIN)
 
 static int _copy_contract_candidate(const char *src, char *out, size_t out_n)
 {
@@ -306,6 +313,24 @@ static void _footer_triplet_build(
     lv_obj_set_style_text_align(*right, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
+static void _layout_row4(bool has_page_marker)
+{
+    int reserved = FOOTER_ROW4_STAR_W + FOOTER_ROW4_HINT_GAP;
+    if (has_page_marker) {
+        reserved += FOOTER_PAGE_W + FOOTER_ROW4_GAP;
+    }
+    int width = FOOTER_W - reserved;
+    if (width < 0) width = 0;
+    lv_obj_set_width(s_lbl_stats_row4, width);
+
+    int star_offset = has_page_marker ? (FOOTER_PAGE_W + FOOTER_ROW4_GAP) : 0;
+    lv_obj_set_pos(
+        s_lbl_watch_star,
+        FOOTER_X + FOOTER_W - FOOTER_ROW4_STAR_W - star_offset,
+        FOOTER_ROW4_Y
+    );
+}
+
 /* ─── JSON helpers ───────────────────────────────────────────────────────── */
 static int _str(const char *o, const char *k, char *out, int n) {
     char nd[64]; snprintf(nd, sizeof(nd), "\"%s\"", k);
@@ -515,6 +540,15 @@ static void _build(void) {
     lv_obj_set_style_text_color(s_lbl_t_end, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_t_end, &lv_font_montserrat_12, 0);
 
+    s_lbl_origin = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_origin, ORIGIN_HINT_X, 22);
+    lv_obj_set_width(s_lbl_origin, ORIGIN_HINT_WIDTH);
+    lv_label_set_long_mode(s_lbl_origin, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_origin, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_origin, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_origin, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_text(s_lbl_origin, "");
+
     /* ── Four-line compact footer stats ──────────────────────────────── */
     s_lbl_stats_row1 = lv_label_create(s_screen);
     lv_obj_set_pos(s_lbl_stats_row1, -1000, FOOTER_ROW1_Y);
@@ -545,6 +579,15 @@ static void _build(void) {
     lv_label_set_long_mode(s_lbl_stats_row4, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_stats_row4, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_stats_row4, &lv_font_montserrat_12, 0);
+
+    s_lbl_watch_star = lv_label_create(s_screen);
+    lv_obj_set_pos(s_lbl_watch_star, FOOTER_X + FOOTER_W - FOOTER_ROW4_STAR_W, FOOTER_ROW4_Y);
+    lv_obj_set_width(s_lbl_watch_star, FOOTER_ROW4_STAR_W);
+    lv_label_set_long_mode(s_lbl_watch_star, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_lbl_watch_star, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(s_lbl_watch_star, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(s_lbl_watch_star, COLOR_GRAY, 0);
+    lv_label_set_text(s_lbl_watch_star, "☆");
 
     /* ── Divider ─────────────────────────────────────────────────────── */
     lv_obj_t *div = lv_obj_create(s_screen);
@@ -614,6 +657,7 @@ static void _build(void) {
     lv_label_set_text(lbl_buy, "[A] BUY");
     lv_obj_set_style_text_color(lbl_buy, COLOR_GREEN, 0);
     lv_obj_set_style_text_font(lbl_buy, &lv_font_montserrat_12, 0);
+
 }
 
 /* ─── Public API ──────────────────────────────────────────────────────────── */
@@ -663,6 +707,7 @@ void screen_spotlight_show(const char *json_data)
     char holders[20]={0}, liq[20]={0}, cmin[16]={0}, cmax[16]={0};
     char vol24h[20]={0}, mcap[20]={0}, top100[20]={0}, ca_compact[32]={0};
     char contract_addr[160]={0}, mint_addr[160]={0};
+    char origin_hint[32]={0};
     char identity_buf[64]={0};
     s_token_id[0] = '\0';
     s_chain[0] = '\0';
@@ -687,6 +732,7 @@ void screen_spotlight_show(const char *json_data)
     _str(json_data, "chain",     s_chain,    sizeof(s_chain));
     _str(json_data, "contract_tail", s_contract_tail, sizeof(s_contract_tail));
     _str(json_data, "source_tag", s_source_tag, sizeof(s_source_tag));
+    _field_text(json_data, "origin_hint", origin_hint, sizeof(origin_hint));
     _format_contract_short(contract_addr, mint_addr, s_token_id, ca_compact, sizeof(ca_compact));
     snprintf(s_symbol, sizeof(s_symbol), "%s", sym);
     /* Compact Y-axis labels; fall back to full price strings */
@@ -699,6 +745,7 @@ void screen_spotlight_show(const char *json_data)
     int is_honeypot = _bool(json_data, "is_honeypot", 0);
     int is_mintable = _bool(json_data, "is_mintable",  0);
     int is_freezable= _bool(json_data, "is_freezable", 0);
+    int is_watchlisted= _bool(json_data, "is_watchlisted", 0);
 
     /* Top bar */
     _identity_text(identity_buf, sizeof(identity_buf), sym, s_chain, s_contract_tail);
@@ -715,6 +762,7 @@ void screen_spotlight_show(const char *json_data)
     lv_label_set_text(s_lbl_change,change[0] ? change : "N/A");
     lv_obj_set_style_text_color(s_lbl_change,
         change_pos ? COLOR_GREEN : COLOR_RED, 0);
+    lv_label_set_text(s_lbl_origin, origin_hint[0] ? origin_hint : "");
 
     /* Chart — parse pre-normalized int array (always [0..1000] from server) */
     int16_t pts[MAX_CHART_PTS];
@@ -802,19 +850,20 @@ void screen_spotlight_show(const char *json_data)
         "CA:%s",
         ca_compact
     );
+    lv_label_set_text(s_lbl_watch_star, is_watchlisted ? "★" : "☆");
 
     /* Feed position indicator (present only when navigating feed list) */
     s_feed_cursor = cursor;
     s_feed_total = total;
-    if (cursor >= 0 && total > 1) {
-        lv_obj_set_width(s_lbl_stats_row4, FOOTER_W - FOOTER_PAGE_W - FOOTER_ROW4_GAP);
+    bool has_page_marker = (cursor >= 0 && total > 1);
+    if (has_page_marker) {
         lv_obj_set_pos(s_lbl_pos, FOOTER_X + FOOTER_W - FOOTER_PAGE_W, FOOTER_ROW4_Y);
         lv_obj_set_width(s_lbl_pos, FOOTER_PAGE_W);
         lv_label_set_text_fmt(s_lbl_pos, "<%d/%d>", cursor + 1, total);
     } else {
-        lv_obj_set_width(s_lbl_stats_row4, FOOTER_W);
         lv_label_set_text(s_lbl_pos, "");
     }
+    _layout_row4(has_page_marker);
 }
 
 #if !defined(AVE_SPOTLIGHT_SHOW_ONLY)
