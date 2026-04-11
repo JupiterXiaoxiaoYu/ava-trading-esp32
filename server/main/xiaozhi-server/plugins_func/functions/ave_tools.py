@@ -2492,7 +2492,7 @@ def ave_list_signals(conn: "ConnectionHandler"):
         # cannot repaint the previous feed while Signals is loading.
         feed_session = _invalidate_live_feed_session(conn, clear_tokens=True)
 
-        resp = _data_get("/signals/public/list", {"limit": 20})
+        resp = _data_get("/signals/public/list", {"limit": 20, "pageSize": 20, "pageNO": 1})
         raw = resp.get("data", {})
         if isinstance(raw, dict):
             raw = raw.get("list", raw.get("items", []))
