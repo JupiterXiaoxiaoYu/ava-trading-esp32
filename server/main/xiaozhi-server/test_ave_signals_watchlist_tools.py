@@ -31,11 +31,15 @@ class SignalsWatchlistToolTests(unittest.TestCase):
                         "signal_type": "SMART_MONEY",
                         "headline": "Should not be shown in browse row",
                         "action_type": "BUY",
+                        "first_signal_time": 9900,
+                        "signal_time": 9980,
+                        "action_count": 2,
+                        "tx_volume_u_24h": 125000,
                         "price_change_24h": 12.34,
                         "mc_cur": 120000,
                         "actions": [
-                            {"action_type": "buy", "quote_token_volume": "1.25"},
-                            {"action_type": "buy", "quote_token_volume": "2.25"},
+                            {"action_type": "buy", "quote_token_volume": "1.25", "quote_token_symbol": "SOL"},
+                            {"action_type": "buy", "quote_token_volume": "2.25", "quote_token_symbol": "SOL"},
                         ],
                     }
                 ]
@@ -43,6 +47,8 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         }
 
         with patch.object(ave_tools, "_data_get", return_value=signal_payload), patch.object(
+            ave_tools.time, "time", return_value=10020
+        ), patch.object(
             ave_tools, "_send_display", new=AsyncMock()
         ) as send_display:
             ave_tools.ave_list_signals(self.conn)
@@ -55,8 +61,54 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(payload["source_label"], "SIGNALS")
         self.assertEqual(payload["tokens"][0]["token_id"], "Token111")
         self.assertEqual(payload["tokens"][0]["signal_label"], "BUY")
-        self.assertEqual(payload["tokens"][0]["signal_summary"], "总买入 3.5 SOL")
+        self.assertEqual(payload["tokens"][0]["signal_value"], "BUY 3.5 SOL")
+        self.assertEqual(payload["tokens"][0]["signal_first"], "First 2m")
+        self.assertEqual(payload["tokens"][0]["signal_last"], "Last 0m")
+        self.assertEqual(payload["tokens"][0]["signal_count"], "Count 2")
+        self.assertEqual(payload["tokens"][0]["signal_vol"], "Vol $125.0K")
+        self.assertEqual(
+            payload["tokens"][0]["signal_summary"],
+            "First 2m Last 0m Count 2 Vol $125.0K",
+        )
         self.assertEqual(self.conn.ave_state["feed_mode"], "signals")
+
+    def test_ave_list_signals_falls_back_to_action_count_when_actions_missing(self):
+        signal_payload = {
+            "data": {
+                "list": [
+                    {
+                        "symbol": "MORITZ",
+                        "token": "Token222",
+                        "chain": "solana",
+                        "action_type": "BUY",
+                        "first_signal_time": 6400,
+                        "signal_time": 8200,
+                        "action_count": 3,
+                        "tx_volume_u_24h": 13150,
+                    }
+                ]
+            }
+        }
+
+        with patch.object(ave_tools, "_data_get", return_value=signal_payload), patch.object(
+            ave_tools.time, "time", return_value=10000
+        ), patch.object(
+            ave_tools, "_send_display", new=AsyncMock()
+        ) as send_display:
+            ave_tools.ave_list_signals(self.conn)
+            self.loop.run_until_complete(asyncio.sleep(0))
+
+        _, _, payload = send_display.await_args.args
+        self.assertEqual(payload["tokens"][0]["signal_label"], "BUY")
+        self.assertEqual(payload["tokens"][0]["signal_value"], "BUY")
+        self.assertEqual(payload["tokens"][0]["signal_first"], "First 1h")
+        self.assertEqual(payload["tokens"][0]["signal_last"], "Last 30m")
+        self.assertEqual(payload["tokens"][0]["signal_count"], "Count 3")
+        self.assertEqual(payload["tokens"][0]["signal_vol"], "Vol $13.2K")
+        self.assertEqual(
+            payload["tokens"][0]["signal_summary"],
+            "First 1h Last 30m Count 3 Vol $13.2K",
+        )
 
     def test_ave_list_signals_invalidates_live_feed_session_before_fetch(self):
         signal_payload = {"data": {"list": []}}

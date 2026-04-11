@@ -285,6 +285,19 @@ def _fmt_signal_amount(value) -> str:
     return f"{amount:.4f}".rstrip("0").rstrip(".")
 
 
+def _fmt_signal_age(raw_ts, now_ts=None) -> str:
+    ts = _parse_numeric_value(raw_ts)
+    if ts is None or ts <= 0:
+        return ""
+    now_value = int(now_ts if now_ts is not None else time.time())
+    delta = max(0, now_value - int(ts))
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
+
+
 def _signal_label_from_totals(buy_total: float, sell_total: float) -> str:
     if buy_total > 0 and buy_total >= sell_total:
         return "BUY"
@@ -302,15 +315,40 @@ def _signal_label_from_item(item: dict) -> str:
     return ""
 
 
-def _build_signal_display(item: dict, chain: str) -> tuple[str, str]:
+def _build_signal_meta_fields(item: dict, now_ts=None) -> tuple[str, str, str, str, str]:
+    first_age = _fmt_signal_age(item.get("first_signal_time"), now_ts)
+    first_text = f"First {first_age}" if first_age else "First -"
+
+    last_age = _fmt_signal_age(item.get("signal_time"), now_ts)
+    last_text = f"Last {last_age}" if last_age else "Last -"
+
+    action_count = _parse_numeric_value(item.get("action_count"))
+    if action_count is not None and action_count > 0:
+        count_text = f"Count {int(action_count)}"
+    else:
+        count_text = "Count -"
+
+    volume_value = _coalesce_numeric_value(
+        _coalesce_numeric_value(item.get("tx_volume_u_24h"), item.get("token_tx_volume_usd_24h")),
+        item.get("volume_24h"),
+    )
+    volume_text = _fmt_volume(volume_value)
+    if volume_text != "N/A":
+        vol_text = f"Vol {volume_text}"
+    else:
+        vol_text = "Vol -"
+
+    summary = f"{first_text} {last_text} {count_text} {vol_text}"
+    return first_text, last_text, count_text, vol_text, summary
+
+
+def _build_signal_display(item: dict, chain: str) -> tuple[str, str, str, str, str, str, str]:
     actions = item.get("actions")
+    label = _signal_label_from_item(item)
+    value_text = label or "SIGNAL"
+    first_text, last_text, count_text, vol_text, summary = _build_signal_meta_fields(item)
     if not isinstance(actions, list) or not actions:
-        label = _signal_label_from_item(item)
-        if label == "SELL":
-            return label, "卖出信号"
-        if label == "BUY":
-            return label, "买入信号"
-        return "", "信号更新中"
+        return label, value_text, first_text, last_text, count_text, vol_text, summary
 
     buy_total = 0.0
     sell_total = 0.0
@@ -327,8 +365,8 @@ def _build_signal_display(item: dict, chain: str) -> tuple[str, str]:
         if volume is None:
             continue
 
-        quote_token = str(action.get("quote_token") or "").strip()
-        base_token = str(action.get("base_token") or "").strip()
+        quote_token = str(action.get("quote_token_symbol") or action.get("quote_token") or "").strip()
+        base_token = str(action.get("base_token_symbol") or action.get("base_token") or "").strip()
         if not unit:
             if quote_token and len(quote_token) <= 12 and quote_token.isascii():
                 unit = quote_token.upper()
@@ -344,19 +382,19 @@ def _build_signal_display(item: dict, chain: str) -> tuple[str, str]:
         unit = _signal_default_quote_symbol(chain)
 
     label = _signal_label_from_totals(buy_total, sell_total)
-    if buy_total > 0:
-        if label == "BUY":
-            return label, f"总买入 {_fmt_signal_amount(buy_total)} {unit}"
-        return label or "SELL", f"总卖出 {_fmt_signal_amount(sell_total)} {unit}"
-    if sell_total > 0:
-        return label or "SELL", f"总卖出 {_fmt_signal_amount(sell_total)} {unit}"
-
-    label = _signal_label_from_item(item)
-    if label == "SELL":
-        return label, "卖出信号"
+    amount_total = 0.0
     if label == "BUY":
-        return label, "买入信号"
-    return "", "信号更新中"
+        amount_total = buy_total
+    elif label == "SELL":
+        amount_total = sell_total
+
+    if label and amount_total > 0:
+        value_text = f"{label} {_fmt_signal_amount(amount_total)} {unit}"
+    else:
+        label = label or _signal_label_from_item(item)
+        value_text = label or "SIGNAL"
+
+    return label, value_text, first_text, last_text, count_text, vol_text, summary
 
 
 def _balance_ratio_to_percent_points(raw_value):
@@ -1300,7 +1338,15 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
             }
         )
         change_value = _parse_numeric_value(item.get("price_change_24h"))
-        signal_label, signal_summary = _build_signal_display(item, chain)
+        (
+            signal_label,
+            signal_value,
+            signal_first,
+            signal_last,
+            signal_count,
+            signal_vol,
+            signal_summary,
+        ) = _build_signal_display(item, chain)
         rows.append(
             {
                 **identity,
@@ -1309,6 +1355,11 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
                 "change_positive": True if change_value is None else change_value >= 0,
                 "signal_type": str(item.get("signal_type") or "").strip(),
                 "signal_label": signal_label,
+                "signal_value": signal_value,
+                "signal_first": signal_first,
+                "signal_last": signal_last,
+                "signal_count": signal_count,
+                "signal_vol": signal_vol,
                 "signal_summary": signal_summary,
                 "headline": str(item.get("headline") or "").strip(),
                 "signal_time": str(item.get("signal_time") or "").strip(),

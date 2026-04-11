@@ -66,6 +66,11 @@ typedef struct {
     char market_cap[16];
     char source[24];
     char signal_label[8];
+    char signal_value[32];
+    char signal_first[20];
+    char signal_last[20];
+    char signal_count[20];
+    char signal_vol[20];
     char signal_type[32];
     char signal_summary[64];
     char headline[64];
@@ -246,6 +251,10 @@ typedef struct {
     lv_obj_t *lbl_price;
     lv_obj_t *lbl_chg;
     lv_obj_t *lbl_subtitle;
+    lv_obj_t *lbl_meta1;
+    lv_obj_t *lbl_meta2;
+    lv_obj_t *lbl_meta3;
+    lv_obj_t *lbl_meta4;
 } feed_row_ui_t;
 
 static feed_row_ui_t s_rows[VISIBLE_ROWS];
@@ -599,17 +608,47 @@ static const char *_signal_label(const feed_token_t *t)
     if (strcmp(t->signal_label, "BUY") == 0 || strcmp(t->signal_label, "SELL") == 0) {
         return t->signal_label;
     }
-    if (strncmp(t->signal_summary, "总买入", strlen("总买入")) == 0) return "BUY";
-    if (strncmp(t->signal_summary, "总卖出", strlen("总卖出")) == 0) return "SELL";
+    if (strncmp(t->signal_value, "BUY", 3) == 0) return "BUY";
+    if (strncmp(t->signal_value, "SELL", 4) == 0) return "SELL";
+    if (strncmp(t->signal_summary, "Total bought", strlen("Total bought")) == 0) return "BUY";
+    if (strncmp(t->signal_summary, "Total sold", strlen("Total sold")) == 0) return "SELL";
     return "";
+}
+
+static const char *_signal_value(const feed_token_t *t)
+{
+    if (t->signal_value[0]) return t->signal_value;
+    if (strcmp(_signal_label(t), "BUY") == 0) return "BUY";
+    if (strcmp(_signal_label(t), "SELL") == 0) return "SELL";
+    return "SIGNAL";
 }
 
 static const char *_signal_summary(const feed_token_t *t)
 {
     if (t->signal_summary[0]) return t->signal_summary;
-    if (strcmp(_signal_label(t), "BUY") == 0) return "买入信号";
-    if (strcmp(_signal_label(t), "SELL") == 0) return "卖出信号";
-    return "信号更新中";
+    if (strcmp(_signal_label(t), "BUY") == 0) return "Buy signal";
+    if (strcmp(_signal_label(t), "SELL") == 0) return "Sell signal";
+    return "Signal updating";
+}
+
+static const char *_signal_first(const feed_token_t *t)
+{
+    return t->signal_first[0] ? t->signal_first : "First -";
+}
+
+static const char *_signal_last(const feed_token_t *t)
+{
+    return t->signal_last[0] ? t->signal_last : "Last -";
+}
+
+static const char *_signal_count(const feed_token_t *t)
+{
+    return t->signal_count[0] ? t->signal_count : "Count -";
+}
+
+static const char *_signal_vol(const feed_token_t *t)
+{
+    return t->signal_vol[0] ? t->signal_vol : "Vol -";
 }
 
 /* ─── JSON parsing ────────────────────────────────────────────────────────── */
@@ -716,6 +755,11 @@ static void _parse_tokens_from_json(const char *json)
         _get_json_str_field(obj, "market_cap", t->market_cap, sizeof(t->market_cap));
         _get_json_str_field(obj, "source",     t->source,     sizeof(t->source));
         _get_json_str_field(obj, "signal_label", t->signal_label, sizeof(t->signal_label));
+        _get_json_str_field(obj, "signal_value", t->signal_value, sizeof(t->signal_value));
+        _get_json_str_field(obj, "signal_first", t->signal_first, sizeof(t->signal_first));
+        _get_json_str_field(obj, "signal_last", t->signal_last, sizeof(t->signal_last));
+        _get_json_str_field(obj, "signal_count", t->signal_count, sizeof(t->signal_count));
+        _get_json_str_field(obj, "signal_vol", t->signal_vol, sizeof(t->signal_vol));
         _get_json_str_field(obj, "signal_type", t->signal_type, sizeof(t->signal_type));
         _get_json_str_field(obj, "signal_summary", t->signal_summary, sizeof(t->signal_summary));
         _get_json_str_field(obj, "headline",    t->headline,    sizeof(t->headline));
@@ -754,6 +798,10 @@ static void _set_row_text(feed_row_ui_t *ui,
     lv_label_set_text(ui->lbl_chg, chg ? chg : "");
     lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
     lv_label_set_text(ui->lbl_subtitle, "");
+    lv_label_set_text(ui->lbl_meta1, "");
+    lv_label_set_text(ui->lbl_meta2, "");
+    lv_label_set_text(ui->lbl_meta3, "");
+    lv_label_set_text(ui->lbl_meta4, "");
 }
 
 static void _clear_row(feed_row_ui_t *ui)
@@ -811,11 +859,18 @@ static void _apply_browse_row_layout(feed_row_ui_t *ui)
 {
     if (!ui) return;
     int first_line_y = _browse_first_line_y();
+    int second_line_y = _browse_second_line_y();
+    int meta_x = COL_SYM_X;
+    int meta_w = (320 - COL_SYM_X - 4) / 4;
     lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
     lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ui->lbl_meta1, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ui->lbl_meta2, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ui->lbl_meta3, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(ui->lbl_meta4, &lv_font_montserrat_12, 0);
     lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, first_line_y);
     lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, first_line_y);
     lv_obj_set_width(ui->lbl_sym, 120);
@@ -825,7 +880,6 @@ static void _apply_browse_row_layout(feed_row_ui_t *ui)
     lv_obj_set_width(ui->lbl_price, 90);
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
-    int second_line_y = _browse_second_line_y();
     lv_obj_set_pos(ui->lbl_subtitle, COL_SYM_X, second_line_y);
     lv_obj_set_width(ui->lbl_subtitle, COL_CHG_X - COL_SYM_X);
     lv_obj_set_style_text_align(ui->lbl_subtitle, LV_TEXT_ALIGN_LEFT, 0);
@@ -833,6 +887,22 @@ static void _apply_browse_row_layout(feed_row_ui_t *ui)
     lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, second_line_y);
     lv_obj_set_width(ui->lbl_chg, 60);
     lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_set_pos(ui->lbl_meta1, meta_x, second_line_y);
+    lv_obj_set_width(ui->lbl_meta1, meta_w);
+    lv_obj_set_style_text_align(ui->lbl_meta1, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_set_pos(ui->lbl_meta2, meta_x + meta_w, second_line_y);
+    lv_obj_set_width(ui->lbl_meta2, meta_w);
+    lv_obj_set_style_text_align(ui->lbl_meta2, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_set_pos(ui->lbl_meta3, meta_x + meta_w * 2, second_line_y);
+    lv_obj_set_width(ui->lbl_meta3, meta_w);
+    lv_obj_set_style_text_align(ui->lbl_meta3, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_set_pos(ui->lbl_meta4, meta_x + meta_w * 3, second_line_y);
+    lv_obj_set_width(ui->lbl_meta4, meta_w);
+    lv_obj_set_style_text_align(ui->lbl_meta4, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 static void _update_overlay_rows(void)
@@ -1001,14 +1071,19 @@ static void _update_browse_rows(void)
         lv_color_t text_color = selected ? COLOR_WHITE : COLOR_GRAY;
         lv_obj_set_style_text_color(ui->lbl_sym, text_color, 0);
         lv_obj_set_style_text_color(ui->lbl_price, text_color, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta1, text_color, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta2, text_color, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta3, text_color, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta4, text_color, 0);
 
         if (s_feed_mode == FEED_MODE_SIGNALS) {
-            lv_obj_set_style_text_font(ui->lbl_subtitle, ave_font_cjk_14(), 0);
-            lv_label_set_text(ui->lbl_price, _signal_label(t));
-            lv_label_set_text(ui->lbl_subtitle, _signal_summary(t));
+            lv_label_set_text(ui->lbl_price, _signal_value(t));
+            lv_label_set_text(ui->lbl_subtitle, "");
             lv_label_set_text(ui->lbl_chg, "");
-            lv_obj_set_style_text_color(ui->lbl_subtitle, text_color, 0);
-            lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
+            lv_label_set_text(ui->lbl_meta1, _signal_first(t));
+            lv_label_set_text(ui->lbl_meta2, _signal_last(t));
+            lv_label_set_text(ui->lbl_meta3, _signal_count(t));
+            lv_label_set_text(ui->lbl_meta4, _signal_vol(t));
         } else {
             lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
             lv_label_set_text(ui->lbl_price, "");
@@ -1016,6 +1091,10 @@ static void _update_browse_rows(void)
             const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
             lv_label_set_text(ui->lbl_chg, chg_text);
             lv_obj_set_style_text_color(ui->lbl_subtitle, text_color, 0);
+            lv_label_set_text(ui->lbl_meta1, "");
+            lv_label_set_text(ui->lbl_meta2, "");
+            lv_label_set_text(ui->lbl_meta3, "");
+            lv_label_set_text(ui->lbl_meta4, "");
             lv_color_t chg_color = COLOR_GRAY;
             if (t->change_24h[0]) {
                 if (t->change_positive > 0) chg_color = COLOR_GREEN;
@@ -1184,6 +1263,23 @@ static void _build_screen(void)
         lv_label_set_long_mode(ui->lbl_subtitle, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_color(ui->lbl_subtitle, COLOR_GRAY, 0);
         lv_label_set_text(ui->lbl_subtitle, "");
+
+        ui->lbl_meta1 = lv_label_create(ui->row);
+        ui->lbl_meta2 = lv_label_create(ui->row);
+        ui->lbl_meta3 = lv_label_create(ui->row);
+        ui->lbl_meta4 = lv_label_create(ui->row);
+        lv_label_set_long_mode(ui->lbl_meta1, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_meta2, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_meta3, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_meta4, LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_text_color(ui->lbl_meta1, COLOR_GRAY, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta2, COLOR_GRAY, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta3, COLOR_GRAY, 0);
+        lv_obj_set_style_text_color(ui->lbl_meta4, COLOR_GRAY, 0);
+        lv_label_set_text(ui->lbl_meta1, "");
+        lv_label_set_text(ui->lbl_meta2, "");
+        lv_label_set_text(ui->lbl_meta3, "");
+        lv_label_set_text(ui->lbl_meta4, "");
     }
 
     /* ── Divider ─────────────────────────────────────────────────────────── */

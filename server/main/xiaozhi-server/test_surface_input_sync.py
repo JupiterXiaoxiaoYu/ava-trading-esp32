@@ -1879,7 +1879,9 @@ int main(void)
             '"screen":"feed",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
             '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal",'
-            '"signal_label":"BUY","signal_summary":"总买入 3.5 SOL","headline":"THIS_HEADLINE_MUST_NOT_RENDER"}'
+            '"signal_label":"BUY","signal_value":"BUY 3.5 SOL","signal_first":"First 5m","signal_last":"Last 2m",'
+            '"signal_count":"Count 2","signal_vol":"Vol $125.0K","signal_summary":"First 5m Last 2m Count 2 Vol $125.0K",'
+            '"headline":"THIS_HEADLINE_MUST_NOT_RENDER"}'
             ']}}'
         ).replace("\\", "\\\\").replace('"', '\\"')
 
@@ -1949,17 +1951,29 @@ int main(void)
         fprintf(stderr, "signals symbol not preserved: %s\\n", s_rows[0].lbl_sym ? s_rows[0].lbl_sym->text : "<null>");
         return 2;
     }}
-    if (!s_rows[0].lbl_price || strcmp(s_rows[0].lbl_price->text, "BUY") != 0) {{
+    if (!s_rows[0].lbl_price || strcmp(s_rows[0].lbl_price->text, "BUY 3.5 SOL") != 0) {{
         fprintf(stderr, "signals action label incorrect: %s\\n", s_rows[0].lbl_price ? s_rows[0].lbl_price->text : "<null>");
         return 3;
     }}
-    if (!s_rows[0].lbl_subtitle || strcmp(s_rows[0].lbl_subtitle->text, "总买入 3.5 SOL") != 0) {{
-        fprintf(stderr, "signals subtitle should use summary: %s\\n", s_rows[0].lbl_subtitle ? s_rows[0].lbl_subtitle->text : "<null>");
+    if (!s_rows[0].lbl_meta1 || strcmp(s_rows[0].lbl_meta1->text, "First 5m") != 0) {{
+        fprintf(stderr, "signals first meta incorrect: %s\\n", s_rows[0].lbl_meta1 ? s_rows[0].lbl_meta1->text : "<null>");
         return 4;
     }}
-    if (strstr(s_rows[0].lbl_subtitle->text, "HEADLINE") != NULL) {{
-        fprintf(stderr, "signals subtitle leaked headline: %s\\n", s_rows[0].lbl_subtitle->text);
+    if (!s_rows[0].lbl_meta2 || strcmp(s_rows[0].lbl_meta2->text, "Last 2m") != 0) {{
+        fprintf(stderr, "signals last meta incorrect: %s\\n", s_rows[0].lbl_meta2 ? s_rows[0].lbl_meta2->text : "<null>");
         return 5;
+    }}
+    if (!s_rows[0].lbl_meta3 || strcmp(s_rows[0].lbl_meta3->text, "Count 2") != 0) {{
+        fprintf(stderr, "signals count meta incorrect: %s\\n", s_rows[0].lbl_meta3 ? s_rows[0].lbl_meta3->text : "<null>");
+        return 6;
+    }}
+    if (!s_rows[0].lbl_meta4 || strcmp(s_rows[0].lbl_meta4->text, "Vol $125.0K") != 0) {{
+        fprintf(stderr, "signals vol meta incorrect: %s\\n", s_rows[0].lbl_meta4 ? s_rows[0].lbl_meta4->text : "<null>");
+        return 7;
+    }}
+    if (s_rows[0].lbl_subtitle && s_rows[0].lbl_subtitle->text[0] != '\\0') {{
+        fprintf(stderr, "signals subtitle should stay empty: %s\\n", s_rows[0].lbl_subtitle->text);
+        return 8;
     }}
     return 0;
 }}
@@ -1987,8 +2001,8 @@ int main(void)
             '{'
             '"screen":"feed",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
-            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_label":"BUY","signal_summary":"总买入 3.5 SOL"},'
-            '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_label":"BUY","signal_summary":"总买入 1.2 ETH"}'
+            '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_label":"BUY","signal_value":"BUY 3.5 SOL","signal_first":"First 5m","signal_last":"Last 2m","signal_count":"Count 2","signal_vol":"Vol $125.0K"},'
+            '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_label":"BUY","signal_value":"BUY 1.2 ETH","signal_first":"First 9m","signal_last":"Last 1m","signal_count":"Count 4","signal_vol":"Vol $532.0K"}'
             ']}}'
         ).replace("\\", "\\\\").replace('"', '\\"')
 
