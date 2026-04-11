@@ -10,10 +10,10 @@ VALID_TRADE_MODES = {"real", "paper"}
 _STORE_LOCK = threading.Lock()
 
 _CHAIN_SEEDS = {
-    "solana": {"symbol": "SOL", "amount": "100"},
-    "eth": {"symbol": "ETH", "amount": "100"},
-    "base": {"symbol": "ETH", "amount": "100"},
-    "bsc": {"symbol": "BNB", "amount": "100"},
+    "solana": {"symbol": "SOL", "amount": "1"},
+    "eth": {"symbol": "ETH", "amount": "1"},
+    "base": {"symbol": "ETH", "amount": "1"},
+    "bsc": {"symbol": "BNB", "amount": "1"},
 }
 
 

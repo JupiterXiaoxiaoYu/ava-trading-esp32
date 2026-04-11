@@ -180,7 +180,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_payload["mode_label"], "PAPER")
 
         account = get_paper_account(self.paper_store, "default")
-        self.assertEqual(account["balances"]["solana"]["amount"], "99")
+        self.assertEqual(account["balances"]["solana"]["amount"], "0")
         position = account["positions"]["token-1-solana"]
         self.assertEqual(position["symbol"], "BONK")
         self.assertEqual(position["amount"], "50")
@@ -236,7 +236,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_payload["mode_label"], "PAPER")
 
         account = get_paper_account(self.paper_store, "default")
-        self.assertEqual(account["balances"]["solana"]["amount"], "99.5")
+        self.assertEqual(account["balances"]["solana"]["amount"], "0.5")
         position = account["positions"]["token-1-solana"]
         self.assertEqual(position["amount"], "25")
 
@@ -268,7 +268,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
                 conn,
                 addr="token-2",
                 chain="solana",
-                in_amount_sol=2.0,
+                in_amount_sol=0.5,
                 limit_price=1.5,
                 current_price=2.0,
                 symbol="PEPE",
@@ -287,7 +287,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("PEPE limit", list_result.result)
 
             account = get_paper_account(self.paper_store, "default")
-            self.assertEqual(account["balances"]["solana"]["amount"], "98")
+            self.assertEqual(account["balances"]["solana"]["amount"], "0.5")
             self.assertEqual(len(account["open_orders"]), 1)
             order_id = account["open_orders"][0]["id"]
 
@@ -303,7 +303,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cancel_payload["title"], "Paper Order Cancelled")
 
         account = get_paper_account(self.paper_store, "default")
-        self.assertEqual(account["balances"]["solana"]["amount"], "100")
+        self.assertEqual(account["balances"]["solana"]["amount"], "1")
         self.assertEqual(account["open_orders"], [])
 
     async def test_paper_limit_order_matches_when_orders_refresh_hits_price(self):
@@ -334,7 +334,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
                 conn,
                 addr="token-3",
                 chain="solana",
-                in_amount_sol=2.0,
+                in_amount_sol=0.5,
                 limit_price=1.5,
                 current_price=2.0,
                 symbol="DOGE",
@@ -353,7 +353,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.result, "没有未完成挂单")
         account = get_paper_account(self.paper_store, "default")
         self.assertEqual(account["open_orders"], [])
-        self.assertEqual(account["positions"]["token-3-solana"]["amount"], "200")
+        self.assertEqual(account["positions"]["token-3-solana"]["amount"], "50")
         notify_payloads = [data for screen, data in sent if screen == "notify"]
         self.assertTrue(notify_payloads)
         self.assertEqual(notify_payloads[-1]["title"], "Paper Order Filled")
