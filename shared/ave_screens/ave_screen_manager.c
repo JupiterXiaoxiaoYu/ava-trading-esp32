@@ -20,20 +20,20 @@
 
 /* Screen implementations (forward declarations) */
 void screen_feed_show(const char *json_data);
-void screen_feed_reveal(void);
+void screen_feed_reveal(void) __attribute__((weak));
 void screen_feed_key(int key);
 bool screen_feed_should_ignore_live_push(void);
 int screen_feed_get_selected_context_json(char *out, size_t out_n);
 
-void screen_explorer_show(const char *json_data);
-void screen_explorer_key(int key);
-int screen_explorer_get_selected_context_json(char *out, size_t out_n);
+void screen_explorer_show(const char *json_data) __attribute__((weak));
+void screen_explorer_key(int key) __attribute__((weak));
+int screen_explorer_get_selected_context_json(char *out, size_t out_n) __attribute__((weak));
 
-void screen_browse_show(const char *json_data);
-void screen_browse_show_placeholder(const char *mode);
-void screen_browse_reveal(void);
-void screen_browse_key(int key);
-int screen_browse_get_selected_context_json(char *out, size_t out_n);
+void screen_browse_show(const char *json_data) __attribute__((weak));
+void screen_browse_show_placeholder(const char *mode) __attribute__((weak));
+void screen_browse_reveal(void) __attribute__((weak));
+void screen_browse_key(int key) __attribute__((weak));
+int screen_browse_get_selected_context_json(char *out, size_t out_n) __attribute__((weak));
 
 void screen_spotlight_show(const char *json_data);
 void screen_spotlight_key(int key);
@@ -72,20 +72,6 @@ static ave_screen_id_t s_current = AVE_SCREEN_FEED;
 static ave_screen_id_t s_back_target = AVE_SCREEN_FEED;
 
 static int _json_str(const char *json, const char *key, char *out, size_t out_n);
-
-static int _data_is_browse_payload(const char *json)
-{
-    char mode[24] = {0};
-    char source_label[24] = {0};
-
-    if (_json_str(json, "mode", mode, sizeof(mode))) {
-        if (strcmp(mode, "signals") == 0 || strcmp(mode, "watchlist") == 0) return 1;
-    }
-    if (_json_str(json, "source_label", source_label, sizeof(source_label))) {
-        if (strcmp(source_label, "SIGNALS") == 0 || strcmp(source_label, "WATCHLIST") == 0) return 1;
-    }
-    return 0;
-}
 
 static void _remember_back_target(ave_screen_id_t current_screen)
 {
@@ -215,16 +201,8 @@ void ave_sm_handle_json(const char *json_str)
             while (*lp == ' ' || *lp == ':') lp++;
             if (*lp == 't') is_live = 1;
         }
-        if (_data_is_browse_payload(data)) {
-            if (!is_live || s_current == AVE_SCREEN_BROWSE) {
-                _prepare_primary_screen_transition(AVE_SCREEN_BROWSE);
-                if (screen_browse_show) {
-                    screen_browse_show(data);
-                    s_current = AVE_SCREEN_BROWSE;
-                }
-            }
-        } else if (!is_live ||
-                   (s_current == AVE_SCREEN_FEED && !screen_feed_should_ignore_live_push())) {
+        if (!is_live ||
+            (s_current == AVE_SCREEN_FEED && !screen_feed_should_ignore_live_push())) {
             _prepare_primary_screen_transition(AVE_SCREEN_FEED);
             screen_feed_show(data);
             s_current = AVE_SCREEN_FEED;

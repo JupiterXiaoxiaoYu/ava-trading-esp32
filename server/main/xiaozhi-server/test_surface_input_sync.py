@@ -190,6 +190,37 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
 void screen_disambiguation_key(int key) {{ (void)key; }}
 void screen_disambiguation_cancel_timers(void) {{ }}
@@ -474,6 +505,37 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
 void screen_disambiguation_key(int key) {{ (void)key; }}
 void screen_disambiguation_cancel_timers(void) {{ }}
@@ -585,6 +647,37 @@ int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 
 {other_context_stub}
 int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
 {{
     (void)out;
     (void)out_n;
@@ -1185,6 +1278,37 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 #include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
 
 int main(void)
@@ -1302,6 +1426,37 @@ void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
 void screen_disambiguation_key(int key) {{ (void)key; }}
 void screen_disambiguation_cancel_timers(void) {{ }}
 int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
 {{
     (void)out;
     (void)out_n;
@@ -1448,6 +1603,37 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }}
 
+void screen_feed_show(const char *json_data) {{ (void)json_data; }}
+void screen_feed_reveal(void) {{ }}
+void screen_feed_key(int key) {{ (void)key; }}
+bool screen_feed_should_ignore_live_push(void) {{ return false; }}
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
 #include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
 
 int main(void)
@@ -1572,6 +1758,8 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
     (void)out_n;
     return 0;
 }}
+
+void screen_feed_reveal(void) {{ }}
 
 #include "{repo_root / 'shared/ave_screens/screen_spotlight.c'}"
 
@@ -1711,7 +1899,11 @@ int main(void)
             harness_source,
             include_dir,
             manager_src,
-            extra_sources=(repo_root / "shared/ave_screens/ave_price_fmt.c",),
+            extra_sources=(
+                repo_root / "shared/ave_screens/ave_price_fmt.c",
+                repo_root / "shared/ave_screens/screen_explorer.c",
+                repo_root / "shared/ave_screens/screen_browse.c",
+            ),
             extra_ldflags=(
                 "-DLV_OPA_TRANSP=0",
                 "-DLV_TEXT_ALIGN_LEFT=0",
@@ -1819,7 +2011,7 @@ int main(void)
     ave_sm_handle_json("{feed_payload}");
     clear_last_json();
     ave_sm_key_press(AVE_KEY_B);
-    for (int i = 0; i < 3; i++) {{
+    for (int i = 0; i < 4; i++) {{
         ave_sm_key_press(AVE_KEY_DOWN);
     }}
     ave_sm_key_press(AVE_KEY_A);
@@ -1838,7 +2030,7 @@ int main(void)
     ave_sm_handle_json("{feed_payload}");
     clear_last_json();
     ave_sm_key_press(AVE_KEY_B);
-    for (int i = 0; i < 4; i++) {{
+    for (int i = 0; i < 5; i++) {{
         ave_sm_key_press(AVE_KEY_DOWN);
     }}
     ave_sm_key_press(AVE_KEY_A);
@@ -1876,7 +2068,7 @@ int main(void)
 
         signals_payload = (
             '{'
-            '"screen":"feed",'
+            '"screen":"browse",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
             '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal",'
             '"signal_label":"BUY","signal_value":"BUY 3.5 SOL","signal_first":"First 5m","signal_last":"Last 2m",'
@@ -1999,7 +2191,7 @@ int main(void)
 
         signals_payload = (
             '{'
-            '"screen":"feed",'
+            '"screen":"browse",'
             '"data":{"mode":"signals","source_label":"SIGNALS","tokens":['
             '{"token_id":"sig-1","chain":"solana","symbol":"赢麻了","signal_type":"public_signal","signal_label":"BUY","signal_value":"BUY 3.5 SOL","signal_first":"First 5m","signal_last":"Last 2m","signal_count":"Count 2","signal_vol":"Vol $125.0K"},'
             '{"token_id":"sig-2","chain":"eth","symbol":"LINK","signal_type":"public_signal","signal_label":"BUY","signal_value":"BUY 1.2 ETH","signal_first":"First 9m","signal_last":"Last 1m","signal_count":"Count 4","signal_vol":"Vol $532.0K"}'
@@ -2098,7 +2290,7 @@ int main(void)
 
         watchlist_payload = (
             '{'
-            '"screen":"feed",'
+            '"screen":"browse",'
             '"data":{"mode":"watchlist","source_label":"WATCHLIST","tokens":['
             '{"token_id":"wl-001","chain":"solana","symbol":"KEEP","price":"$2.11","change_24h":"+0.9%"}'
             ']}}'
