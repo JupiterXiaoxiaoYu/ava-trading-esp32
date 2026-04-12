@@ -6,6 +6,9 @@
 
 - `close_connection_no_voice_time: 315360000`
 - `enable_websocket_ping: true`
+- `websocket_heartbeat_interval: 30`
+- `websocket_transport_ping_interval: 30`
+- `websocket_transport_ping_timeout: 10`
 
 其中 `315360000` 秒约等于 10 年，用来表达“工程上等同于永不超时”。之所以不直接使用 `0`，是因为现有超时逻辑把数值视为秒数参与比较，`0` 会导致立即超时，而不是禁用超时。
 
@@ -22,6 +25,9 @@
 ```yaml
 close_connection_no_voice_time: 315360000
 enable_websocket_ping: true
+websocket_heartbeat_interval: 30
+websocket_transport_ping_interval: 30
+websocket_transport_ping_timeout: 10
 ```
 
 如果你的部署启用了 `manager-api`，还需要让数据库里的 `sys_params` 同步到新默认值。为此本仓新增了一个 Liquibase 变更集 `202604101030.sql`，用于把已有的：

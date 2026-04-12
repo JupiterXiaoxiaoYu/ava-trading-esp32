@@ -119,7 +119,18 @@ class KeyActionHandler(TextMessageHandler):
                     if state.get("feed_mode") == "search":
                         state["search_cursor"] = cursor
                         _set_search_session_cursor(state, cursor)
-                    conn.ave_state = state
+                origin = str(msg_json.get("origin") or "").strip().lower()
+                if origin not in {"feed", "signals", "watchlist", "portfolio"}:
+                    if state.get("screen") == "portfolio":
+                        origin = "portfolio"
+                    elif state.get("feed_mode") == "signals" or state.get("feed_source") == "signals":
+                        origin = "signals"
+                    elif state.get("feed_mode") == "watchlist" or state.get("feed_source") == "watchlist":
+                        origin = "watchlist"
+                    else:
+                        origin = "feed"
+                state["nav_from"] = origin
+                conn.ave_state = state
                 ave_token_detail(
                     conn,
                     addr=token_addr,
@@ -444,6 +455,20 @@ class KeyActionHandler(TextMessageHandler):
                     ave_portfolio(conn)
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"key_action back→portfolio error: {e}")
+            elif nav_from == "signals":
+                logger.bind(tag=TAG).info("key_action back → signals (nav_from)")
+                try:
+                    ave_list_signals(conn)
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→signals(nav_from) error: {e}")
+            elif nav_from == "watchlist":
+                logger.bind(tag=TAG).info("key_action back → watchlist (nav_from)")
+                try:
+                    ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0))
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→watchlist(nav_from) error: {e}")
             elif state.get("feed_mode") == "search":
                 logger.bind(tag=TAG).info("key_action back → restore search feed")
                 try:

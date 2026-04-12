@@ -1252,6 +1252,7 @@ static void _enter_selected_detail(void)
         {"token_id", ""},
         {"chain", ""},
         {"cursor", cursor_buf},
+        {"origin", "feed"},
     };
 
     if (s_token_count < 1) return;
@@ -1261,7 +1262,7 @@ static void _enter_selected_detail(void)
     snprintf(cursor_buf, sizeof(cursor_buf), "%d", s_token_idx);
     fields[0].value = t->token_id;
     fields[1].value = t->chain;
-    if (!ave_sm_build_key_action_json("watch", fields, 3, cmd, sizeof(cmd))) return;
+    if (!ave_sm_build_key_action_json("watch", fields, 4, cmd, sizeof(cmd))) return;
     ave_send_json(cmd);
     printf("[FEED] WATCH -> %s (%s)\n", t->symbol, t->chain);
 }

@@ -112,7 +112,7 @@ static void _split_copy_two_lines(const char *src, char *line1, size_t line1_n, 
 
     len = strlen(src);
     if (len < 34) {
-        snprintf(line1, line1_n, "%s", src);
+        snprintf(line1, line1_n, "%.*s", (int)(line1_n - 1), src);
         return;
     }
 

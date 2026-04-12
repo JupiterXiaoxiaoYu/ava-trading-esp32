@@ -857,6 +857,16 @@ async def try_route_ave_command(
             return True
         if effective_screen == "portfolio":
             state["nav_from"] = "portfolio"
+        elif (
+            effective_screen == "browse"
+            and (str(state.get("feed_mode") or "") == "signals" or str(state.get("feed_source") or "") == "signals")
+        ):
+            state["nav_from"] = "signals"
+        elif (
+            effective_screen == "browse"
+            and (str(state.get("feed_mode") or "") == "watchlist" or str(state.get("feed_source") or "") == "watchlist")
+        ):
+            state["nav_from"] = "watchlist"
         elif effective_screen in {"feed", "browse", "disambiguation"}:
             state["nav_from"] = "feed"
         feed_cursor, feed_total = _resolve_selection_feed_nav(state, selection_payload, token)
@@ -951,6 +961,13 @@ async def try_route_ave_command(
         nav_from = str(state.pop("nav_from", "") or "")
         if nav_from == "portfolio":
             await _handle_tool_response(conn, ave_tools.ave_portfolio(conn))
+        elif nav_from == "signals":
+            await _handle_tool_response(conn, ave_tools.ave_list_signals(conn))
+        elif nav_from == "watchlist":
+            await _handle_tool_response(
+                conn,
+                ave_tools.ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0)),
+            )
         elif str(state.get("feed_mode") or "") == "search":
             payload = ave_tools._restore_search_session_payload(state)
             if payload:

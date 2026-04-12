@@ -4858,12 +4858,21 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
             "source_tag": "",
             "origin_hint": origin_hint,
         }
-        if previous_screen == "portfolio":
-            state["nav_from"] = "portfolio"
-        elif previous_screen in {"feed", "browse", "disambiguation"}:
-            state["nav_from"] = "feed"
-        elif "nav_from" not in state:
-            state["nav_from"] = "feed"
+        explicit_nav_from = str(state.get("nav_from") or "").strip().lower()
+        if explicit_nav_from not in {"feed", "portfolio", "signals", "watchlist"}:
+            if previous_screen == "portfolio":
+                state["nav_from"] = "portfolio"
+            elif previous_screen == "browse":
+                if state.get("feed_mode") == "signals" or state.get("feed_source") == "signals":
+                    state["nav_from"] = "signals"
+                elif state.get("feed_mode") == "watchlist" or state.get("feed_source") == "watchlist":
+                    state["nav_from"] = "watchlist"
+                else:
+                    state["nav_from"] = "feed"
+            elif previous_screen in {"feed", "disambiguation"}:
+                state["nav_from"] = "feed"
+            else:
+                state["nav_from"] = "feed"
         loading_payload = _build_spotlight_loading_payload(
             addr,
             chain,

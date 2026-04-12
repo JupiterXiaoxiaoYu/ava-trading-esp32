@@ -83,7 +83,9 @@ bool Protocol::SendRawJson(const std::string& message) {
 }
 
 bool Protocol::IsTimeout() const {
-    const int kTimeoutSeconds = 120;
+    // The server now sends periodic heartbeats, so keep the quiet-channel timeout generous
+    // to avoid false reconnects while the user is just browsing on-screen content.
+    const int kTimeoutSeconds = 1800;
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_incoming_time_);
     bool timeout = duration.count() > kTimeoutSeconds;

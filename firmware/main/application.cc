@@ -597,6 +597,8 @@ void Application::InitializeProtocol() {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
             }
+        } else if (strcmp(type->valuestring, "ping") == 0 || strcmp(type->valuestring, "pong") == 0) {
+            // WebSocket keepalive frames are handled by the protocol layer; no UI action needed.
         } else if (strcmp(type->valuestring, "alert") == 0) {
             auto status = cJSON_GetObjectItem(root, "status");
             auto message = cJSON_GetObjectItem(root, "message");
@@ -794,13 +796,20 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
-    if (!protocol_) {
-        return;
-    }
-
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
+
+    if (state == kDeviceStateWifiConfiguring) {
+        // Leave the provisioning page and handle the wake flow like the normal idle state.
+        SetDeviceState(kDeviceStateIdle);
+        state = GetDeviceState();
+    }
+
+    if (!protocol_) {
+        ESP_LOGW(TAG, "Ignore wake word because protocol is not initialized");
+        return;
+    }
 
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
@@ -935,7 +944,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(false);
+            audio_service_.EnableWakeWordDetection(true);
             break;
         default:
             // Do nothing

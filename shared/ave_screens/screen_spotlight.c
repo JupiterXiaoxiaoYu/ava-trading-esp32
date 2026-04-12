@@ -28,7 +28,12 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+#if !defined(LV_SIMULATOR)
+LV_FONT_DECLARE(font_awesome_16_4);
+#endif
+
 #define MAX_CHART_PTS 100
+#define AVE_WATCH_STAR_ICON "\xef\x80\x85"
 
 static lv_obj_t *s_screen      = NULL;
 static lv_obj_t *s_lbl_sym     = NULL;
@@ -595,10 +600,16 @@ static void _build(void) {
     lv_obj_set_width(s_lbl_watch_star, FOOTER_ROW4_STAR_W);
     lv_label_set_long_mode(s_lbl_watch_star, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(s_lbl_watch_star, LV_TEXT_ALIGN_RIGHT, 0);
-    /* Montserrat doesn't contain the watchlist star glyphs, so render them with the CJK font. */
+#if defined(LV_SIMULATOR)
+    /* Simulator uses the CJK font so Unicode stars still render in screenshots. */
     lv_obj_set_style_text_font(s_lbl_watch_star, ave_font_cjk_14(), 0);
-    lv_obj_set_style_text_color(s_lbl_watch_star, COLOR_GRAY, 0);
     lv_label_set_text(s_lbl_watch_star, "☆");
+#else
+    /* Scratch Arcade firmware ships the basic Puhui font, which lacks U+2605/U+2606. */
+    lv_obj_set_style_text_font(s_lbl_watch_star, &font_awesome_16_4, 0);
+    lv_label_set_text(s_lbl_watch_star, AVE_WATCH_STAR_ICON);
+#endif
+    lv_obj_set_style_text_color(s_lbl_watch_star, COLOR_GRAY, 0);
 
     /* ── Divider ─────────────────────────────────────────────────────── */
     lv_obj_t *div = lv_obj_create(s_screen);
@@ -877,7 +888,12 @@ void screen_spotlight_show(const char *json_data)
         "CA:%s",
         ca_compact
     );
+#if defined(LV_SIMULATOR)
     lv_label_set_text(s_lbl_watch_star, is_watchlisted ? "★" : "☆");
+#else
+    lv_label_set_text(s_lbl_watch_star, AVE_WATCH_STAR_ICON);
+    lv_obj_set_style_text_color(s_lbl_watch_star, is_watchlisted ? COLOR_ORANGE : COLOR_GRAY, 0);
+#endif
 
     /* Feed position indicator (present only when navigating feed list) */
     s_feed_cursor = cursor;
