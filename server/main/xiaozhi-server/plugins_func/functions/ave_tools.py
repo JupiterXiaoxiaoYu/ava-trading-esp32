@@ -256,6 +256,17 @@ def _fmt_signed_volume(vol) -> str:
     return f"{sign}{_fmt_volume(abs(numeric))}"
 
 
+def _fmt_portfolio_pnl(vol) -> str:
+    numeric = _parse_numeric_value(vol)
+    if numeric is None:
+        return "N/A"
+    sign = "+" if numeric >= 0 else "-"
+    abs_value = abs(float(numeric))
+    if abs_value >= 1_000:
+        return f"{sign}{_fmt_volume(abs_value)}"
+    return f"{sign}${abs_value:.2f}"
+
+
 def _parse_numeric_value(value):
     if value is None:
         return None
@@ -2574,7 +2585,7 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
             "price": _fmt_price(price),
             "avg_cost_usd": _fmt_price(avg_cost) if avg_cost is not None and avg_cost > 0 else "N/A",
             "cost_basis_usd": _fmt_volume(cost_basis) if cost_basis is not None and cost_basis > 0 else "N/A",
-            "pnl": _fmt_signed_volume(pnl_value) if pnl_value is not None else "N/A",
+            "pnl": _fmt_portfolio_pnl(pnl_value) if pnl_value is not None else "N/A",
             "pnl_pct": _fmt_change(pnl_pct_value) if pnl_pct_value is not None else "N/A",
             "pnl_positive": pnl_positive,
         })
@@ -2592,7 +2603,7 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
         "mode_label": "PAPER",
         "chain_label": _surface_chain_label(normalized_chain_filter),
         "total_usd": _fmt_volume(total_usd),
-        "pnl": _fmt_signed_volume(total_pnl_usd) if has_pnl else "N/A",
+        "pnl": _fmt_portfolio_pnl(total_pnl_usd) if has_pnl else "N/A",
         "pnl_pct": _fmt_change((total_pnl_usd / total_cost_basis_usd) * 100.0) if has_pnl else "N/A",
         "pnl_reason": "" if has_pnl else "Paper account",
     }

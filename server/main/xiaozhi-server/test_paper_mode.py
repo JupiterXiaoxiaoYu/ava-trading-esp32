@@ -346,8 +346,8 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         target = next(row for row in payload["holdings"] if row.get("addr") == "token-1")
         self.assertEqual(target["symbol"], "BONK")
         self.assertEqual(target["avg_cost_usd"], "$2.0000")
-        self.assertEqual(target["pnl"], "+$50")
-        self.assertEqual(payload["pnl"], "+$50")
+        self.assertEqual(target["pnl"], "+$50.00")
+        self.assertEqual(payload["pnl"], "+$50.00")
         self.assertEqual(payload["pnl_pct"], "+50.00%")
         self.assertEqual(payload["pnl_reason"], "")
 
@@ -431,8 +431,8 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         row = next(item for item in payload["holdings"] if item.get("addr") == "0xoldtoken")
         self.assertEqual(row["symbol"], "LDO")
         self.assertEqual(row["avg_cost_usd"], "$0.500000")
-        self.assertEqual(row["pnl"], "+$50")
-        self.assertEqual(payload["pnl"], "+$50")
+        self.assertEqual(row["pnl"], "+$50.00")
+        self.assertEqual(payload["pnl"], "+$50.00")
 
         account = get_paper_account(self.paper_store, "default")
         repaired = account["positions"]["0xoldtoken-eth"]
@@ -555,8 +555,53 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.result, "paper_portfolio:2tokens")
         _, payload = sent[-1]
         target = next(row for row in payload["holdings"] if row.get("addr") == "token-1")
-        self.assertEqual(target["pnl"], "+$100")
-        self.assertEqual(payload["pnl"], "+$150")
+        self.assertEqual(target["pnl"], "+$100.00")
+        self.assertEqual(payload["pnl"], "+$150.00")
+
+    async def test_paper_portfolio_pnl_keeps_two_decimals_for_small_values(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        sent = []
+        price_call = {"count": 0}
+
+        async def _fake_send_display(conn_obj, screen, data):
+            sent.append((screen, data))
+
+        def _fake_data_post(path, payload):
+            self.assertEqual(path, "/tokens/price")
+            price_call["count"] += 1
+            data = {}
+            for token_id in payload.get("token_ids", []):
+                if token_id == f"{ave_tools.NATIVE_SOL}-solana":
+                    data[token_id] = {"current_price_usd": 100}
+                elif token_id == "token-1-solana":
+                    data[token_id] = {"current_price_usd": 2.0 if price_call["count"] == 1 else 2.0042}
+                else:
+                    data[token_id] = {"current_price_usd": 1}
+            return {"data": data}
+
+        with patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post):
+            ave_tools._execute_paper_trade(
+                conn,
+                "market_buy",
+                {
+                    "chain": "solana",
+                    "outTokenAddress": "token-1",
+                    "paper_native_amount": "1",
+                    "paper_symbol": "BONK",
+                },
+            )
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=_fake_send_display), patch(
+            "plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post
+        ):
+            ave_tools.ave_portfolio(conn, chain_filter="solana")
+            await asyncio.sleep(0)
+
+        _, payload = sent[-1]
+        target = next(row for row in payload["holdings"] if row.get("addr") == "token-1")
+        self.assertEqual(target["pnl"], "+$0.21")
+        self.assertEqual(payload["pnl"], "+$0.21")
 
     async def test_paper_limit_order_create_list_cancel_restores_balance(self):
         conn = self._conn()
