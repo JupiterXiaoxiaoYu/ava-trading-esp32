@@ -656,6 +656,102 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             symbol="ROCKET",
         )
 
+    async def test_voice_market_buy_amount_uses_token_chain_native_context(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_buy_token") as mock_buy:
+            routed = await try_route_ave_command(
+                conn,
+                "买这个 0.1",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+                    }
+                },
+            )
+
+        self.assertTrue(routed)
+        mock_buy.assert_called_once_with(
+            conn,
+            addr="bsc-1",
+            chain="bsc",
+            in_amount_sol=0.1,
+            symbol="CAKE",
+        )
+
+    async def test_voice_limit_buy_missing_fields_are_filled_by_follow_up_dialogue(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "base-1", "chain": "base", "symbol": "AERO"},
+            }
+        )
+
+        with patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_limit_order") as mock_limit:
+            routed = await try_route_ave_command(
+                conn,
+                "限价买这个",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "base-1", "chain": "base", "symbol": "AERO"},
+                    }
+                },
+            )
+            self.assertTrue(routed)
+            self.assertEqual(conn.ave_state["voice_trade_draft"]["kind"], "limit_buy")
+            self.assertEqual(conn.ave_state["voice_trade_draft"]["chain"], "base")
+            send_stt.assert_awaited_with(conn, "目标价是多少美元？比如说 0.00012。")
+            mock_limit.assert_not_called()
+
+            await try_route_ave_command(conn, "0.00012")
+            send_stt.assert_awaited_with(conn, "你想用多少 ETH 买入？比如说 0.1 ETH。")
+            mock_limit.assert_not_called()
+
+            await try_route_ave_command(conn, "0.1")
+
+        self.assertNotIn("voice_trade_draft", conn.ave_state)
+        mock_limit.assert_called_once_with(
+            conn,
+            addr="base-1",
+            chain="base",
+            in_amount_sol=0.1,
+            limit_price=0.00012,
+            symbol="AERO",
+        )
+
+    async def test_voice_market_buy_rejects_wrong_native_unit_for_chain(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+            }
+        )
+
+        with patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_buy_token") as mock_buy:
+            routed = await try_route_ave_command(
+                conn,
+                "买这个 0.1 SOL",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+                    }
+                },
+            )
+
+        self.assertTrue(routed)
+        send_stt.assert_awaited_once_with(conn, "这条链下单金额请用 BNB 表示。")
+        mock_buy.assert_not_called()
+
     async def test_non_router_utterance_falls_through_to_chat(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn({"screen": "feed"})

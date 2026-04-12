@@ -68,6 +68,39 @@ _SELECTION_GUARDED_SCREENS = {"feed", "browse", "portfolio", "spotlight", "confi
 
 _WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
 _BUY_SYMBOL_PATTERN = re.compile(r"^买([A-Za-z][A-Za-z0-9._-]{1,15})$")
+_BUY_SYMBOL_FUZZY_PATTERN = re.compile(
+    r"(?:买|买入|购买|buy|purchase)\s*([A-Za-z][A-Za-z0-9._-]{1,15})",
+    re.IGNORECASE,
+)
+_LIMIT_SYMBOL_FUZZY_PATTERN = re.compile(
+    r"(?:限价买|限价|挂单买|挂买单|limit\s*buy)\s*([A-Za-z][A-Za-z0-9._-]{1,15})",
+    re.IGNORECASE,
+)
+_NUMBER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)")
+_PRICE_PATTERNS = (
+    re.compile(r"(?:价格|价位|price)\s*(?:到|是|为|=)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"(?:跌到|到价|到|低于|小于|below)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+)
+_AMOUNT_PATTERNS = (
+    re.compile(r"(?:用|拿|花|投入|买入金额|金额)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"(\d+(?:\.\d+)?)\s*(?:买|买入|购买|buy|purchase)", re.IGNORECASE),
+    re.compile(r"(?:买|买入|购买|buy|purchase)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+)
+_LIMIT_INTENT_MARKERS = ("限价", "挂单", "limit")
+_BUY_INTENT_MARKERS = ("买", "买入", "购买", "buy", "purchase")
+_PRICE_MARKERS = ("价格", "价位", "price", "跌到", "到价", "低于", "小于", "below")
+_CHAIN_NATIVE_SYMBOLS = {
+    "solana": "SOL",
+    "eth": "ETH",
+    "base": "ETH",
+    "bsc": "BNB",
+}
+_CHAIN_NATIVE_ALIASES = {
+    "solana": ("sol",),
+    "eth": ("eth",),
+    "base": ("eth",),
+    "bsc": ("bnb",),
+}
 
 
 def _extract_utterance_text(raw_text: str) -> str:
@@ -315,6 +348,332 @@ def _resolve_symbol_entry(state: Dict[str, Any], symbol: str) -> Optional[Dict[s
     return token
 
 
+def _chain_native_symbol(chain: str) -> str:
+    return _CHAIN_NATIVE_SYMBOLS.get(str(chain or "").strip().lower(), "NATIVE")
+
+
+def _parse_numeric_text(raw_value: str) -> Optional[float]:
+    try:
+        return float(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_symbol_hint(utterance: str, state: Dict[str, Any]) -> str:
+    for pattern in (_LIMIT_SYMBOL_FUZZY_PATTERN, _BUY_SYMBOL_FUZZY_PATTERN):
+        match = pattern.search(utterance or "")
+        if match:
+            return str(match.group(1) or "").strip().upper()
+
+    current_token = state.get("current_token")
+    current_symbol = ""
+    if isinstance(current_token, dict):
+        current_symbol = str(current_token.get("symbol") or "").strip().upper()
+
+    candidate_symbols = []
+    if current_symbol:
+        candidate_symbols.append(current_symbol)
+    candidate_symbols.extend(_collect_feed_symbols(state))
+
+    seen = set()
+    for symbol in candidate_symbols:
+        normalized_symbol = str(symbol or "").strip().upper()
+        if not normalized_symbol or normalized_symbol in seen:
+            continue
+        seen.add(normalized_symbol)
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(normalized_symbol)}(?![A-Za-z0-9])", utterance or "", re.IGNORECASE):
+            return normalized_symbol
+
+    return ""
+
+
+def _resolve_voice_trade_token(
+    state: Dict[str, Any],
+    selection_payload: Optional[Dict[str, Any]],
+    effective_screen: str,
+    symbol_hint: str = "",
+) -> Optional[Dict[str, str]]:
+    token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+    if token:
+        if symbol_hint and not token.get("symbol"):
+            token["symbol"] = symbol_hint
+        return token
+
+    if symbol_hint:
+        symbol_token = _resolve_symbol_entry(state, symbol_hint)
+        if symbol_token:
+            symbol_token["symbol"] = symbol_hint
+            return symbol_token
+
+    if effective_screen in {"spotlight", "confirm", "limit_confirm"}:
+        current_token = _normalize_token(state.get("current_token"))
+        if current_token:
+            if symbol_hint and not current_token.get("symbol"):
+                current_token["symbol"] = symbol_hint
+            return current_token
+
+    return None
+
+
+def _extract_amount_value(utterance: str, chain: str, *, follow_up_only: bool = False) -> tuple[Optional[float], Optional[str]]:
+    lowered = str(utterance or "").lower()
+    aliases = _CHAIN_NATIVE_ALIASES.get(str(chain or "").strip().lower(), ())
+    alias_match = re.search(r"(\d+(?:\.\d+)?)\s*([A-Za-z]{2,4})", lowered)
+    if alias_match:
+        amount = _parse_numeric_text(alias_match.group(1))
+        unit = alias_match.group(2)
+        if amount is not None:
+            if unit in aliases:
+                return amount, None
+            if unit in {"sol", "eth", "bnb"}:
+                return None, f"这条链下单金额请用 {_chain_native_symbol(chain)} 表示。"
+
+    for pattern in _AMOUNT_PATTERNS:
+        match = pattern.search(utterance or "")
+        if match:
+            amount = _parse_numeric_text(match.group(1))
+            if amount is not None:
+                return amount, None
+
+    if follow_up_only and not any(marker in lowered for marker in _PRICE_MARKERS):
+        numbers = _NUMBER_PATTERN.findall(utterance or "")
+        if len(numbers) == 1:
+            amount = _parse_numeric_text(numbers[0])
+            if amount is not None:
+                return amount, None
+
+    return None, None
+
+
+def _extract_limit_price_value(utterance: str, *, follow_up_only: bool = False) -> Optional[float]:
+    for pattern in _PRICE_PATTERNS:
+        match = pattern.search(utterance or "")
+        if match:
+            price = _parse_numeric_text(match.group(1))
+            if price is not None:
+                return price
+
+    if follow_up_only:
+        numbers = _NUMBER_PATTERN.findall(utterance or "")
+        if len(numbers) == 1:
+            return _parse_numeric_text(numbers[0])
+
+    return None
+
+
+def _voice_trade_missing_field(draft: Dict[str, Any]) -> str:
+    token_known = bool(str(draft.get("addr") or "").strip())
+    if not token_known:
+        return "token"
+    if draft.get("kind") == "limit_buy":
+        if draft.get("limit_price") is None:
+            return "limit_price"
+        if draft.get("in_amount_sol") is None:
+            return "amount"
+    return ""
+
+
+def _build_voice_trade_prompt(draft: Dict[str, Any]) -> str:
+    chain = str(draft.get("chain") or "solana")
+    native_symbol = _chain_native_symbol(chain)
+    missing_field = _voice_trade_missing_field(draft)
+    if missing_field == "token":
+        return "你想买哪个币？先说代币名，或者先进入详情页再说买这个。"
+    if missing_field == "limit_price":
+        return "目标价是多少美元？比如说 0.00012。"
+    if missing_field == "amount":
+        return f"你想用多少 {native_symbol} 买入？比如说 0.1 {native_symbol}。"
+    return ""
+
+
+def _build_voice_trade_draft(
+    *,
+    kind: str,
+    token: Optional[Dict[str, str]],
+    in_amount_sol: Optional[float] = None,
+    limit_price: Optional[float] = None,
+) -> Dict[str, Any]:
+    token = token or {}
+    return {
+        "kind": kind,
+        "addr": str(token.get("addr") or "").strip(),
+        "chain": str(token.get("chain") or "solana").strip() or "solana",
+        "symbol": str(token.get("symbol") or "").strip(),
+        "in_amount_sol": in_amount_sol,
+        "limit_price": limit_price,
+    }
+
+
+async def _continue_voice_trade_draft(
+    conn: "ConnectionHandler",
+    utterance: str,
+    normalized: str,
+    state: Dict[str, Any],
+    selection_payload: Optional[Dict[str, Any]],
+    effective_screen: str,
+    ave_tools: Any,
+) -> bool:
+    draft = state.get("voice_trade_draft")
+    if not isinstance(draft, dict) or not draft.get("kind"):
+        return False
+
+    if normalized in (
+        _FEED_COMMANDS
+        | _PORTFOLIO_COMMANDS
+        | _OPEN_WATCHLIST_COMMANDS
+        | _OPEN_ORDERS_COMMANDS
+        | _WATCH_CURRENT_COMMANDS
+    ):
+        state.pop("voice_trade_draft", None)
+        return False
+
+    if normalized in _CANCEL_COMMANDS or normalized in _BACK_COMMANDS:
+        state.pop("voice_trade_draft", None)
+        await _send_router_reply(conn, "已取消这次语音下单。")
+        return True
+
+    current_missing = _voice_trade_missing_field(draft)
+    symbol_hint = _extract_symbol_hint(utterance, state)
+    token = _resolve_voice_trade_token(state, selection_payload, effective_screen, symbol_hint)
+    if token:
+        draft["addr"] = token.get("addr", "")
+        draft["chain"] = token.get("chain", draft.get("chain", "solana"))
+        draft["symbol"] = token.get("symbol") or draft.get("symbol", "")
+
+    next_missing = _voice_trade_missing_field(draft)
+
+    if next_missing == "limit_price":
+        draft["limit_price"] = _extract_limit_price_value(utterance, follow_up_only=True)
+
+    should_parse_amount = (
+        next_missing == "amount"
+        or (draft.get("kind") == "market_buy" and current_missing in {"token", "amount"})
+    )
+    if should_parse_amount and draft.get("in_amount_sol") is None:
+        amount_value, amount_error = _extract_amount_value(
+            utterance,
+            draft.get("chain", "solana"),
+            follow_up_only=True,
+        )
+        if amount_error:
+            await _send_router_reply(conn, amount_error)
+            return True
+        if amount_value is not None:
+            draft["in_amount_sol"] = amount_value
+
+    missing_field = _voice_trade_missing_field(draft)
+    if missing_field:
+        state["voice_trade_draft"] = draft
+        await _send_router_reply(conn, _build_voice_trade_prompt(draft))
+        return True
+
+    state.pop("voice_trade_draft", None)
+    symbol = draft.get("symbol", "")
+    if draft.get("kind") == "limit_buy":
+        await _handle_tool_response(
+            conn,
+            ave_tools.ave_limit_order(
+                conn,
+                addr=draft["addr"],
+                chain=draft["chain"],
+                in_amount_sol=draft["in_amount_sol"],
+                limit_price=draft["limit_price"],
+                symbol=symbol,
+            ),
+        )
+        return True
+
+    buy_kwargs = {
+        "addr": draft["addr"],
+        "chain": draft["chain"],
+        "symbol": symbol,
+    }
+    if draft.get("in_amount_sol") is not None:
+        buy_kwargs["in_amount_sol"] = draft.get("in_amount_sol")
+    await _handle_tool_response(conn, ave_tools.ave_buy_token(conn, **buy_kwargs))
+    return True
+
+
+async def _try_route_voice_trade_intent(
+    conn: "ConnectionHandler",
+    utterance: str,
+    normalized: str,
+    state: Dict[str, Any],
+    selection_payload: Optional[Dict[str, Any]],
+    effective_screen: str,
+    ave_tools: Any,
+) -> bool:
+    lowered = str(utterance or "").lower()
+    has_limit_intent = any(marker in lowered for marker in _LIMIT_INTENT_MARKERS)
+    has_buy_intent = any(marker in lowered for marker in _BUY_INTENT_MARKERS)
+    if not has_buy_intent:
+        return False
+
+    symbol_hint = _extract_symbol_hint(utterance, state)
+    token = _resolve_voice_trade_token(state, selection_payload, effective_screen, symbol_hint)
+    chain = token.get("chain", "solana") if token else "solana"
+
+    if has_limit_intent:
+        limit_price = _extract_limit_price_value(utterance)
+        amount_value, amount_error = _extract_amount_value(utterance, chain)
+        if amount_error:
+            await _send_router_reply(conn, amount_error)
+            return True
+        draft = _build_voice_trade_draft(
+            kind="limit_buy",
+            token=token,
+            in_amount_sol=amount_value,
+            limit_price=limit_price,
+        )
+        missing_field = _voice_trade_missing_field(draft)
+        if missing_field:
+            state["voice_trade_draft"] = draft
+            await _send_router_reply(conn, _build_voice_trade_prompt(draft))
+            return True
+
+        await _handle_tool_response(
+            conn,
+            ave_tools.ave_limit_order(
+                conn,
+                addr=draft["addr"],
+                chain=draft["chain"],
+                in_amount_sol=draft["in_amount_sol"],
+                limit_price=draft["limit_price"],
+                symbol=draft.get("symbol", ""),
+            ),
+        )
+        return True
+
+    amount_value, amount_error = _extract_amount_value(utterance, chain)
+    if amount_error:
+        await _send_router_reply(conn, amount_error)
+        return True
+    if amount_value is None and not any(marker in lowered for marker in _PRICE_MARKERS):
+        numbers = _NUMBER_PATTERN.findall(utterance or "")
+        if len(numbers) == 1:
+            amount_value = _parse_numeric_text(numbers[0])
+
+    if not token:
+        draft = _build_voice_trade_draft(
+            kind="market_buy",
+            token=None,
+            in_amount_sol=amount_value,
+        )
+        state["voice_trade_draft"] = draft
+        await _send_router_reply(conn, _build_voice_trade_prompt(draft))
+        return True
+
+    buy_kwargs = {
+        "addr": token["addr"],
+        "chain": token["chain"],
+        "symbol": token.get("symbol", ""),
+    }
+    if amount_value is not None:
+        buy_kwargs["in_amount_sol"] = amount_value
+    await _handle_tool_response(conn, ave_tools.ave_buy_token(conn, **buy_kwargs))
+    return True
+
+
 def _collect_feed_symbols(state: Dict[str, Any]) -> list[str]:
     token_list = state.get("feed_token_list")
     if isinstance(token_list, list):
@@ -454,6 +813,18 @@ async def try_route_ave_command(
 
     state_screen = str(state.get("screen") or "")
     effective_screen = _resolve_effective_screen(state_screen, selection_payload)
+
+    if await _continue_voice_trade_draft(
+        conn,
+        utterance,
+        normalized,
+        state,
+        selection_payload,
+        effective_screen,
+        ave_tools,
+    ):
+        _refresh_turn_context()
+        return True
 
     if normalized in _FEED_COMMANDS:
         await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
@@ -610,6 +981,18 @@ async def try_route_ave_command(
                 )
             else:
                 await _handle_tool_response(conn, ave_tools.ave_get_trending(conn, topic=source))
+        _refresh_turn_context()
+        return True
+
+    if await _try_route_voice_trade_intent(
+        conn,
+        utterance,
+        normalized,
+        state,
+        selection_payload,
+        effective_screen,
+        ave_tools,
+    ):
         _refresh_turn_context()
         return True
 
