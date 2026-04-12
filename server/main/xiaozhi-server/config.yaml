@@ -253,7 +253,7 @@ prompt: |
 prompt_template: agent-base-prompt.txt
 
 # 系统错误时的回复
-system_error_response: "主人，小智现在有点忙，我们稍后再试吧。"
+system_error_response: "主人，Ava 现在有点忙，我们稍后再试吧。"
 
 # 结束语prompt
 end_prompt:
@@ -271,7 +271,7 @@ selected_module:
   # 将根据配置名称对应的type调用实际的LLM适配器
   LLM: AliLLM
   # 视觉语言大模型
-  VLLM: ChatGLMVLLM
+  VLLM: QwenVLVLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: EdgeTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
@@ -375,7 +375,7 @@ Memory:
       config:
         api_key: 你的嵌入模型API密钥
         model: text-embedding-v4
-        openai_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        openai_base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
         # embedding_dims: 1024  # 向量维度，非1536时需配置
 
     # ========== Database 配置 ==========
@@ -575,7 +575,7 @@ ASR:
     # 3.Qwen3-ASR-Flash基于通义千问多模态基座，支持多语言识别、歌唱识别、噪声拒识等功能
     type: qwen3_asr_flash
     api_key: 你的阿里云百炼API密钥
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-asr-flash
     output_dir: tmp/
     # ASR选项配置
@@ -594,6 +594,7 @@ ASR:
     sample_rate: 16000
     output_dir: tmp/
     language: zh
+    context: "常用词：Ava、艾娃、AVA、AVE、代币详情页、详情页、spotlight、feed、钱包、持仓、买入、卖出、pump.fun、4.meme。若识别到接近 Ava 的发音，优先输出 Ava。"  # 常用词/品牌词上下文，可提升专有词识别
     threshold: 0.2
     silence_duration_ms: 800
   XunfeiStreamASR:
@@ -656,7 +657,7 @@ LLM:
     # 定义LLM API类型
     type: openai
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b
     api_key: 你的阿里云百炼API密钥
     temperature: 0.7  # 温度值
@@ -666,7 +667,7 @@ LLM:
   AliAppLLM:
     # 定义LLM API类型
     type: AliBL
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     app_id: 你的app_id
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     api_key: 你的api_key
@@ -793,7 +794,7 @@ VLLM:
   QwenVLVLLM:
     type: openai
     model_name: qwen2.5-vl-3b-instruct
-    url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     # 可在这里找到你的api key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     api_key: 你的api_key
   XunfeiSparkLLM:
@@ -918,7 +919,7 @@ TTS:
     response_format: wav
     reference_id: null
     reference_audio: ["config/assets/wakeup_words.wav",]
-    reference_text: ["哈啰啊，我是小智啦，声音好听的台湾女孩一枚，超开心认识你耶，最近在忙啥，别忘了给我来点有趣的料哦，我超爱听八卦的啦",]
+    reference_text: ["哈啰啊，我是 Ava 啦，声音好听的台湾女孩一枚，超开心认识你耶，最近在忙啥，别忘了给我来点有趣的料哦，我超爱听八卦的啦",]
     normalize: true
     max_new_tokens: 1024
     chunk_length: 200

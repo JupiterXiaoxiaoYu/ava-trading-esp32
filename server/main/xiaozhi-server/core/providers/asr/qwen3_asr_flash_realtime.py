@@ -41,6 +41,7 @@ class ASRProvider(ASRProviderBase):
         self.sample_rate = int(config.get("sample_rate", 16000))
         self.audio_format = config.get("format", "pcm")
         self.language = config.get("language")
+        self.context = (config.get("context") or "").strip()
         self.threshold = float(config.get("threshold", 0.2))
         self.silence_duration_ms = int(config.get("silence_duration_ms", 800))
         self.ws_url = config.get(
@@ -64,6 +65,8 @@ class ASRProvider(ASRProviderBase):
         }
         if self.language:
             session["input_audio_transcription"]["language"] = self.language
+        if self.context:
+            session["input_audio_transcription"]["corpus"] = {"text": self.context}
 
         if manual_mode:
             session["turn_detection"] = None

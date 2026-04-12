@@ -178,18 +178,28 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     codec_ = codec;
     commands_.clear();
 
+#ifdef CONFIG_CUSTOM_WAKE_WORD
+    const float configured_threshold = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
+#else
+    const float configured_threshold = threshold_;
+#endif
+
     if (models_list == nullptr) {
         language_ = "cn";
         models_ = esp_srmodel_init("model");
-#ifdef CONFIG_CUSTOM_WAKE_WORD
-        threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        AddCommand(CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake");
-        ExpandWakeCommandAliases();
-#endif
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
     }
+
+#ifdef CONFIG_CUSTOM_WAKE_WORD
+    // Keep the board-level wake word working even if the generated assets were built without the latest index.json.
+    threshold_ = (threshold_ > configured_threshold) ? configured_threshold : threshold_;
+    AddCommand(CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake");
+    ExpandWakeCommandAliases();
+#endif
+
+    ESP_LOGI(TAG, "Custom wake config: language=%s, threshold=%.2f, commands=%u", language_.c_str(), threshold_, (unsigned)commands_.size());
 
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");

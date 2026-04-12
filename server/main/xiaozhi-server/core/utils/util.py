@@ -606,4 +606,4 @@ def get_system_error_response(config: dict) -> str:
     Returns:
         str: 系统错误时的回复
     """
-    return config.get("system_error_response", "主人，小智现在有点忙，我们稍后再试吧。")
+    return config.get("system_error_response", "主人，Ava 现在有点忙，我们稍后再试吧。")

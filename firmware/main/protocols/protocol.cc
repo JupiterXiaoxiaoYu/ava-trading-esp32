@@ -34,6 +34,10 @@ void Protocol::OnDisconnected(std::function<void()> callback) {
 
 void Protocol::SetError(const std::string& message) {
     error_occurred_ = true;
+    if (suppress_network_error_) {
+        ESP_LOGW(TAG, "Suppressed network error: %s", message.c_str());
+        return;
+    }
     if (on_network_error_ != nullptr) {
         on_network_error_(message);
     }

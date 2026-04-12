@@ -52,7 +52,7 @@ extern const lv_image_dsc_t emoji_1f644_32; // confused
 extern const lv_img_dsc_t ava_wifi_image;
 
 Twemoji32::Twemoji32() {
-    AddEmoji("neutral", new LvglSourceImage(&emoji_1f636_32));
+    AddEmoji("neutral", new LvglSourceImage(&ava_wifi_image));
     AddEmoji("happy", new LvglSourceImage(&emoji_1f642_32));
     AddEmoji("laughing", new LvglSourceImage(&emoji_1f606_32));
     AddEmoji("funny", new LvglSourceImage(&emoji_1f602_32));
@@ -101,7 +101,7 @@ extern const lv_image_dsc_t emoji_1f61c_64; // silly
 extern const lv_image_dsc_t emoji_1f644_64; // confused
 
 Twemoji64::Twemoji64() {
-    AddEmoji("neutral", new LvglSourceImage(&emoji_1f636_64));
+    AddEmoji("neutral", new LvglSourceImage(&ava_wifi_image));
     AddEmoji("happy", new LvglSourceImage(&emoji_1f642_64));
     AddEmoji("laughing", new LvglSourceImage(&emoji_1f606_64));
     AddEmoji("funny", new LvglSourceImage(&emoji_1f602_64));
