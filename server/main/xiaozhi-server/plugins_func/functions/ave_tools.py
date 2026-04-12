@@ -1207,10 +1207,24 @@ def _reset_to_standard_feed_state(state: dict) -> None:
     _clear_search_state(state)
 
 
+def _remember_home_feed_state(state: dict, *, source: str = "trending", platform: str = "") -> None:
+    normalized_source = str(source or "trending").strip().lower() or "trending"
+    if normalized_source in {"signals", "watchlist", "orders"}:
+        normalized_source = "trending"
+    state["home_feed_source"] = normalized_source
+    state["home_feed_platform"] = str(platform or "").strip()
+
+
 def _refresh_home_feed(conn: "ConnectionHandler") -> ActionResponse:
     state = _ensure_ave_state(conn)
-    remembered_source = str(state.get("feed_source", "trending") or "trending").strip().lower() or "trending"
-    remembered_platform = str(state.get("feed_platform", "") or "").strip()
+    remembered_source = str(
+        state.get("home_feed_source") or state.get("feed_source", "trending") or "trending"
+    ).strip().lower() or "trending"
+    remembered_platform = str(
+        state.get("home_feed_platform") or state.get("feed_platform", "") or ""
+    ).strip()
+    if remembered_source in {"signals", "watchlist", "orders"}:
+        remembered_source = "trending"
     _invalidate_live_feed_session(conn)
     _reset_to_standard_feed_state(state)
     if remembered_platform:
@@ -1746,6 +1760,9 @@ def _set_pending_trade(
     order_ids=None,
 ) -> dict:
     state = _ensure_ave_state(conn)
+    current_screen = str(state.get("screen") or "").strip().lower()
+    current_nav_from = str(state.get("nav_from") or "").strip().lower()
+    current_token = state.get("current_token") if isinstance(state.get("current_token"), dict) else {}
     pending = {
         "trade_id": trade_id,
         "trade_type": trade_type,
@@ -1756,7 +1773,15 @@ def _set_pending_trade(
         "created_at": int(time.time()),
         "chain": _normalize_chain_name(chain),
         "asset_token_address": str(asset_token_address or "").strip(),
+        "return_screen": current_screen,
+        "return_nav_from": current_nav_from,
     }
+    if current_token.get("addr") and current_token.get("chain"):
+        pending["return_token"] = {
+            "addr": str(current_token.get("addr") or "").strip(),
+            "chain": _normalize_chain_name(current_token.get("chain")),
+            "symbol": str(current_token.get("symbol") or symbol or "TOKEN").strip() or "TOKEN",
+        }
     if order_ids:
         pending["order_ids"] = [str(item) for item in order_ids if item not in (None, "")]
     state["pending_trade"] = pending
@@ -1765,6 +1790,32 @@ def _set_pending_trade(
     state["pending_symbol"] = pending["symbol"]
     state["screen"] = screen or "confirm"
     return pending
+
+
+def _restore_cancel_target(conn: "ConnectionHandler", pending: dict) -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    return_screen = str(pending.get("return_screen") or "").strip().lower()
+    return_nav_from = str(pending.get("return_nav_from") or "").strip().lower()
+    return_token = pending.get("return_token") if isinstance(pending.get("return_token"), dict) else {}
+
+    if return_screen == "portfolio" or return_nav_from == "portfolio":
+        return ave_portfolio(conn)
+
+    if return_screen == "spotlight":
+        addr = str(return_token.get("addr") or pending.get("asset_token_address") or "").strip()
+        chain = _normalize_chain_name(return_token.get("chain") or pending.get("chain"), "solana")
+        symbol = str(return_token.get("symbol") or pending.get("symbol") or "TOKEN").strip() or "TOKEN"
+        if addr and chain:
+            if return_nav_from in {"feed", "signals", "watchlist", "portfolio"}:
+                state["nav_from"] = return_nav_from
+            return ave_token_detail(conn, addr=addr, chain=chain, symbol=symbol)
+
+    if return_nav_from == "signals":
+        return ave_list_signals(conn)
+    if return_nav_from == "watchlist":
+        return ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0))
+
+    return _refresh_home_feed(conn)
 
 
 def _get_pending_trade(conn: "ConnectionHandler") -> dict:
@@ -3578,7 +3629,7 @@ def _trade_status_copy(reason: str, trade_type: str = "") -> tuple[str, str]:
         return _submission_title(trade_type), "Waiting for chain confirmation."
 
     mapping = {
-        "confirm_timeout": ("Trade Cancelled", "Confirmation timed out. Nothing was executed."),
+        "confirm_timeout": ("Trade Cancelled", "Nothing was executed."),
         "ack_timeout": ("Still Pending", "We did not receive a final confirmation yet."),
         "deferred_result": ("Result Deferred", "Another confirmation flow is active. Result will appear next."),
     }
@@ -4319,6 +4370,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             state["feed_source"] = "trending"
             state["feed_platform"] = platform
             state["feed_mode"] = "standard"
+            _remember_home_feed_state(state, source="trending", platform=platform)
             state.pop("nav_from", None)
             _clear_search_state(state)
             _set_feed_navigation_state(state, tokens, cursor=0)
@@ -4412,6 +4464,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
         state["feed_source"] = topic or "trending"
         state["feed_platform"] = ""
         state["feed_mode"] = "standard"
+        _remember_home_feed_state(state, source=topic or "trending", platform="")
         state.pop("nav_from", None)
         _clear_search_state(state)
         _set_feed_navigation_state(state, tokens, cursor=0)
@@ -4969,22 +5022,10 @@ ave_risk_check_desc = {
 
 @register_function("ave_risk_check", ave_risk_check_desc, ToolType.SYSTEM_CTL)
 def ave_risk_check(conn: "ConnectionHandler", addr: str, chain: str = "solana"):
-    """检查合约风险，CRITICAL 时推送 NOTIFY 拦截"""
+    """检查合约风险，返回风险信息但不阻止后续交易流程。"""
     try:
         risk_resp = _data_get(f"/contracts/{addr}-{chain}")
         flags = _risk_flags(risk_resp)
-
-        if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-            conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error",
-                "title": "Dangerous Token Blocked",
-                "body": "Honeypot contract detected. Trade blocked.",
-            }))
-            return ActionResponse(
-                action=Action.RESPONSE,
-                result="CRITICAL_BLOCKED",
-                response="警告：检测到蜜罐合约，已拦截交易。该代币买入后无法卖出，请勿操作。"
-            )
 
         logger.bind(tag=TAG).info(f"Risk check passed: {addr}-{chain} level={flags['risk_level']}")
         return ActionResponse(
@@ -5048,21 +5089,15 @@ def ave_buy_token(
 
         symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
 
-        # 1. Risk check
+        # 1. Risk check (informational only; do not block buys)
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             risk_resp = pool.submit(_data_get, f"/contracts/{addr}-{chain}").result()
         flags = _risk_flags(risk_resp)
         if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-            conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error",
-                "title": "Dangerous Token Blocked",
-                "body": "Honeypot contract detected. Buy cancelled.",
-            }))
-            return ActionResponse(
-                action=Action.RESPONSE,
-                result="BLOCKED",
-                response=f"该代币检测为蜜罐，已拦截买入操作。"
+            logger.bind(tag=TAG).warning(
+                f"ave_buy_token proceeding despite risk flags: {addr}-{chain} "
+                f"level={flags['risk_level']} honeypot={flags['is_honeypot']}"
             )
 
         # 2. Apply defaults
@@ -5227,15 +5262,9 @@ def ave_limit_order(
             risk_resp = _data_get(f"/contracts/{addr}-{chain}")
             flags = _risk_flags(risk_resp)
             if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-                conn.loop.create_task(_send_display(conn, "notify", {
-                    "level": "error",
-                    "title": "Dangerous Token Blocked",
-                    "body": "Honeypot contract detected. Limit order cancelled.",
-                }))
-                return ActionResponse(
-                    action=Action.RESPONSE,
-                    result="BLOCKED",
-                    response="该代币检测为蜜罐，已拦截限价买入操作。"
+                logger.bind(tag=TAG).warning(
+                    f"ave_limit_order proceeding despite risk flags: {addr}-{chain} "
+                    f"level={flags['risk_level']} honeypot={flags['is_honeypot']}"
                 )
         except Exception as e:
             logger.bind(tag=TAG).warning(f"ave_limit_order risk check skipped: {e}")
@@ -5712,21 +5741,21 @@ ave_cancel_trade_desc = {
 
 @register_function("ave_cancel_trade", ave_cancel_trade_desc, ToolType.SYSTEM_CTL)
 def ave_cancel_trade(conn: "ConnectionHandler"):
-    """取消 pending trade，返回 FEED"""
-    state = _ensure_ave_state(conn)
+    """取消 pending trade，并恢复到发起交易前的页面。"""
     pending = _get_pending_trade(conn)
     trade_id = pending.get("trade_id", "")
     symbol = pending.get("symbol", "TOKEN")
     trade_type = pending.get("trade_type", "")
     if trade_id:
         trade_mgr.cancel(trade_id)
+    state = _ensure_ave_state(conn)
     state.pop("deferred_result_queue", None)
     _clear_pending_trade(conn, trade_id)
-    refresh_resp = _refresh_home_feed(conn)
-    if isinstance(refresh_resp, ActionResponse) and refresh_resp.action != Action.NONE:
-        return refresh_resp
+    restore_resp = _restore_cancel_target(conn, pending)
+    if isinstance(restore_resp, ActionResponse) and restore_resp.action != Action.NONE:
+        return restore_resp
     return ActionResponse(action=Action.NONE,
-        result=f"已取消{_label_trade_action(trade_type)}{symbol}，返回热门列表", response=None)
+        result=f"已取消{_label_trade_action(trade_type)}{symbol}，已恢复上一页", response=None)
 
 
 # ---------------------------------------------------------------------------

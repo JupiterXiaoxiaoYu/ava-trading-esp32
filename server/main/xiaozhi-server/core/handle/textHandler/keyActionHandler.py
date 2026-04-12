@@ -48,7 +48,7 @@ class KeyActionHandler(TextMessageHandler):
             ave_sell_token, ave_get_trending, ave_cancel_trade,
             ave_list_orders, ave_list_signals, ave_open_watchlist,
             ave_portfolio_activity_detail,
-            ave_set_trade_mode,
+            ave_set_trade_mode, ave_back_to_feed,
             ave_remove_current_watchlist_token,
             _get_pending_trade, _restore_search_session_payload,
             _set_feed_navigation_state, _build_explorer_payload,
@@ -328,6 +328,13 @@ class KeyActionHandler(TextMessageHandler):
                 await _send_display(conn, "explorer", _build_explorer_payload(conn))
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action explorer_sync error: {e}")
+
+        elif action == "feed_home":
+            logger.bind(tag=TAG).info("key_action feed_home")
+            try:
+                ave_back_to_feed(conn)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action feed_home error: {e}")
 
         elif action == "trade_mode_set":
             requested_mode = str(msg_json.get("mode", "") or "").strip().lower()

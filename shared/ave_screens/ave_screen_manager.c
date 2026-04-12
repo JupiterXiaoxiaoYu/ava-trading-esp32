@@ -327,6 +327,7 @@ void ave_sm_open_feed_cached(void)
     screen_feed_reveal();
     s_current = AVE_SCREEN_FEED;
     s_back_target = AVE_SCREEN_FEED;
+    ave_send_json("{\"type\":\"key_action\",\"action\":\"feed_home\"}");
 }
 
 void ave_sm_open_explorer(void)

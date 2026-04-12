@@ -101,6 +101,7 @@ static void _split_copy_two_lines(const char *src, char *line1, size_t line1_n, 
 {
     size_t len;
     size_t split_at;
+    const char *sentence_break;
     size_t line1_end;
     size_t line2_start;
     size_t i;
@@ -114,6 +115,28 @@ static void _split_copy_two_lines(const char *src, char *line1, size_t line1_n, 
     if (len < 34) {
         snprintf(line1, line1_n, "%.*s", (int)(line1_n - 1), src);
         return;
+    }
+
+    /* Prefer breaking at a sentence boundary so phrases like
+     * "Confirmation timed out. Nothing was executed." render as:
+     *   Confirmation timed out.
+     *   Nothing was executed.
+     */
+    sentence_break = strstr(src, ". ");
+    if (!sentence_break) sentence_break = strstr(src, "! ");
+    if (!sentence_break) sentence_break = strstr(src, "? ");
+    if (sentence_break) {
+        split_at = (size_t)(sentence_break - src + 1);
+        if (split_at >= 12 && split_at < len - 3) {
+            line1_end = split_at;
+            while (line1_end > 0 && src[line1_end - 1] == ' ') line1_end--;
+            snprintf(line1, line1_n, "%.*s", (int)line1_end, src);
+
+            line2_start = split_at;
+            while (src[line2_start] == ' ') line2_start++;
+            snprintf(line2, line2_n, "%s", src + line2_start);
+            return;
+        }
     }
 
     split_at = len / 2;
@@ -229,12 +252,15 @@ void screen_result_show(const char *json_data)
     char title[64] = {0};
     char subtitle[128] = {0};
     char mode_label[16] = {0};
+    char explain_state[32] = {0};
     _get_str(json_data, "title", title, sizeof(title));
     _get_str(json_data, "subtitle", subtitle, sizeof(subtitle));
     _get_str(json_data, "mode_label", mode_label, sizeof(mode_label));
+    _get_str(json_data, "explain_state", explain_state, sizeof(explain_state));
     _trim_in_place(title);
     _trim_in_place(subtitle);
     _trim_in_place(mode_label);
+    _trim_in_place(explain_state);
 
     if (success) {
         lv_label_set_text(s_lbl_icon, LV_SYMBOL_OK);
@@ -327,12 +353,18 @@ void screen_result_show(const char *json_data)
         char error_line2[96] = {0};
         _get_str(json_data, "error", error, sizeof(error));
         _trim_in_place(error);
-        if (_has_text(error)) {
+        if (strcmp(explain_state, "confirm_timeout") == 0) {
+            snprintf(error_line1, sizeof(error_line1), "Confirmation timed out.");
+            snprintf(error_line2, sizeof(error_line2), "Nothing was executed.");
+        } else if (_has_text(error)) {
             _split_copy_two_lines(error, error_line1, sizeof(error_line1), error_line2, sizeof(error_line2));
         }
         lv_label_set_text(s_lbl_line1, _has_text(error_line1) ? error_line1 : (_has_text(error) ? error : "Unknown error"));
 
-        if (_has_text(subtitle) && strcmp(subtitle, error) != 0) {
+        if (strcmp(explain_state, "confirm_timeout") == 0) {
+            lv_label_set_text(s_lbl_line2, error_line2);
+            lv_obj_clear_flag(s_lbl_line2, LV_OBJ_FLAG_HIDDEN);
+        } else if (_has_text(subtitle) && strcmp(subtitle, error) != 0) {
             lv_label_set_text(s_lbl_line2, subtitle);
             lv_obj_clear_flag(s_lbl_line2, LV_OBJ_FLAG_HIDDEN);
         } else if (_has_text(error_line2)) {

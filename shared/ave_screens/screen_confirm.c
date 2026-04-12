@@ -235,8 +235,8 @@ static void _show_confirm_timeout_result(void)
 {
     screen_result_show(
         "{\"success\":false,\"title\":\"Trade Cancelled\","
-        "\"error\":\"Confirmation timed out. Nothing was executed.\","
-        "\"subtitle\":\"Confirmation timed out. Nothing was executed.\","
+        "\"error\":\"Confirmation timed out.\","
+        "\"subtitle\":\"Nothing was executed.\","
         "\"explain_state\":\"confirm_timeout\"}"
     );
 }
@@ -466,8 +466,6 @@ void screen_confirm_show(const char *json_data)
     if (strlen(out_amount) > 0) {
         _buf_append(amount_buf, sizeof(amount_buf), "   Get ");
         _buf_append(amount_buf, sizeof(amount_buf), out_amount);
-        _buf_append(amount_buf, sizeof(amount_buf), " ");
-        _buf_append(amount_buf, sizeof(amount_buf), symbol[0] ? symbol : "TOKEN");
     } else if (amount_usd[0]) {
         _buf_append(amount_buf, sizeof(amount_buf), "   Est. ");
         _buf_append(amount_buf, sizeof(amount_buf), amount_usd);
@@ -527,7 +525,6 @@ void screen_confirm_key(int key)
             ave_send_json(msg);
             printf("[CONFIRM] CANCEL trade_id=%s\n", s_trade_id);
         }
-        ave_sm_go_to_feed();
     } else if (key == AVE_KEY_A) {
         if ((lv_tick_get() - s_show_ts) < 500) return;  /* 500ms cooldown, prevent rapid tap-through */
         /* Confirm — notify server, then arm ack watchdog */
