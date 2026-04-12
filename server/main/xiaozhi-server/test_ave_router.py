@@ -1660,6 +1660,74 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("watch_current", ave_context["allowed_actions"])
         self.assertNotIn("buy_current", ave_context["allowed_actions"])
 
+    def test_context_feed_snapshot_tracks_cursor_and_selected_row(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "feed",
+                "feed_cursor": 1,
+                "feed_source": "trending",
+                "feed_platform": "base",
+                "feed_token_list": [
+                    {
+                        "addr": "feed-1",
+                        "chain": "solana",
+                        "symbol": "FIRST",
+                        "price": "$1.00",
+                        "change_24h": "+5%",
+                        "headline": "leader",
+                    },
+                    {
+                        "addr": "feed-2",
+                        "chain": "base",
+                        "symbol": "SECOND",
+                        "price": "$2.00",
+                        "change_24h": "-3%",
+                        "headline": "runner up",
+                    },
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(conn)
+
+        snapshot = ave_context["screen_snapshot"]
+        self.assertEqual(snapshot["screen"], "feed")
+        self.assertEqual(snapshot["cursor"], 1)
+        self.assertEqual(snapshot["source"], "trending")
+        self.assertEqual(snapshot["platform"], "base")
+        self.assertEqual(snapshot["selected_row"]["symbol"], "SECOND")
+        self.assertEqual(snapshot["visible_rows"][0]["symbol"], "FIRST")
+
+    def test_context_spotlight_snapshot_survives_without_trusted_selection(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "spot-1", "chain": "base", "symbol": "AVA"},
+                "spotlight_snapshot": {
+                    "addr": "spot-1",
+                    "chain": "base",
+                    "symbol": "AVA",
+                    "price": "$0.12",
+                    "change_24h": "+12%",
+                    "market_cap": "$12M",
+                    "volume_24h": "$4M",
+                    "liquidity": "$900K",
+                    "risk_level": "medium",
+                    "cursor": 3,
+                    "total": 20,
+                },
+            }
+        )
+
+        ave_context = build_ave_context(conn)
+
+        self.assertIsNone(ave_context["current_token"])
+        snapshot = ave_context["screen_snapshot"]
+        self.assertEqual(snapshot["screen"], "spotlight")
+        self.assertEqual(snapshot["symbol"], "AVA")
+        self.assertEqual(snapshot["price"], "$0.12")
+        self.assertEqual(snapshot["cursor"], 3)
+
     async def test_open_ended_deictic_chat_fails_closed_without_trusted_selection(self):
         conn = self._build_chat_conn(
             {

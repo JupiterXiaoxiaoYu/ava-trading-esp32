@@ -145,7 +145,7 @@ void CustomWakeWord::AddCommand(const std::string& command, const std::string& t
 
 void CustomWakeWord::ExpandWakeCommandAliases() {
     std::vector<Command> snapshot(commands_.begin(), commands_.end());
-    static const char* prefixes[] = {"hey ", "hi ", "hello "};
+    static const char* prefixes[] = {"hey ", "hi ", "hello ", "ni hao ", "nihao "};
 
     for (const auto& command : snapshot) {
         if (command.action != "wake") {
@@ -166,10 +166,19 @@ void CustomWakeWord::ExpandWakeCommandAliases() {
             continue;
         }
 
-        AddCommand(std::string("hey ") + wake_name, std::string("Hey ") + TitleCaseCommand(wake_name), "wake");
-        AddCommand(std::string("hi ") + wake_name, std::string("Hi ") + TitleCaseCommand(wake_name), "wake");
-        AddCommand(std::string("hello ") + wake_name, std::string("Hello ") + TitleCaseCommand(wake_name), "wake");
-        AddCommand(wake_name, TitleCaseCommand(wake_name), "wake");
+        std::vector<std::string> wake_variants = {wake_name};
+        if (wake_name == "ava") {
+            wake_variants.push_back("eva");
+            wake_variants.push_back("ai wa");
+        }
+
+        for (const auto& variant : wake_variants) {
+            AddCommand(variant, TitleCaseCommand(variant), "wake");
+            for (const char* prefix : prefixes) {
+                std::string prefix_str(prefix);
+                AddCommand(prefix_str + variant, TitleCaseCommand(prefix_str + variant), "wake");
+            }
+        }
     }
 }
 

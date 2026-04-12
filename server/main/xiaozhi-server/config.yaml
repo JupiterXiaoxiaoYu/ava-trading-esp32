@@ -116,14 +116,44 @@ wakeup_words:
   - "Hi Ava"
   - "Hello Ava"
   - "Ava"
+  - "Hey Eva"
+  - "Hi Eva"
+  - "Hello Eva"
+  - "Eva"
+  - "Hey Ai Wa"
+  - "Hi Ai Wa"
+  - "Hello Ai Wa"
+  - "Ai Wa"
+  - "Ni Hao Ava"
+  - "Nihao Ava"
+  - "Ni Hao Eva"
+  - "Nihao Eva"
+  - "Ni Hao Ai Wa"
+  - "Nihao Ai Wa"
   - "hey ava"
   - "hi ava"
   - "hello ava"
   - "ava"
+  - "hey eva"
+  - "hi eva"
+  - "hello eva"
+  - "eva"
+  - "hey ai wa"
+  - "hi ai wa"
+  - "hello ai wa"
+  - "ai wa"
+  - "ni hao ava"
+  - "nihao ava"
+  - "ni hao eva"
+  - "nihao eva"
+  - "ni hao ai wa"
+  - "nihao ai wa"
   - "你好Ava"
   - "嗨Ava"
   - "嘿Ava"
   - "艾娃"
+  - "诶娃"
+  - "欸娃"
 # MCP接入点地址，地址格式为：ws://你的mcp接入点ip或者域名:端口号/mcp/?token=你的token
 # 详细教程 https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/mcp-endpoint-integration.md
 mcp_endpoint: 你的接入点 websocket地址
@@ -594,7 +624,7 @@ ASR:
     sample_rate: 16000
     output_dir: tmp/
     language: zh
-    context: "常用词：Ava、艾娃、AVA、AVE、代币详情页、详情页、spotlight、feed、钱包、持仓、买入、卖出、pump.fun、4.meme。若识别到接近 Ava 的发音，优先输出 Ava。"  # 常用词/品牌词上下文，可提升专有词识别
+    context: "常用词：Ava、Eva、Ai Wa、艾娃、诶娃、欸娃、AVA、AVE、Hey Ava、Hi Ava、Hello Ava、Ni Hao Ava、代币详情页、详情页、spotlight、feed、钱包、持仓、买入、卖出、pump.fun、4.meme。若识别到接近 Ava / Eva / Ai Wa 的发音，优先输出 Ava。"  # 常用词/品牌词上下文，可提升专有词识别
     threshold: 0.2
     silence_duration_ms: 800
   XunfeiStreamASR:

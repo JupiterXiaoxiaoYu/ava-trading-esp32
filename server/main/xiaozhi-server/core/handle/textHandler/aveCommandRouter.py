@@ -700,6 +700,128 @@ def _collect_feed_symbols(state: Dict[str, Any]) -> list[str]:
     return symbols
 
 
+def _compact_surface_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    compact: Dict[str, Any] = {}
+    for key in (
+        "addr",
+        "chain",
+        "symbol",
+        "price",
+        "change_24h",
+        "headline",
+        "value_usd",
+        "pnl",
+        "amount",
+        "signal_summary",
+    ):
+        value = row.get(key)
+        if value not in (None, "", []):
+            compact[key] = value
+    return compact
+
+
+def _build_screen_snapshot(
+    state: Dict[str, Any],
+    screen: str,
+    selection_payload: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    snapshot: Dict[str, Any] = {"screen": screen}
+
+    if screen in {"feed", "browse", "disambiguation"}:
+        rows = state.get("feed_token_list")
+        if isinstance(rows, list):
+            cursor = _resolve_effective_feed_cursor(
+                state.get("feed_cursor", 0), selection_payload
+            )
+            total = len(rows)
+            if total:
+                cursor = max(0, min(cursor, total - 1))
+                snapshot["cursor"] = cursor
+                snapshot["total"] = total
+                snapshot["selected_row"] = _compact_surface_row(rows[cursor])
+                snapshot["visible_rows"] = [
+                    _compact_surface_row(row)
+                    for row in rows[:12]
+                    if isinstance(row, dict)
+                ]
+        feed_mode = str(state.get("feed_mode") or "").strip()
+        feed_source = str(state.get("feed_source") or "").strip()
+        feed_platform = str(state.get("feed_platform") or "").strip()
+        if feed_mode:
+            snapshot["mode"] = feed_mode
+        if feed_source:
+            snapshot["source"] = feed_source
+        if feed_platform:
+            snapshot["platform"] = feed_platform
+        search_query = str(state.get("search_query") or "").strip()
+        if search_query:
+            snapshot["search_query"] = search_query
+        return snapshot
+
+    if screen == "portfolio":
+        holdings = state.get("portfolio_holdings")
+        if isinstance(holdings, list):
+            cursor = state.get("portfolio_cursor", 0)
+            if isinstance(selection_payload, dict) and selection_payload.get("screen") == "portfolio":
+                cursor = selection_payload.get("cursor", cursor)
+            try:
+                cursor = int(cursor)
+            except (TypeError, ValueError):
+                cursor = 0
+            total = len(holdings)
+            if total:
+                cursor = max(0, min(cursor, total - 1))
+                snapshot["cursor"] = cursor
+                snapshot["total"] = total
+                snapshot["selected_row"] = _compact_surface_row(holdings[cursor])
+                snapshot["visible_rows"] = [
+                    _compact_surface_row(row)
+                    for row in holdings[:12]
+                    if isinstance(row, dict)
+                ]
+        return snapshot
+
+    if screen == "spotlight":
+        spotlight = state.get("spotlight_snapshot")
+        if isinstance(spotlight, dict):
+            for key in (
+                "symbol",
+                "chain",
+                "addr",
+                "pair",
+                "price",
+                "change_24h",
+                "market_cap",
+                "volume_24h",
+                "liquidity",
+                "holders",
+                "top100_concentration",
+                "risk_level",
+                "is_watchlisted",
+                "origin_hint",
+                "cursor",
+                "total",
+            ):
+                value = spotlight.get(key)
+                if value not in (None, "", []):
+                    snapshot[key] = value
+        current = state.get("current_token")
+        if isinstance(current, dict):
+            for key in ("addr", "chain", "symbol"):
+                value = current.get(key)
+                if value not in (None, "") and key not in snapshot:
+                    snapshot[key] = value
+        return snapshot
+
+    if screen in {"confirm", "limit_confirm", "result"}:
+        pending = _resolve_pending_trade(state)
+        if pending:
+            snapshot["pending_trade"] = pending
+        return snapshot
+
+    return snapshot
+
+
 def _build_allowed_actions(
     screen: str,
     current_token: Optional[Dict[str, str]],
@@ -741,6 +863,7 @@ def build_ave_context(
     pending_trade = _resolve_pending_trade(state)
     feed_visible_symbols = _collect_feed_symbols(state)
     feed_cursor = _resolve_effective_feed_cursor(state.get("feed_cursor", 0), selection_payload)
+    screen_snapshot = _build_screen_snapshot(state, screen, selection_payload)
 
     return {
         "screen": screen,
@@ -753,6 +876,7 @@ def build_ave_context(
         "feed_platform": str(state.get("feed_platform") or ""),
         "feed_cursor": feed_cursor,
         "feed_visible_symbols": feed_visible_symbols,
+        "screen_snapshot": screen_snapshot,
         "allowed_actions": _build_allowed_actions(
             screen,
             current_token,

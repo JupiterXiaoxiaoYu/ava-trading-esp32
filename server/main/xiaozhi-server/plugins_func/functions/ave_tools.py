@@ -1107,6 +1107,24 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             "source_tag": identity.get("source_tag", ""),
             "origin_hint": origin_hint,
         }
+        state["spotlight_snapshot"] = {
+            "addr": addr,
+            "chain": chain,
+            "symbol": sym,
+            "pair": spotlight_data.get("pair", ""),
+            "price": spotlight_data.get("price", ""),
+            "change_24h": spotlight_data.get("change_24h", ""),
+            "market_cap": spotlight_data.get("market_cap", ""),
+            "volume_24h": spotlight_data.get("volume_24h", ""),
+            "liquidity": spotlight_data.get("liquidity", ""),
+            "holders": spotlight_data.get("holders", ""),
+            "top100_concentration": spotlight_data.get("top100_concentration", ""),
+            "risk_level": spotlight_data.get("risk_level", ""),
+            "is_watchlisted": bool(is_watchlisted),
+            "origin_hint": origin_hint,
+            "cursor": spotlight_data.get("cursor"),
+            "total": spotlight_data.get("total"),
+        }
         state["spotlight_origin_hint"] = origin_hint
         state["spotlight_is_watchlisted"] = bool(is_watchlisted)
         if "nav_from" not in state:

@@ -1,4 +1,5 @@
 #include "protocol.h"
+#include "ave_screen_manager.h"
 
 #include <esp_log.h>
 
@@ -59,6 +60,7 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
 }
 
 void Protocol::SendStartListening(ListeningMode mode) {
+    char selection[384];
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\"";
     if (mode == kListeningModeRealtime) {
@@ -67,6 +69,10 @@ void Protocol::SendStartListening(ListeningMode mode) {
         message += ",\"mode\":\"auto\"";
     } else {
         message += ",\"mode\":\"manual\"";
+    }
+    if (ave_sm_get_selection_context_json(selection, sizeof(selection))) {
+        message += ",\"selection\":";
+        message += selection;
     }
     message += "}";
     SendText(message);

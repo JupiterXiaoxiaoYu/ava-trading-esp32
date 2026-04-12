@@ -126,6 +126,7 @@ class ConnectionHandler:
         self.client_abort = False
         self.client_is_speaking = False
         self.client_listen_mode = "auto"
+        self.pending_listen_payload = None
 
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
