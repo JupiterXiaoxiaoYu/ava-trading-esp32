@@ -109,6 +109,7 @@ lv_obj_t *lv_label_create(lv_obj_t *parent);
 void lv_label_set_long_mode(lv_obj_t *obj, int mode);
 void lv_label_set_text(lv_obj_t *obj, const char *text);
 void lv_label_set_text_fmt(lv_obj_t *obj, const char *fmt, ...);
+void lv_label_set_recolor(lv_obj_t *obj, bool en);
 
 lv_obj_t *lv_bar_create(lv_obj_t *parent);
 void lv_bar_set_range(lv_obj_t *obj, int min, int max);

@@ -47,6 +47,7 @@ class KeyActionHandler(TextMessageHandler):
             ave_token_detail, ave_buy_token, ave_portfolio,
             ave_sell_token, ave_get_trending, ave_cancel_trade,
             ave_list_orders, ave_list_signals, ave_open_watchlist,
+            ave_portfolio_activity_detail,
             ave_set_trade_mode,
             ave_remove_current_watchlist_token,
             _get_pending_trade, _restore_search_session_payload,
@@ -505,6 +506,25 @@ class KeyActionHandler(TextMessageHandler):
                 ave_token_detail(conn, addr=token_addr, chain=token_chain)
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action portfolio_watch error: {e}")
+
+        elif action == "portfolio_activity_detail":
+            if not token_addr:
+                logger.bind(tag=TAG).warning("key_action portfolio_activity_detail missing token_id")
+                return
+            if not token_has_chain:
+                logger.bind(tag=TAG).warning("key_action portfolio_activity_detail missing chain")
+                return
+            symbol = str(msg_json.get("symbol", "") or "").strip()
+            logger.bind(tag=TAG).info(
+                f"key_action portfolio_activity_detail {token_addr} chain={token_chain} symbol={symbol}"
+            )
+            state = getattr(conn, "ave_state", {})
+            state["nav_from"] = "portfolio"
+            conn.ave_state = state
+            try:
+                ave_portfolio_activity_detail(conn, addr=token_addr, chain=token_chain, symbol=symbol)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action portfolio_activity_detail error: {e}")
 
         elif action == "portfolio_sell":
             addr = msg_json.get("addr", "")

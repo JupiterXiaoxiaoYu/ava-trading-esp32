@@ -519,11 +519,17 @@ int main(void)
     snprintf(s_holdings[0].balance_raw, sizeof(s_holdings[0].balance_raw), "%s", "10\".25");
 
     clear_last_json();
-    screen_portfolio_key(AVE_KEY_A);
+    screen_portfolio_key(AVE_KEY_RIGHT);
     ok &= expect_contains("\"action\":\"portfolio_watch\"", "portfolio watch action");
     ok &= expect_contains("addr\\\"1\\\\line", "portfolio watch addr escaped");
     ok &= expect_contains("sol\\\"ana", "portfolio watch chain escaped");
     ok &= expect_not_contains("addr\"1\\line", "portfolio raw watch addr");
+
+    clear_last_json();
+    screen_portfolio_key(AVE_KEY_A);
+    ok &= expect_contains("\"action\":\"portfolio_activity_detail\"", "portfolio activity detail action");
+    ok &= expect_contains("SYM\\\"1", "portfolio activity detail symbol escaped");
+    ok &= expect_not_contains("SYM\"1", "portfolio raw detail symbol");
 
     clear_last_json();
     screen_portfolio_key(AVE_KEY_X);

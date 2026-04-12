@@ -68,6 +68,17 @@ static lv_obj_t *s_lbl_title   = NULL;
 static lv_obj_t *s_lbl_total   = NULL;
 static lv_obj_t *s_lbl_pnl     = NULL;
 static lv_obj_t *s_lbl_summary = NULL;
+static lv_obj_t *s_detail_screen = NULL;
+static lv_obj_t *s_detail_lbl_title = NULL;
+static lv_obj_t *s_detail_lbl_symbol = NULL;
+static lv_obj_t *s_detail_lbl_subtitle = NULL;
+static lv_obj_t *s_detail_lbl_note = NULL;
+static lv_obj_t *s_detail_lbl_bottom = NULL;
+static lv_obj_t *s_detail_metric[5][2];
+static int s_showing_detail = 0;
+static char s_detail_addr[64];
+static char s_detail_chain[16];
+static char s_detail_symbol[24];
 static lv_timer_t *s_back_timer = NULL;
 
 void screen_portfolio_cancel_back_timer(void)
@@ -488,6 +499,20 @@ static void _refresh_rows(void) {
     }
 }
 
+static int _is_detail_payload(const char *json)
+{
+    char view[24] = {0};
+    return _str_portfolio_top_level(json, "view", view, sizeof(view)) && strcmp(view, "detail") == 0;
+}
+
+static void _set_detail_metric_cell(lv_obj_t *label, const char *title, const char *value)
+{
+    char buf[80];
+    if (!label) return;
+    snprintf(buf, sizeof(buf), "%s\n%s", title ? title : "", (value && value[0]) ? value : "N/A");
+    lv_label_set_text(label, buf);
+}
+
 /* ─── Back fallback ──────────────────────────────────────────────────────── */
 static void _back_timeout_cb(lv_timer_t *t)
 {
@@ -701,19 +726,94 @@ static void _build(void) {
     lv_obj_set_style_text_font(lbl_chain, &lv_font_montserrat_12, 0);
 }
 
+static void _build_detail(void)
+{
+    s_detail_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_detail_screen, COLOR_BG, 0);
+    lv_obj_set_size(s_detail_screen, 320, 240);
+
+    lv_obj_t *top = lv_obj_create(s_detail_screen);
+    lv_obj_set_size(top, 320, 22);
+    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(top, COLOR_BAR, 0);
+    lv_obj_set_style_border_width(top, 0, 0);
+    lv_obj_set_style_pad_all(top, 0, 0);
+
+    s_detail_lbl_title = lv_label_create(top);
+    lv_obj_align(s_detail_lbl_title, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_label_set_text(s_detail_lbl_title, "ACTIVITY");
+    lv_obj_set_style_text_color(s_detail_lbl_title, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_detail_lbl_title, &lv_font_montserrat_12, 0);
+
+    s_detail_lbl_symbol = lv_label_create(top);
+    lv_obj_align(s_detail_lbl_symbol, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_width(s_detail_lbl_symbol, 150);
+    lv_label_set_long_mode(s_detail_lbl_symbol, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_detail_lbl_symbol, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(s_detail_lbl_symbol, ave_font_cjk_14(), 0);
+    lv_obj_set_style_text_align(s_detail_lbl_symbol, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_detail_lbl_subtitle = lv_label_create(s_detail_screen);
+    lv_obj_align(s_detail_lbl_subtitle, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_set_width(s_detail_lbl_subtitle, 300);
+    lv_label_set_long_mode(s_detail_lbl_subtitle, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_detail_lbl_subtitle, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_detail_lbl_subtitle, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_detail_lbl_subtitle, LV_TEXT_ALIGN_CENTER, 0);
+
+    static const int row_y[5] = {52, 82, 112, 142, 172};
+    for (int r = 0; r < 5; r++) {
+        for (int c = 0; c < 2; c++) {
+            lv_obj_t *cell = lv_label_create(s_detail_screen);
+            lv_obj_set_pos(cell, c == 0 ? 10 : 166, row_y[r]);
+            lv_obj_set_width(cell, 144);
+            lv_label_set_long_mode(cell, LV_LABEL_LONG_CLIP);
+            lv_obj_set_style_text_color(cell, COLOR_WHITE, 0);
+            lv_obj_set_style_text_font(cell, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_align(cell, c == 0 ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
+            s_detail_metric[r][c] = cell;
+        }
+    }
+
+    s_detail_lbl_note = lv_label_create(s_detail_screen);
+    lv_obj_align(s_detail_lbl_note, LV_ALIGN_TOP_LEFT, 10, 202);
+    lv_obj_set_width(s_detail_lbl_note, 300);
+    lv_label_set_long_mode(s_detail_lbl_note, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_detail_lbl_note, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_detail_lbl_note, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_detail_lbl_note, LV_TEXT_ALIGN_LEFT, 0);
+
+    lv_obj_t *div = lv_obj_create(s_detail_screen);
+    lv_obj_set_size(div, 320, 1);
+    lv_obj_align(div, LV_ALIGN_TOP_LEFT, 0, BOTTOM_DIV_Y);
+    lv_obj_set_style_bg_color(div, COLOR_DIVIDER, 0);
+    lv_obj_set_style_border_width(div, 0, 0);
+
+    s_detail_lbl_bottom = lv_label_create(s_detail_screen);
+    lv_obj_align(s_detail_lbl_bottom, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_label_set_text(s_detail_lbl_bottom, "[B] BACK    [>] SPOT");
+    lv_obj_set_style_text_color(s_detail_lbl_bottom, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_detail_lbl_bottom, &lv_font_montserrat_12, 0);
+}
+
 /* ─── Public API ──────────────────────────────────────────────────────────── */
 
 void screen_portfolio_show(const char *json_data)
 {
     screen_portfolio_cancel_back_timer();
     if (!s_screen) _build();
-    lv_screen_load(s_screen);
+    if (!s_detail_screen) _build_detail();
 
     if (_is_empty_payload(json_data)) {
+        s_showing_detail = 0;
+        lv_screen_load(s_screen);
         s_holding_count = 0;
         s_scroll_top = 0;
         s_sel_idx = 0;
         memset(s_holdings, 0, sizeof(s_holdings));
+        memset(s_detail_addr, 0, sizeof(s_detail_addr));
+        memset(s_detail_chain, 0, sizeof(s_detail_chain));
+        memset(s_detail_symbol, 0, sizeof(s_detail_symbol));
         lv_label_set_text(s_lbl_total, "--");
         lv_label_set_text(s_lbl_pnl, "N/A");
         lv_obj_set_style_text_color(s_lbl_pnl, COLOR_GRAY, 0);
@@ -721,6 +821,66 @@ void screen_portfolio_show(const char *json_data)
         _refresh_rows();
         return;
     }
+
+    if (_is_detail_payload(json_data)) {
+        char symbol[24] = {0};
+        char chain_label[8] = {0};
+        char mode_label[16] = {0};
+        char note[64] = {0};
+        char buy_avg[24] = {0}, buy_total[24] = {0};
+        char sell_avg[24] = {0}, sell_total[24] = {0};
+        char realized_pnl[24] = {0}, open_orders[16] = {0};
+        char first_buy[24] = {0}, last_buy[24] = {0};
+        char first_sell[24] = {0}, last_sell[24] = {0};
+
+        memset(s_detail_addr, 0, sizeof(s_detail_addr));
+        memset(s_detail_chain, 0, sizeof(s_detail_chain));
+        memset(s_detail_symbol, 0, sizeof(s_detail_symbol));
+        _str_portfolio_top_level(json_data, "symbol", symbol, sizeof(symbol));
+        _str_portfolio_top_level(json_data, "chain_label", chain_label, sizeof(chain_label));
+        _str_portfolio_top_level(json_data, "mode_label", mode_label, sizeof(mode_label));
+        _str_portfolio_top_level(json_data, "note", note, sizeof(note));
+        _str_portfolio_top_level(json_data, "buy_avg", buy_avg, sizeof(buy_avg));
+        _str_portfolio_top_level(json_data, "buy_total", buy_total, sizeof(buy_total));
+        _str_portfolio_top_level(json_data, "sell_avg", sell_avg, sizeof(sell_avg));
+        _str_portfolio_top_level(json_data, "sell_total", sell_total, sizeof(sell_total));
+        _str_portfolio_top_level(json_data, "realized_pnl", realized_pnl, sizeof(realized_pnl));
+        _str_portfolio_top_level(json_data, "open_orders", open_orders, sizeof(open_orders));
+        _str_portfolio_top_level(json_data, "first_buy", first_buy, sizeof(first_buy));
+        _str_portfolio_top_level(json_data, "last_buy", last_buy, sizeof(last_buy));
+        _str_portfolio_top_level(json_data, "first_sell", first_sell, sizeof(first_sell));
+        _str_portfolio_top_level(json_data, "last_sell", last_sell, sizeof(last_sell));
+        _str_portfolio_top_level(json_data, "addr", s_detail_addr, sizeof(s_detail_addr));
+        _str_portfolio_top_level(json_data, "chain", s_detail_chain, sizeof(s_detail_chain));
+        _str_portfolio_top_level(json_data, "symbol", s_detail_symbol, sizeof(s_detail_symbol));
+
+        s_showing_detail = 1;
+        lv_screen_load(s_detail_screen);
+        lv_label_set_text(s_detail_lbl_symbol, symbol[0] ? symbol : "TOKEN");
+
+        char subtitle[48];
+        if (mode_label[0] && chain_label[0]) snprintf(subtitle, sizeof(subtitle), "%s  |  %s", chain_label, mode_label);
+        else if (chain_label[0]) snprintf(subtitle, sizeof(subtitle), "%s", chain_label);
+        else if (mode_label[0]) snprintf(subtitle, sizeof(subtitle), "%s", mode_label);
+        else snprintf(subtitle, sizeof(subtitle), "TOKEN ACTIVITY");
+        lv_label_set_text(s_detail_lbl_subtitle, subtitle);
+
+        _set_detail_metric_cell(s_detail_metric[0][0], "Buy Avg", buy_avg);
+        _set_detail_metric_cell(s_detail_metric[0][1], "Buy Tot", buy_total);
+        _set_detail_metric_cell(s_detail_metric[1][0], "Sell Avg", sell_avg);
+        _set_detail_metric_cell(s_detail_metric[1][1], "Sell Tot", sell_total);
+        _set_detail_metric_cell(s_detail_metric[2][0], "P&L", realized_pnl);
+        _set_detail_metric_cell(s_detail_metric[2][1], "Open", open_orders);
+        _set_detail_metric_cell(s_detail_metric[3][0], "First Buy", first_buy);
+        _set_detail_metric_cell(s_detail_metric[3][1], "Last Buy", last_buy);
+        _set_detail_metric_cell(s_detail_metric[4][0], "First Sell", first_sell);
+        _set_detail_metric_cell(s_detail_metric[4][1], "Last Sell", last_sell);
+        lv_label_set_text(s_detail_lbl_note, note[0] ? note : "");
+        return;
+    }
+
+    s_showing_detail = 0;
+    lv_screen_load(s_screen);
 
     _parse(json_data);
     if (s_holding_count > 0) {
@@ -792,6 +952,25 @@ lv_obj_t *screen_portfolio__verify_get_summary_label(void) { return s_lbl_summar
 
 void screen_portfolio_key(int key)
 {
+    if (s_showing_detail) {
+        if (key == AVE_KEY_B) {
+            screen_portfolio_cancel_back_timer();
+            s_back_timer = lv_timer_create(_back_timeout_cb, 3000, NULL);
+            lv_timer_set_repeat_count(s_back_timer, 1);
+            ave_send_json("{\"type\":\"key_action\",\"action\":\"back\"}");
+        } else if (key == AVE_KEY_RIGHT) {
+            if (s_detail_addr[0] == '\0' || s_detail_chain[0] == '\0') return;
+            char msg[384];
+            ave_sm_json_field_t fields[] = {
+                {"token_id", s_detail_addr},
+                {"chain", s_detail_chain},
+            };
+            if (!ave_sm_build_key_action_json("portfolio_watch", fields, 2, msg, sizeof(msg))) return;
+            ave_send_json(msg);
+        }
+        return;
+    }
+
     if (key == AVE_KEY_B) {
         screen_portfolio_cancel_back_timer();
         s_back_timer = lv_timer_create(_back_timeout_cb, 3000, NULL);
@@ -812,7 +991,7 @@ void screen_portfolio_key(int key)
                 s_scroll_top = s_sel_idx - VISIBLE_ROWS + 1;
             _refresh_rows();
         }
-    } else if (key == AVE_KEY_A) {
+    } else if (key == AVE_KEY_RIGHT) {
         if (s_holding_count < 1 || s_sel_idx < 0 || s_sel_idx >= s_holding_count) return;
         const holding_t *h = &s_holdings[s_sel_idx];
         if (h->addr[0] == '\0' || h->chain[0] == '\0') return; /* no actionable identity, ignore */
@@ -822,6 +1001,18 @@ void screen_portfolio_key(int key)
             {"chain", h->chain},
         };
         if (!ave_sm_build_key_action_json("portfolio_watch", fields, 2, msg, sizeof(msg))) return;
+        ave_send_json(msg);
+    } else if (key == AVE_KEY_A) {
+        if (s_holding_count < 1 || s_sel_idx < 0 || s_sel_idx >= s_holding_count) return;
+        const holding_t *h = &s_holdings[s_sel_idx];
+        if (h->addr[0] == '\0' || h->chain[0] == '\0') return;
+        char msg[448];
+        ave_sm_json_field_t fields[] = {
+            {"token_id", h->addr},
+            {"chain", h->chain},
+            {"symbol", h->symbol},
+        };
+        if (!ave_sm_build_key_action_json("portfolio_activity_detail", fields, 3, msg, sizeof(msg))) return;
         ave_send_json(msg);
     } else if (key == AVE_KEY_X) {
         if (s_holding_count < 1 || s_sel_idx < 0 || s_sel_idx >= s_holding_count) return;
@@ -848,6 +1039,7 @@ int screen_portfolio_get_selected_context_json(char *out, size_t out_n)
     char symbol_esc[64];
 
     if (!out || out_n == 0) return 0;
+    if (s_showing_detail) return 0;
     if (s_holding_count < 1 || s_sel_idx < 0 || s_sel_idx >= s_holding_count) return 0;
 
     const holding_t *h = &s_holdings[s_sel_idx];

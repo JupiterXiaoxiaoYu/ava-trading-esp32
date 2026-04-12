@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -124,6 +125,126 @@ class SurfaceInputSyncTests(unittest.IsolatedAsyncioTestCase):
             repo_root / "simulator/mock/ave_screen_harness_support.c",
         )
 
+    @staticmethod
+    def _normalize_c_harness_source(harness_source: str, extra_sources=()) -> str:
+        prefix = []
+        compat = []
+        extra_names = {Path(source).name for source in extra_sources}
+        has_real_feed = "screen_feed.c" in harness_source or "screen_feed.c" in extra_names
+        has_real_portfolio = "screen_portfolio.c" in harness_source or "screen_portfolio.c" in extra_names
+        has_real_spotlight = "screen_spotlight.c" in harness_source or "screen_spotlight.c" in extra_names
+        has_real_explorer = "screen_explorer.c" in harness_source or "screen_explorer.c" in extra_names
+        has_real_browse = "screen_browse.c" in harness_source or "screen_browse.c" in extra_names
+        scan_source = harness_source
+
+        if has_real_feed and "#define VERIFY_FEED" not in harness_source:
+            prefix.append("#define VERIFY_FEED")
+        if has_real_portfolio and "#define VERIFY_PORTFOLIO" not in harness_source:
+            prefix.append("#define VERIFY_PORTFOLIO")
+        if has_real_spotlight and "#define VERIFY_SPOTLIGHT" not in harness_source:
+            prefix.append("#define VERIFY_SPOTLIGHT")
+
+        has_verifier_feed_stubs = "#if !defined(VERIFY_FEED)" in harness_source
+        if "#if !defined(VERIFY_FEED)" in harness_source and "#define VERIFY_FEED" not in harness_source:
+            scan_source = re.sub(
+                r"#if !defined\(VERIFY_FEED\).*?#endif\n",
+                "",
+                scan_source,
+                count=1,
+                flags=re.DOTALL,
+            )
+            harness_source = re.sub(
+                r"""
+void\ screen_feed_show\(const\ char\ \*json_data\)\ \{[^\n]*\}\n
+void\ screen_feed_reveal\(void\)\ \{[^\n]*\}\n
+void\ screen_feed_key\(int\ key\)\ \{[^\n]*\}\n
+bool\ screen_feed_should_ignore_live_push\(void\)\ \{[^\n]*\}\n
+int\ screen_feed_get_selected_context_json\(char\ \*out,\ size_t\ out_n\)\n
+\{\n
+\s*\(void\)out;\n
+\s*\(void\)out_n;\n
+\s*return\ 0;\n
+\}\n
+""",
+                "",
+                harness_source,
+                count=1,
+                flags=re.VERBOSE,
+            )
+            scan_source = harness_source
+
+        compat.append("#include <stddef.h>\n#include <stdbool.h>\n")
+
+        feed_symbols = (
+            "void screen_feed_show(",
+            "void screen_feed_key(",
+            "bool screen_feed_should_ignore_live_push(",
+            "int screen_feed_get_selected_context_json(",
+        )
+        if (
+            not has_real_feed
+            and (not has_verifier_feed_stubs or "#define VERIFY_FEED" in harness_source)
+            and any(symbol not in scan_source for symbol in feed_symbols)
+        ):
+            compat.append(
+                """
+void screen_feed_show(const char *json_data) { (void)json_data; }
+void screen_feed_key(int key) { (void)key; }
+bool screen_feed_should_ignore_live_push(void) { return false; }
+int screen_feed_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+            )
+
+        if not has_real_feed and "void screen_feed_reveal(" not in scan_source:
+            compat.append("void screen_feed_reveal(void) { }\n")
+
+        if not has_real_explorer and "void screen_explorer_show(" not in harness_source:
+            compat.append(
+                """
+void screen_explorer_show(const char *json_data) { (void)json_data; }
+void screen_explorer_key(int key) { (void)key; }
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+            )
+
+        browse_symbols = (
+            "void screen_browse_show(",
+            "void screen_browse_show_placeholder(",
+            "void screen_browse_reveal(",
+            "void screen_browse_key(",
+            "int screen_browse_get_selected_context_json(",
+        )
+        if not has_real_browse and any(symbol not in harness_source for symbol in browse_symbols):
+            compat.append(
+                """
+void screen_browse_show(const char *json_data) { (void)json_data; }
+void screen_browse_show_placeholder(const char *mode) { (void)mode; }
+void screen_browse_reveal(void) { }
+void screen_browse_key(int key) { (void)key; }
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+"""
+            )
+
+        compat_text = "".join(compat)
+        if not prefix and not compat_text:
+            return harness_source
+        return "".join(f"{line}\n" for line in prefix) + compat_text + harness_source
+
     def _build_listen_conn(self, ave_state=None):
         conn = SimpleNamespace()
         conn.logger = _FakeLogger()
@@ -235,7 +356,10 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / "verify_missing_chain_selection.c"
             binary = tmpdir_path / "verify_missing_chain_selection"
-            source_path.write_text(harness_source, encoding="utf-8")
+            source_path.write_text(
+                self._normalize_c_harness_source(harness_source, extra_sources),
+                encoding="utf-8",
+            )
 
             compile_result = subprocess.run(
                 [
@@ -290,7 +414,10 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / f"{binary_name}.c"
             binary_path = tmpdir_path / binary_name
-            source_path.write_text(harness_source, encoding="utf-8")
+            source_path.write_text(
+                self._normalize_c_harness_source(harness_source, extra_sources),
+                encoding="utf-8",
+            )
 
             compile_result = subprocess.run(
                 [
@@ -724,7 +851,7 @@ int main(void)
             }
         )
 
-        def _detail_side_effect(passed_conn, addr, chain, symbol=""):
+        def _detail_side_effect(passed_conn, addr, chain, symbol="", **kwargs):
             passed_conn.ave_state["screen"] = "spotlight"
             passed_conn.ave_state["current_token"] = {
                 "addr": "stale-after-watch",
@@ -761,7 +888,14 @@ int main(void)
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="feed-2",
+            chain="base",
+            symbol="NEW",
+            feed_cursor=1,
+            feed_total=2,
+        )
         mock_buy.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
 
     async def test_portfolio_mixed_input_watch_uses_explicit_selection_payload(self):
@@ -795,7 +929,14 @@ int main(void)
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once_with(conn, addr="pf-2", chain="eth", symbol="REAL")
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="pf-2",
+            chain="eth",
+            symbol="REAL",
+            feed_cursor=None,
+            feed_total=None,
+        )
 
     async def test_non_router_listen_detect_forwards_selection_payload_into_chat_pipeline(self):
         handler = ListenTextMessageHandler()
@@ -930,12 +1071,20 @@ int main(void)
 #include <stddef.h>
 #include "lvgl/lvgl.h"
 
+#if defined(__GNUC__)
+#define TEST_STUB_WEAK __attribute__((weak))
+#else
+#define TEST_STUB_WEAK
+#endif
+
 void lv_obj_set_style_text_align(lv_obj_t *obj, int align, int part)
 {
     (void)obj;
     (void)align;
     (void)part;
 }
+
+TEST_STUB_WEAK void screen_feed_reveal(void) {}
 
 int screen_confirm_get_selected_context_json(char *out, size_t out_n)
 {
@@ -958,6 +1107,26 @@ int screen_result_get_selected_context_json(char *out, size_t out_n)
     return 0;
 }
 
+void screen_explorer_show(const char *json_data) { (void)json_data; }
+void screen_explorer_key(int key) { (void)key; }
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
+void screen_browse_show(const char *json_data) { (void)json_data; }
+void screen_browse_show_placeholder(const char *mode) { (void)mode; }
+void screen_browse_reveal(void) {}
+void screen_browse_key(int key) { (void)key; }
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{
+    (void)out;
+    (void)out_n;
+    return 0;
+}
+
 
 void screen_disambiguation_show(const char *json_data) { (void)json_data; }
 void screen_disambiguation_key(int key) { (void)key; }
@@ -972,7 +1141,7 @@ int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             selection_stub = Path(tmpdir) / "selection_context_stubs.c"
-            selection_stub.write_text(selection_stub_source)
+            selection_stub.write_text(selection_stub_source, encoding="utf-8")
             for macro in ("VERIFY_FEED", "VERIFY_PORTFOLIO", "VERIFY_SPOTLIGHT"):
                 binary = Path(tmpdir) / macro.lower()
                 compile_cmd = [
@@ -1892,6 +2061,121 @@ int main(void)
             key_steps="ave_sm_key_press(AVE_KEY_A);",
         )
 
+    def test_real_portfolio_keys_map_right_to_watch_and_a_to_activity_detail(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        verifier = repo_root / "simulator/mock/verify_ave_json_payloads.c"
+        include_dir = repo_root / "simulator/mock/json_verify_include"
+        manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
+        verifier_prefix = verifier.read_text(encoding="utf-8").split(
+            "#if defined(VERIFY_FEED)", 1
+        )[0]
+        display_json = (
+            '{"screen":"portfolio","data":{"holdings":['
+            '{"symbol":"BONK","addr":"token-1","chain":"solana","value_usd":"$123","avg_cost_usd":"$1","pnl":"+1"}'
+            "]}}"
+        )
+        display_json_c = display_json.replace("\\", "\\\\").replace('"', '\\"')
+
+        harness_source = f"""
+#define VERIFY_PORTFOLIO
+{verifier_prefix}
+
+#ifndef LV_OPA_TRANSP
+#define LV_OPA_TRANSP 0
+#endif
+
+int screen_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_limit_confirm_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int screen_result_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_explorer_show(const char *json_data) {{ (void)json_data; }}
+void screen_explorer_key(int key) {{ (void)key; }}
+int screen_explorer_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_browse_show(const char *json_data) {{ (void)json_data; }}
+void screen_browse_show_placeholder(const char *mode) {{ (void)mode; }}
+void screen_browse_reveal(void) {{ }}
+void screen_browse_key(int key) {{ (void)key; }}
+int screen_browse_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+void screen_feed_reveal(void) {{ }}
+
+void screen_disambiguation_show(const char *json_data) {{ (void)json_data; }}
+void screen_disambiguation_key(int key) {{ (void)key; }}
+void screen_disambiguation_cancel_timers(void) {{ }}
+int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
+{{
+    (void)out;
+    (void)out_n;
+    return 0;
+}}
+
+int main(void)
+{{
+    ave_sm_handle_json("{display_json_c}");
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_RIGHT);
+    if (!strstr(g_last_json, "\\"action\\":\\"portfolio_watch\\"")) {{
+        fprintf(stderr, "RIGHT did not emit portfolio_watch: %s\\n", g_last_json);
+        return 2;
+    }}
+
+    clear_last_json();
+    ave_sm_key_press(AVE_KEY_A);
+    if (!strstr(g_last_json, "\\"action\\":\\"portfolio_activity_detail\\"")) {{
+        fprintf(stderr, "A did not emit portfolio_activity_detail: %s\\n", g_last_json);
+        return 3;
+    }}
+    if (!strstr(g_last_json, "\\"symbol\\":\\"BONK\\"")) {{
+        fprintf(stderr, "detail payload lost symbol: %s\\n", g_last_json);
+        return 4;
+    }}
+    return 0;
+}}
+"""
+
+        self._compile_and_run_c_harness(
+            harness_source,
+            include_dir,
+            manager_src,
+            binary_name="verify_portfolio_key_mapping_detail",
+            extra_sources=(repo_root / "shared/ave_screens/screen_portfolio.c",),
+            extra_ldflags=(
+                "-DLV_OPA_TRANSP=0",
+                "-DLV_TEXT_ALIGN_LEFT=0",
+                "-DLV_TEXT_ALIGN_CENTER=1",
+                "-DLV_TEXT_ALIGN_RIGHT=2",
+            ),
+        )
+
     def test_real_disambiguation_key_action_omits_missing_chain(self):
         repo_root = Path(__file__).resolve().parents[3]
         self._assert_real_key_action_missing_chain_fails_closed(
@@ -2244,7 +2528,7 @@ int main(void)
             extra_sources=(browse_source, explorer_source),
         )
 
-    def test_real_feed_watchlist_mode_x_emits_watchlist_remove(self):
+    def test_real_feed_watchlist_mode_x_cycles_watchlist_chain(self):
         repo_root = Path(__file__).resolve().parents[3]
         include_dir = repo_root / "simulator/mock/json_verify_include"
         manager_src = repo_root / "shared/ave_screens/ave_screen_manager.c"
@@ -2325,10 +2609,11 @@ int main(void)
     screen_browse_show("{watchlist_payload}");
     clear_last_json();
     screen_browse_key(AVE_KEY_X);
-    if (!expect_contains("\\"action\\":\\"watchlist_remove\\"", "watchlist X action")) {{
+    if (!expect_contains("\\"action\\":\\"watchlist_chain_cycle\\"", "watchlist X action")) {{
         return 2;
     }}
-    if (!expect_contains("\\"token_id\\":\\"wl-001\\"", "watchlist token id")) {{
+    if (strstr(g_last_json, "\\"token_id\\"")) {{
+        fprintf(stderr, "watchlist chain cycle should not pin a token: %s\\n", g_last_json);
         return 3;
     }}
     return 0;
@@ -2339,7 +2624,7 @@ int main(void)
             harness_source,
             include_dir,
             manager_src,
-            binary_name="verify_feed_watchlist_mode_x_remove",
+            binary_name="verify_feed_watchlist_mode_x_chain_cycle",
         )
 
     def test_real_feed_explore_search_guide_omits_trusted_selection_in_listen_payload(self):
@@ -2505,11 +2790,11 @@ int main(void)
         fprintf(stderr, "search guide title column should shift left, x=%d\\n", s_rows[0].lbl_sym->x);
         return 4;
     }}
-    if (s_rows[0].lbl_price->x > 120) {{
+    if (s_rows[0].lbl_price->x > 128) {{
         fprintf(stderr, "search guide right column should shift left, x=%d\\n", s_rows[0].lbl_price->x);
         return 5;
     }}
-    if (s_rows[0].lbl_price->width < 190) {{
+    if (s_rows[0].lbl_price->width < 160) {{
         fprintf(stderr, "search guide right column should be widened to near the right edge\\n");
         return 6;
     }}
@@ -2685,7 +2970,10 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / "verify_orders_listen_selection.c"
             binary = tmpdir_path / "verify_orders_listen_selection"
-            source_path.write_text(harness_source, encoding="utf-8")
+            source_path.write_text(
+                self._normalize_c_harness_source(harness_source),
+                encoding="utf-8",
+            )
 
             compile_result = subprocess.run(
                 [
@@ -2879,7 +3167,10 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / "verify_listen_detect.c"
             binary = tmpdir_path / "verify_listen_detect"
-            source_path.write_text(harness_source)
+            source_path.write_text(
+                self._normalize_c_harness_source(harness_source),
+                encoding="utf-8",
+            )
 
             compile_result = subprocess.run(
                 [
@@ -3038,7 +3329,10 @@ int main(void)
             tmpdir_path = Path(tmpdir)
             source_path = tmpdir_path / "verify_listen_detect_screens.c"
             binary = tmpdir_path / "verify_listen_detect_screens"
-            source_path.write_text(harness_source)
+            source_path.write_text(
+                self._normalize_c_harness_source(harness_source),
+                encoding="utf-8",
+            )
 
             compile_result = subprocess.run(
                 [

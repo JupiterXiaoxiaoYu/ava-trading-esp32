@@ -23,7 +23,9 @@ tmp/
 # Secrets / local state
 apiSecret.txt
 apiSecret.zip
+server/main/xiaozhi-server/wallet-1
 server/main/xiaozhi-server/wallet-1/
+firmware/build.bak-*/
 server/.env.ave
 
 # OS/editor

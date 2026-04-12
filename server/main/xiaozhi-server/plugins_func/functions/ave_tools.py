@@ -1250,6 +1250,45 @@ def _trade_namespace(conn: "ConnectionHandler") -> str:
     return _watchlist_namespace(conn)
 
 
+def _resolve_proxy_wallet_target(
+    conn: "ConnectionHandler",
+    chain: str = "",
+) -> tuple[str, str]:
+    requested_chain = _normalize_chain_name(chain)
+    state = _ensure_ave_state(conn)
+
+    cached_wallets = state.get("portfolio_wallets")
+    if isinstance(cached_wallets, list) and cached_wallets:
+        wallets = cached_wallets
+    else:
+        assets_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+        if not assets_id:
+            raise ValueError("AVE proxy wallet is not configured")
+        wallet_resp = _trade_get(
+            "/v1/thirdParty/user/getUserByAssetsId",
+            {"assetsIds": assets_id},
+        )
+        wallets = _normalize_portfolio_wallets(wallet_resp.get("data", []))
+        state["portfolio_wallets"] = wallets
+
+    for wallet in wallets:
+        for address_info in wallet.get("addresses", []):
+            chain_name = _normalize_chain_name(address_info.get("chain"))
+            address = str(address_info.get("address", "") or "").strip()
+            if not chain_name or not address:
+                continue
+            if requested_chain and chain_name == requested_chain:
+                return address, chain_name
+
+    first_wallet = wallets[0] if wallets else {}
+    first_address = (first_wallet.get("addresses") or [{}])[0]
+    fallback_address = str(first_address.get("address", "") or "").strip()
+    fallback_chain = _normalize_chain_name(first_address.get("chain"), requested_chain or "solana")
+    if not fallback_address:
+        raise ValueError("AVE proxy wallet has no usable chain address")
+    return fallback_address, fallback_chain
+
+
 def _paper_store_path() -> Path:
     override = str(os.environ.get("AVE_PAPER_STORE_PATH", "") or "").strip()
     return Path(override) if override else _PAPER_STORE_PATH
@@ -2440,6 +2479,332 @@ def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str 
         "pnl_pct": _fmt_change((total_pnl_usd / total_cost_basis_usd) * 100.0) if has_pnl else "N/A",
         "pnl_reason": "" if has_pnl else "Paper account",
     }
+
+
+def _pick_activity_value(data: dict, *keys, default=""):
+    if not isinstance(data, dict):
+        return default
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _fmt_activity_time(raw_value) -> str:
+    if raw_value in (None, "", 0, "0"):
+        return "N/A"
+
+    numeric = _parse_numeric_value(raw_value)
+    if numeric is not None and numeric > 0:
+        timestamp = int(numeric / 1000) if numeric > 1_000_000_000_000 else int(numeric)
+        return _fmt_chart_time(timestamp) or "N/A"
+
+    text = str(raw_value).strip()
+    if not text:
+        return "N/A"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%m/%d %H:%M")
+    except Exception:
+        return text[:16]
+
+
+def _fmt_activity_metric(raw_value, *, kind: str = "price", signed: bool = False) -> str:
+    if isinstance(raw_value, Decimal):
+        raw_value = float(raw_value)
+
+    if kind == "count":
+        numeric = _parse_numeric_value(raw_value)
+        if numeric is None:
+            return "0"
+        return str(int(numeric))
+
+    if signed:
+        return _fmt_signed_volume(raw_value)
+
+    if kind == "volume":
+        return _fmt_volume(raw_value)
+
+    return _fmt_price(raw_value)
+
+
+def _find_portfolio_holding_snapshot(conn: "ConnectionHandler", addr: str, chain: str) -> dict:
+    state = _ensure_ave_state(conn)
+    holdings = state.get("portfolio_holdings", [])
+    if not isinstance(holdings, list):
+        return {}
+
+    normalized_addr, normalized_chain = _split_token_reference(addr, chain)
+    for row in holdings:
+        if not isinstance(row, dict):
+            continue
+        row_addr, row_chain = _split_token_reference(row.get("addr", ""), row.get("chain", ""))
+        if row_addr == normalized_addr and row_chain == normalized_chain:
+            return row
+    return {}
+
+
+def _build_real_portfolio_activity_payload(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+) -> dict:
+    normalized_chain = _normalize_chain_name(chain, "solana")
+    state = _ensure_ave_state(conn)
+    holding = _find_portfolio_holding_snapshot(conn, addr, normalized_chain)
+    resolved_symbol = (
+        str(symbol or holding.get("symbol") or "").strip()
+        or _load_token_symbol(addr, normalized_chain)
+        or "TOKEN"
+    )
+
+    payload = {
+        "view": "detail",
+        "symbol": resolved_symbol,
+        "addr": addr,
+        "chain": normalized_chain,
+        "chain_label": _surface_chain_label(normalized_chain),
+        "mode_label": "",
+        "buy_avg": "N/A",
+        "buy_total": "N/A",
+        "sell_avg": "N/A",
+        "sell_total": "N/A",
+        "realized_pnl": "N/A",
+        "open_orders": "0",
+        "first_buy": "N/A",
+        "last_buy": "N/A",
+        "first_sell": "N/A",
+        "last_sell": "N/A",
+        "note": "",
+    }
+
+    wallet_address, wallet_chain = _resolve_proxy_wallet_target(conn, normalized_chain)
+    try:
+        pnl_resp = _data_get(
+            "/address/pnl",
+            {
+                "wallet_address": wallet_address,
+                "chain": wallet_chain,
+                "token_address": addr,
+            },
+        )
+        pnl_data = pnl_resp.get("data", pnl_resp) if isinstance(pnl_resp, dict) else {}
+
+        payload["buy_avg"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "average_purchase_price_usd", "averagePurchasePriceUsd"),
+            kind="price",
+        )
+        payload["buy_total"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "total_purchased_usd", "totalPurchasedUsd"),
+            kind="volume",
+        )
+        payload["sell_avg"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "average_sold_price_usd", "averageSoldPriceUsd"),
+            kind="price",
+        )
+        payload["sell_total"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "total_sold_usd", "totalSoldUsd"),
+            kind="volume",
+        )
+        payload["realized_pnl"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "profit_realized", "profitRealized"),
+            kind="volume",
+            signed=True,
+        )
+        payload["first_buy"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "first_purchase_time", "firstPurchaseTime")
+        )
+        payload["last_buy"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "last_purchase_time", "lastPurchaseTime")
+        )
+        payload["first_sell"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "first_sold_time", "firstSoldTime")
+        )
+        payload["last_sell"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "last_sold_time", "lastSoldTime")
+        )
+    except Exception as exc:
+        payload["note"] = str(exc)[:63]
+
+    assets_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+    if assets_id:
+        try:
+            order_resp = _trade_get(
+                "/v1/thirdParty/tx/getLimitOrder",
+                {
+                    "assetsId": assets_id,
+                    "chain": wallet_chain,
+                    "pageSize": "20",
+                    "pageNo": "0",
+                    "status": "waiting",
+                    "token": addr,
+                },
+            )
+            orders = _extract_limit_order_list(order_resp)
+            payload["open_orders"] = _fmt_activity_metric(len(orders), kind="count")
+        except Exception as exc:
+            if not payload["note"]:
+                payload["note"] = str(exc)[:63]
+
+    state["current_token"] = {
+        "addr": addr,
+        "chain": normalized_chain,
+        "symbol": resolved_symbol,
+    }
+    state["portfolio_detail_token"] = dict(state["current_token"])
+    state["portfolio_view"] = "detail"
+    state["screen"] = "portfolio"
+    return payload
+
+
+def _build_paper_portfolio_activity_payload(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+) -> dict:
+    normalized_chain = _normalize_chain_name(chain, "solana")
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    fills = account.get("fills", [])
+    open_orders = account.get("open_orders", [])
+    matching_fills = []
+
+    for fill in fills if isinstance(fills, list) else []:
+        if not isinstance(fill, dict):
+            continue
+        fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+        if fill_addr != addr or fill_chain != normalized_chain:
+            continue
+        matching_fills.append(fill)
+
+    matching_fills.sort(key=lambda item: int(_parse_numeric_value(item.get("created_at")) or 0))
+
+    total_buy_usd = Decimal("0")
+    total_buy_amount = Decimal("0")
+    total_sell_usd = Decimal("0")
+    total_sell_amount = Decimal("0")
+    realized_pnl = Decimal("0")
+    running_amount = Decimal("0")
+    running_cost = Decimal("0")
+    first_buy = None
+    last_buy = None
+    first_sell = None
+    last_sell = None
+    resolved_symbol = str(symbol or "").strip() or "TOKEN"
+
+    for fill in matching_fills:
+        fill_symbol = str(fill.get("symbol") or "").strip()
+        if fill_symbol and resolved_symbol == "TOKEN":
+            resolved_symbol = fill_symbol
+
+        trade_type = str(fill.get("trade_type") or "").strip().lower()
+        token_amount = _parse_decimal_amount(fill.get("token_amount")) or Decimal("0")
+        amount_usd = _parse_decimal_amount(fill.get("amount_usd")) or Decimal("0")
+        created_at = int(_parse_numeric_value(fill.get("created_at")) or 0)
+
+        if trade_type in {"market_buy", "limit_buy"}:
+            total_buy_usd += amount_usd
+            total_buy_amount += token_amount
+            running_amount += token_amount
+            running_cost += amount_usd
+            if created_at > 0:
+                first_buy = created_at if first_buy is None else min(first_buy, created_at)
+                last_buy = created_at if last_buy is None else max(last_buy, created_at)
+        elif trade_type == "market_sell":
+            total_sell_usd += amount_usd
+            total_sell_amount += token_amount
+            avg_cost = (running_cost / running_amount) if running_amount > 0 else Decimal("0")
+            sold_amount = token_amount if token_amount <= running_amount else running_amount
+            realized_pnl += amount_usd - (avg_cost * sold_amount)
+            running_amount -= sold_amount
+            running_cost -= avg_cost * sold_amount
+            if running_amount < 0:
+                running_amount = Decimal("0")
+            if running_cost < 0:
+                running_cost = Decimal("0")
+            if created_at > 0:
+                first_sell = created_at if first_sell is None else min(first_sell, created_at)
+                last_sell = created_at if last_sell is None else max(last_sell, created_at)
+
+    open_order_count = 0
+    for order in open_orders if isinstance(open_orders, list) else []:
+        if not isinstance(order, dict):
+            continue
+        order_addr, order_chain = _split_token_reference(order.get("addr", ""), order.get("chain", ""))
+        if order_addr == addr and order_chain == normalized_chain and str(order.get("status") or "waiting") == "waiting":
+            open_order_count += 1
+
+    state = _ensure_ave_state(conn)
+    state["current_token"] = {
+        "addr": addr,
+        "chain": normalized_chain,
+        "symbol": resolved_symbol,
+    }
+    state["portfolio_detail_token"] = dict(state["current_token"])
+    state["portfolio_view"] = "detail"
+    state["screen"] = "portfolio"
+
+    return {
+        "view": "detail",
+        "symbol": resolved_symbol,
+        "addr": addr,
+        "chain": normalized_chain,
+        "chain_label": _surface_chain_label(normalized_chain),
+        "mode_label": "PAPER",
+        "buy_avg": _fmt_activity_metric((total_buy_usd / total_buy_amount) if total_buy_amount > 0 else None, kind="price"),
+        "buy_total": _fmt_activity_metric(total_buy_usd if total_buy_usd > 0 else None, kind="volume"),
+        "sell_avg": _fmt_activity_metric((total_sell_usd / total_sell_amount) if total_sell_amount > 0 else None, kind="price"),
+        "sell_total": _fmt_activity_metric(total_sell_usd if total_sell_usd > 0 else None, kind="volume"),
+        "realized_pnl": _fmt_activity_metric(realized_pnl, kind="volume", signed=True),
+        "open_orders": _fmt_activity_metric(open_order_count, kind="count"),
+        "first_buy": _fmt_activity_time(first_buy),
+        "last_buy": _fmt_activity_time(last_buy),
+        "first_sell": _fmt_activity_time(first_sell),
+        "last_sell": _fmt_activity_time(last_sell),
+        "note": "",
+    }
+
+
+def ave_portfolio_activity_detail(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+):
+    try:
+        normalized_addr, normalized_chain = _split_token_reference(addr, chain)
+        if not normalized_addr or not normalized_chain:
+            return ActionResponse(action=Action.RESPONSE, result="missing_token", response="Missing portfolio token")
+
+        state = _ensure_ave_state(conn)
+        state["nav_from"] = "portfolio"
+        state["portfolio_selected_token"] = {"addr": normalized_addr, "chain": normalized_chain}
+
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            payload = _build_paper_portfolio_activity_payload(
+                conn,
+                addr=normalized_addr,
+                chain=normalized_chain,
+                symbol=symbol,
+            )
+        else:
+            payload = _build_real_portfolio_activity_payload(
+                conn,
+                addr=normalized_addr,
+                chain=normalized_chain,
+                symbol=symbol,
+            )
+
+        conn.loop.create_task(_send_display(conn, "portfolio", payload))
+        return ActionResponse(action=Action.NONE, result="portfolio_activity_detail", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_portfolio_activity_detail error: {exc}")
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="Open activity detail failed")
 
 
 def _paper_limit_order_rows(conn: "ConnectionHandler", chain: str) -> list[dict]:
@@ -4957,6 +5322,7 @@ def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
             _try_fill_paper_limit_orders(conn)
             selection_hint = state.pop("portfolio_selected_token", None)
             state["screen"] = "portfolio"
+            state["portfolio_view"] = "list"
             payload = _build_paper_portfolio_payload(conn, chain_filter=selected_chain)
             holdings = payload.get("holdings", [])
             cursor = payload.get("cursor", 0)
@@ -4985,6 +5351,7 @@ def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
         selection_hint = state.pop("portfolio_selected_token", None)
         state["screen"] = "portfolio"
+        state["portfolio_view"] = "list"
         state["portfolio_holdings"] = []
         if not assets_id:
             # No wallet configured: show empty portfolio in simulator

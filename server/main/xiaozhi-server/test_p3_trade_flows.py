@@ -1304,6 +1304,23 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         mock_feed.assert_not_called()
         self.assertNotIn("nav_from", conn.ave_state)
 
+    async def test_key_action_portfolio_activity_detail_sets_portfolio_origin(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        handler = KeyActionHandler()
+
+        with patch("plugins_func.functions.ave_tools.ave_portfolio_activity_detail") as mock_detail:
+            await handler.handle(conn, {
+                "type": "key_action",
+                "action": "portfolio_activity_detail",
+                "token_id": "token-1",
+                "chain": "solana",
+                "symbol": "BONK",
+            })
+
+        self.assertEqual(conn.ave_state.get("nav_from"), "portfolio")
+        mock_detail.assert_called_once_with(conn, addr="token-1", chain="solana", symbol="BONK")
+
     async def test_trade_result_back_returns_portfolio_when_nav_from_portfolio(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)

@@ -911,6 +911,102 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             )],
         )
 
+    async def test_real_portfolio_activity_detail_uses_pnl_and_token_filtered_orders(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+        trade_requests = []
+        data_requests = []
+
+        async def _fake_send_display(conn_obj, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_trade_get(path, params=None):
+            trade_requests.append((path, params))
+            if path == "/v1/thirdParty/user/getUserByAssetsId":
+                return {
+                    "data": [
+                        {
+                            "assetsId": "wallet-activity",
+                            "assetsName": "Primary",
+                            "status": "enabled",
+                            "addressList": [
+                                {"chain": "solana", "address": "SoWallet111111111111111111111111111111111qQ7NMn"},
+                            ],
+                        }
+                    ]
+                }
+            if path == "/v1/thirdParty/tx/getLimitOrder":
+                return {"data": {"list": [{"id": "ord-1"}, {"id": "ord-2"}]}}
+            raise AssertionError(f"unexpected trade path {path}")
+
+        def _fake_data_get(path, params=None):
+            data_requests.append((path, params))
+            if path == "/address/pnl":
+                return {
+                    "data": {
+                        "average_purchase_price_usd": "1.23",
+                        "total_purchased_usd": "456",
+                        "average_sold_price_usd": "2.34",
+                        "total_sold_usd": "123",
+                        "profit_realized": "78",
+                        "first_purchase_time": 1710000000,
+                        "last_purchase_time": 1710003600,
+                        "first_sold_time": 1710007200,
+                        "last_sold_time": 1710010800,
+                    }
+                }
+            raise AssertionError(f"unexpected data path {path}")
+
+        def _env_get(key, default=None):
+            if key == "AVE_PROXY_WALLET_ID":
+                return "wallet-activity"
+            return default
+
+        with patch("plugins_func.functions.ave_tools._trade_get", side_effect=_fake_trade_get), \
+             patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools.os.environ.get", side_effect=_env_get):
+            resp = ave_tools.ave_portfolio_activity_detail(conn, addr="token-1", chain="solana", symbol="BONK")
+            await asyncio.sleep(0)
+
+        self.assertEqual(resp.result, "portfolio_activity_detail")
+        self.assertEqual(
+            trade_requests,
+            [
+                ("/v1/thirdParty/user/getUserByAssetsId", {"assetsIds": "wallet-activity"}),
+                (
+                    "/v1/thirdParty/tx/getLimitOrder",
+                    {
+                        "assetsId": "wallet-activity",
+                        "chain": "solana",
+                        "pageSize": "20",
+                        "pageNo": "0",
+                        "status": "waiting",
+                        "token": "token-1",
+                    },
+                ),
+            ],
+        )
+        self.assertEqual(
+            data_requests,
+            [(
+                "/address/pnl",
+                {"wallet_address": "SoWallet111111111111111111111111111111111qQ7NMn", "chain": "solana", "token_address": "token-1"},
+            )],
+        )
+        self.assertTrue(sent)
+        screen, payload = sent[-1]
+        self.assertEqual(screen, "portfolio")
+        self.assertEqual(payload["view"], "detail")
+        self.assertEqual(payload["symbol"], "BONK")
+        self.assertEqual(payload["buy_avg"], "$1.2300")
+        self.assertEqual(payload["buy_total"], "$456")
+        self.assertEqual(payload["sell_avg"], "$2.3400")
+        self.assertEqual(payload["sell_total"], "$123")
+        self.assertEqual(payload["realized_pnl"], "+$78")
+        self.assertEqual(payload["open_orders"], "2")
+
     async def test_ave_cancel_order_all_maps_lookup_then_cancel_payload(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)

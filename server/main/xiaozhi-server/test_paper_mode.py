@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from core.handle.textHandler.keyActionHandler import KeyActionHandler
 from plugins_func.functions import ave_tools
-from plugins_func.functions.ave_paper_store import get_paper_account
+from plugins_func.functions.ave_paper_store import get_paper_account, mutate_account
 
 
 class _FakeLoop:
@@ -126,6 +126,79 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["mode"], "orders")
         self.assertEqual(payload["source_label"], "PAPER ORDERS")
         self.assertEqual(conn.ave_state["feed_mode"], "orders")
+
+    async def test_paper_portfolio_activity_detail_uses_real_aligned_fields(self):
+        conn = self._conn()
+        ave_tools.ave_set_trade_mode(conn, "paper")
+        sent = []
+
+        def _mutate(account):
+            account["fills"] = [
+                {
+                    "id": "buy-1",
+                    "trade_type": "market_buy",
+                    "chain": "solana",
+                    "addr": "token-1",
+                    "symbol": "BONK",
+                    "token_amount": "100",
+                    "amount_usd": "100",
+                    "created_at": 1000,
+                },
+                {
+                    "id": "buy-2",
+                    "trade_type": "limit_buy",
+                    "chain": "solana",
+                    "addr": "token-1",
+                    "symbol": "BONK",
+                    "token_amount": "50",
+                    "amount_usd": "50",
+                    "created_at": 2000,
+                },
+                {
+                    "id": "sell-1",
+                    "trade_type": "market_sell",
+                    "chain": "solana",
+                    "addr": "token-1",
+                    "symbol": "BONK",
+                    "token_amount": "40",
+                    "amount_usd": "80",
+                    "created_at": 3000,
+                },
+            ]
+            account["open_orders"] = [
+                {"id": "ord-1", "addr": "token-1", "chain": "solana", "status": "waiting"},
+                {"id": "ord-2", "addr": "other", "chain": "solana", "status": "waiting"},
+            ]
+
+        mutate_account(self.paper_store, "default", _mutate)
+
+        async def _fake_send_display(conn_obj, screen, data):
+            sent.append((screen, data))
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=_fake_send_display):
+            result = ave_tools.ave_portfolio_activity_detail(
+                conn,
+                addr="token-1",
+                chain="solana",
+                symbol="BONK",
+            )
+            await asyncio.sleep(0)
+
+        self.assertEqual(result.result, "portfolio_activity_detail")
+        self.assertTrue(sent)
+        screen, payload = sent[-1]
+        self.assertEqual(screen, "portfolio")
+        self.assertEqual(payload["view"], "detail")
+        self.assertEqual(payload["mode_label"], "PAPER")
+        self.assertEqual(payload["symbol"], "BONK")
+        self.assertEqual(payload["buy_avg"], "$1.0000")
+        self.assertEqual(payload["buy_total"], "$150")
+        self.assertEqual(payload["sell_avg"], "$2.0000")
+        self.assertEqual(payload["sell_total"], "$80")
+        self.assertEqual(payload["realized_pnl"], "+$40")
+        self.assertEqual(payload["open_orders"], "1")
+        self.assertNotEqual(payload["first_buy"], "N/A")
+        self.assertNotEqual(payload["last_sell"], "N/A")
 
     async def test_key_action_explorer_sync_pushes_current_trade_mode(self):
         conn = self._conn()

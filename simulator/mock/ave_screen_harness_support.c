@@ -20,6 +20,12 @@ AVE_HARNESS_WEAK void lv_obj_set_style_text_align(lv_obj_t *obj, lv_text_align_t
     (void)selector;
 }
 
+AVE_HARNESS_WEAK void lv_label_set_recolor(lv_obj_t *obj, bool en)
+{
+    (void)obj;
+    (void)en;
+}
+
 AVE_HARNESS_WEAK int32_t lv_font_get_line_height(const lv_font_t *font)
 {
     (void)font;
