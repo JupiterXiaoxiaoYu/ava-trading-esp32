@@ -66,8 +66,6 @@ private:
 
     void StoreWakeWordData(const std::vector<int16_t>& data);
     void ParseWakenetModelConfig();
-    void AddCommand(const std::string& command, const std::string& text, const std::string& action);
-    void ExpandWakeCommandAliases();
 };
 
 #endif

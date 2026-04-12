@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from config.logger import setup_logging
 from jinja2 import Template
-from .ave_cloud_skill_prompt import append_ave_cloud_skill_corpus
 
 TAG = __name__
 
@@ -123,9 +122,8 @@ class PromptManager:
             self.cache_manager.set(self.CacheType.CONFIG, device_cache_key, user_prompt)
             self.logger.bind(tag=TAG).debug(f"设备 {device_id} 的提示词已缓存")
 
-        final_prompt = append_ave_cloud_skill_corpus(user_prompt)
-        self.logger.bind(tag=TAG).info(f"使用快速提示词: {final_prompt[:50]}...")
-        return final_prompt
+        self.logger.bind(tag=TAG).info(f"使用快速提示词: {user_prompt[:50]}...")
+        return user_prompt
 
     def _get_current_time_info(self) -> tuple:
         """获取当前时间信息"""
@@ -280,7 +278,6 @@ class PromptManager:
                 *args,
                 **kwargs,
             )
-            enhanced_prompt = append_ave_cloud_skill_corpus(enhanced_prompt)
             device_cache_key = f"device_prompt:{device_id}"
             self.cache_manager.set(
                 self.CacheType.DEVICE_PROMPT, device_cache_key, enhanced_prompt

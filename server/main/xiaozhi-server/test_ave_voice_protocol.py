@@ -3,11 +3,10 @@ import json
 import queue
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from core.connection import ConnectionHandler
 from core.handle.helloHandle import handleHelloMessage
-from core.providers.asr.base import ASRProviderBase
 from core.providers.asr.dto.dto import InterfaceType
 
 
@@ -45,16 +44,6 @@ class _StreamAsr:
         self.stop_request_calls += 1
 
 
-class _ManualSelectionAsr(ASRProviderBase):
-    def __init__(self):
-        super().__init__()
-        self.interface_type = InterfaceType.STREAM
-        self.output_dir = "/tmp"
-
-    async def speech_to_text(self, opus_data, session_id, audio_format="opus", artifacts=None):
-        return "帮我分析这个", None
-
-
 class VoiceProtocolTests(unittest.IsolatedAsyncioTestCase):
     def _build_connection(self):
         conn = ConnectionHandler.__new__(ConnectionHandler)
@@ -77,7 +66,6 @@ class VoiceProtocolTests(unittest.IsolatedAsyncioTestCase):
         conn.client_voice_window = []
         conn.last_is_voice = False
         conn.client_listen_mode = "auto"
-        conn.pending_listen_payload = None
         conn.asr_audio = []
 
         conn.welcome_msg = {
@@ -249,56 +237,6 @@ class VoiceProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reset_calls["count"], 1)
         self.assertTrue(conn.client_voice_stop)
         self.assertEqual(stream_asr.stop_request_calls, 1)
-
-    async def test_asr_voice_stop_forwards_pending_manual_selection_payload(self):
-        conn = self._build_connection()
-        conn.session_id = "selection-test"
-        conn.audio_format = "pcm"
-        conn.voiceprint_provider = None
-        conn.pending_listen_payload = {
-            "type": "listen",
-            "state": "start",
-            "mode": "manual",
-            "selection": {
-                "screen": "feed",
-                "cursor": 1,
-                "token": {"addr": "token-1", "chain": "base", "symbol": "AVA"},
-            },
-        }
-
-        asr = _ManualSelectionAsr()
-
-        with (
-            patch(
-                "core.providers.asr.base.enqueue_asr_report",
-                MagicMock(),
-            ),
-            patch(
-                "core.providers.asr.base.startToChat",
-                AsyncMock(),
-            ) as start_chat,
-        ):
-            await asr.handle_voice_stop(conn, [b"\x00\x00" * 320])
-
-        start_chat.assert_awaited_once_with(
-            conn,
-            "帮我分析这个",
-            message_payload={
-                "type": "listen",
-                "state": "start",
-                "mode": "manual",
-                "selection": {
-                    "screen": "feed",
-                    "cursor": 1,
-                    "token": {
-                        "addr": "token-1",
-                        "chain": "base",
-                        "symbol": "AVA",
-                    },
-                },
-            },
-        )
-        self.assertIsNone(conn.pending_listen_payload)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 import time
 import asyncio
-import copy
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -31,16 +30,10 @@ class ListenTextMessageHandler(TextMessageHandler):
                 f"客户端拾音模式：{conn.client_listen_mode}"
             )
         if msg_json["state"] == "start":
+            selection = msg_json.get("selection")
+            conn.pending_listen_selection = selection if isinstance(selection, dict) else None
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
             conn.reset_audio_states()
-            selection = msg_json.get("selection")
-            conn.pending_listen_payload = {
-                "type": msg_json.get("type", "listen"),
-                "state": "start",
-                "mode": conn.client_listen_mode,
-            }
-            if isinstance(selection, dict):
-                conn.pending_listen_payload["selection"] = copy.deepcopy(selection)
         elif msg_json["state"] == "stop":
             conn.client_voice_stop = True
             if conn.asr.interface_type == InterfaceType.STREAM:
@@ -54,12 +47,9 @@ class ListenTextMessageHandler(TextMessageHandler):
 
                     if len(asr_audio_task) > 0:
                         await conn.asr.handle_voice_stop(conn, asr_audio_task)
-                else:
-                    conn.pending_listen_payload = None
         elif msg_json["state"] == "detect":
             conn.client_have_voice = False
             conn.reset_audio_states()
-            conn.pending_listen_payload = None
             if "text" in msg_json:
                 conn.last_activity_time = time.time() * 1000
                 original_text = msg_json["text"]  # 保留原始文本

@@ -8,7 +8,6 @@
  *   Body:  font 12, gray,  x=12, y=28
  */
 #include "ave_screen_manager.h"
-#include "ave_json_utils.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
 #else
@@ -38,8 +37,14 @@ static int _getf(const char *j, const char *k, char *o, int n)
     if (!p) return 0;
     p += strlen(nd);
     while (*p == ' ' || *p == ':') p++;
-    if (*p != '"') return 0;
-    return ave_json_decode_quoted(p, o, (size_t)n, NULL);
+    if (*p == '"') {
+        p++;
+        int i = 0;
+        while (*p && *p != '"' && i < n - 1) o[i++] = *p++;
+        o[i] = 0;
+        return 1;
+    }
+    return 0;
 }
 
 /* ---- Hide callback ----------------------------------------------------- */
@@ -68,15 +73,11 @@ void screen_notify_show(const char *json_data)
     if (s_overlay) { lv_obj_del(s_overlay); s_overlay = NULL; }
 
     /* Parse JSON fields */
-    char level[16] = {0}, title[80] = {0}, body[128] = {0}, subtitle[128] = {0}, explain_state[32] = {0};
+    char level[16] = {0}, title[80] = {0}, body[128] = {0}, subtitle[128] = {0};
     _getf(json_data, "level", level, sizeof(level));
     _getf(json_data, "title", title, sizeof(title));
     _getf(json_data, "body",  body,  sizeof(body));
     _getf(json_data, "subtitle", subtitle, sizeof(subtitle));
-    _getf(json_data, "explain_state", explain_state, sizeof(explain_state));
-    if (strcmp(explain_state, "deferred_result") == 0) {
-        return;
-    }
     if (body[0] == '\0' && subtitle[0] != '\0') {
         strncpy(body, subtitle, sizeof(body) - 1);
         body[sizeof(body) - 1] = '\0';

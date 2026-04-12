@@ -142,9 +142,7 @@ private:
     bool ave_display_initialized_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
-    bool network_connected_ = false;
     int clock_ticks_ = 0;
-    int next_idle_reconnect_tick_ = 5;
     TaskHandle_t activation_task_handle_ = nullptr;
 
 
@@ -157,8 +155,6 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
-    void HandleClockTickEvent();
-    void TryAutoReconnectInIdle();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 

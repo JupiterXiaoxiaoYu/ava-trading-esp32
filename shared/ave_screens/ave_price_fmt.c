@@ -5,7 +5,6 @@
 
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 void ave_fmt_price(char *buf, size_t n, double price)
@@ -29,54 +28,6 @@ void ave_fmt_price(char *buf, size_t n, double price)
         if (decimals > 12) decimals = 12;
         snprintf(buf, n, "$%.*f", decimals, price);
     }
-}
-
-static void _copy_price(char *buf, size_t n, const char *raw_price)
-{
-    if (!buf || n == 0) return;
-    snprintf(buf, n, "%s", raw_price && raw_price[0] ? raw_price : "$0");
-}
-
-static void _trim_exp_zeros(char *buf)
-{
-    char *e = strchr(buf, 'e');
-    if (!e || !e[1] || !e[2] || !e[3]) return;
-    if ((e[1] == '+' || e[1] == '-') && e[2] == '0') {
-        memmove(e + 2, e + 3, strlen(e + 3) + 1);
-    }
-}
-
-void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
-{
-    char *end = NULL;
-    double price;
-
-    if (!buf || n == 0) return;
-    if (!raw_price || !raw_price[0]) {
-        snprintf(buf, n, "$0");
-        return;
-    }
-
-    price = strtod(raw_price[0] == '$' ? raw_price + 1 : raw_price, &end);
-    if (end == (raw_price[0] == '$' ? raw_price + 1 : raw_price)) {
-        _copy_price(buf, n, raw_price);
-        return;
-    }
-
-    while (*end == ' ') end++;
-    if (*end != '\0') {
-        _copy_price(buf, n, raw_price);
-        return;
-    }
-
-    if (price < 0) price = -price;
-    if (price == 0.0 || price >= 1e-4) {
-        _copy_price(buf, n, raw_price);
-        return;
-    }
-
-    snprintf(buf, n, "$%.2e", price);
-    _trim_exp_zeros(buf);
 }
 
 void ave_fmt_change(char *buf, size_t n, double pct)

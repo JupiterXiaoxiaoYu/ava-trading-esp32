@@ -3,11 +3,14 @@
  * @brief FEED screen - multi-chain token list view with FEED-local Explore/Search-guide overlays.
  *
  * Layout (320x240 landscape):
- *   y=  0..21   top bar (22px): [source label (left)] [context hint (mid)] [N/M counter (far right)]
+ *   y=  0..21   top bar (22px): [source label (left)] [mode label (right)] [N/M counter (far right)]
  *              - ORDERS mode tints the top bar orange.
- *   y= 22..213  list (8 rows x 24px): [Chain 32px] [Symbol 122px] [Price 84px] [Change 60px]
+ *   y= 22..213  list (8 rows x 24px): [Chain 38px] [Symbol 74px] [Price 112px] [Change 82px]
  *   y=214       divider
- *   y=215..239  bottom bar (25px): [navigation hint (left)] [action hint (right)]
+ *   y=215..239  bottom bar (25px) segmented into fixed slots with vertical dividers:
+ *              - left (x=0..79):   navigation hint (e.g. "^ v MOVE")
+ *              - center (x=80..199): source controls (e.g. "< REFRESH  X SOURCE" or "< X SOURCE OFF")
+ *              - right (x=200..319): action hint (e.g. "> DETAIL  Y PORTFOLIO", "> OFF  Y PORTFOLIO")
  *
  * Navigation:
  *   Standard FEED home:
@@ -36,8 +39,6 @@
  *     B        -> send key_action back and exit orders locally (go_to_feed placeholder)
  */
 #include "ave_screen_manager.h"
-#include "ave_font_provider.h"
-#include "ave_json_utils.h"
 #include "ave_transport.h"
 #include "ave_price_fmt.h"
 #if __has_include("lvgl.h")
@@ -85,15 +86,20 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 #define BOTTOM_Y     215
 #define BOTTOM_BAR_H (240 - BOTTOM_Y)
 
+/* Bottom bar segmented slots (320x240):
+ * Prevent hint overlap by reserving explicit widths for left/center/right regions. */
+#define BOT_SLOT_LEFT_W   80
+#define BOT_SLOT_CENTER_W 120
+#define BOT_SLOT_RIGHT_W  (320 - BOT_SLOT_LEFT_W - BOT_SLOT_CENTER_W) /* 120 */
+#define BOT_SLOT_PAD_X    6
+#define BOT_DIV_X1        BOT_SLOT_LEFT_W
+#define BOT_DIV_X2        (BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W)
+
 /* Column x positions (within the row container, i.e. relative to x=0) */
 #define COL_CHAIN_X    4
-#define COL_SYM_X     42
-#define COL_PRICE_X   154
-#define COL_CHG_X     252
-#define COL_OVERLAY_TITLE_X   24
-#define COL_OVERLAY_TITLE_W   84
-#define COL_OVERLAY_DETAIL_X  112
-#define COL_OVERLAY_DETAIL_W  200
+#define COL_SYM_X     44
+#define COL_PRICE_X   120
+#define COL_CHG_X     234
 
 /* ─── Colors ──────────────────────────────────────────────────────────────── */
 #define COLOR_GREEN   lv_color_hex(0x00C853)
@@ -121,15 +127,13 @@ static lv_obj_t *s_lbl_source = NULL;
 static lv_obj_t *s_lbl_src_hint = NULL;
 static lv_obj_t *s_lbl_nav_hint = NULL;
 static lv_obj_t *s_lbl_action_hint = NULL;
+static lv_obj_t *s_lbl_mode = NULL;
 static int s_is_orders_mode = 0;
 static int s_is_search_mode = 0;
 static char s_feed_source_label[24] = "TRENDING";
 static char s_active_source_label[24] = "TRENDING";
 static char s_last_search_query[24] = "";
 static int s_has_special_source_label = 0;
-static int s_feed_session_id = 0;
-static int s_feed_session_valid = 0;
-static int s_cleanup_special_mode = 0;
 
 typedef enum {
     FEED_SURFACE_STANDARD = 0,
@@ -137,14 +141,6 @@ typedef enum {
     FEED_SURFACE_EXPLORE_SEARCH_GUIDE,
     FEED_SURFACE_EXPLORE_SOURCES,
 } feed_surface_t;
-
-typedef enum {
-    FEED_MODE_STANDARD = 0,
-    FEED_MODE_SEARCH,
-    FEED_MODE_ORDERS,
-} feed_mode_t;
-
-static feed_mode_t s_feed_mode = FEED_MODE_STANDARD;
 
 typedef enum {
     FEED_EXPLORE_ITEM_SEARCH = 0,
@@ -174,8 +170,10 @@ typedef struct {
 
 typedef struct {
     feed_surface_t surface;
+    const char *mode_label;
+    int mode_dim;
     const char *nav_hint;
-    const char *top_hint;
+    const char *src_hint;
     const char *action_hint;
     int is_overlay_local;
 } feed_surface_model_t;
@@ -188,9 +186,9 @@ static void _update_rows(void);
 static void _close_feed_overlay(void);
 
 static const feed_explore_item_t EXPLORE_ITEMS[FEED_EXPLORE_ITEM_COUNT] = {
-    {FEED_EXPLORE_ITEM_SEARCH,    "Search",    "Say token",                   FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
-    {FEED_EXPLORE_ITEM_ORDERS,    "Orders",    "Open current orders list",    FEED_SURFACE_STANDARD},
-    {FEED_EXPLORE_ITEM_SOURCES,   "Sources",   "Choose topic or platform",    FEED_SURFACE_STANDARD},
+    {FEED_EXPLORE_ITEM_SEARCH,  "Search",  "FN 说币名",                    FEED_SURFACE_EXPLORE_SEARCH_GUIDE},
+    {FEED_EXPLORE_ITEM_ORDERS,  "Orders",  "Open current orders list",    FEED_SURFACE_STANDARD},
+    {FEED_EXPLORE_ITEM_SOURCES, "Sources", "Choose topic or platform",    FEED_SURFACE_STANDARD},
 };
 
 static const feed_source_entry_t SOURCE_MENU[] = {
@@ -205,12 +203,11 @@ static const feed_source_entry_t SOURCE_MENU[] = {
 };
 
 static const feed_surface_model_t FEED_SURFACE_MODELS[] = {
-    {FEED_SURFACE_STANDARD,             "^ v MOVE", " | < Refresh | X Change", "> Detail | Y Portfolio", 0},
-    {FEED_SURFACE_EXPLORE_PANEL,        "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
-    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "Say token", " | B CLOSE",             "B Back | Y Port",        1},
-    {FEED_SURFACE_EXPLORE_SOURCES,      "^ v MOVE", " | B CLOSE",               "> OPEN | Y PORTFOLIO",   1},
+    {FEED_SURFACE_STANDARD,             "FEED",    1, "^ v MOVE", "< REFRESH  X SOURCE", "> DETAIL  Y PORTFOLIO", 0},
+    {FEED_SURFACE_EXPLORE_PANEL,        "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
+    {FEED_SURFACE_EXPLORE_SEARCH_GUIDE, "EXPLORE", 0, "FN 说币名", "< CLOSE",              "> OFF  Y PORTFOLIO",    1},
+    {FEED_SURFACE_EXPLORE_SOURCES,      "EXPLORE", 0, "^ v MOVE", "< CLOSE",               "> OPEN  Y PORTFOLIO",   1},
 };
-
 
 typedef struct {
     lv_obj_t *row;
@@ -218,23 +215,9 @@ typedef struct {
     lv_obj_t *lbl_sym;
     lv_obj_t *lbl_price;
     lv_obj_t *lbl_chg;
-    lv_obj_t *lbl_subtitle;
-    lv_obj_t *lbl_meta1;
-    lv_obj_t *lbl_meta2;
-    lv_obj_t *lbl_meta3;
-    lv_obj_t *lbl_meta4;
 } feed_row_ui_t;
 
 static feed_row_ui_t s_rows[VISIBLE_ROWS];
-
-static void _apply_overlay_row_layout(feed_row_ui_t *ui);
-static void _apply_token_row_layout(feed_row_ui_t *ui);
-
-static int _center_text_y(const lv_font_t *font)
-{
-    int y = (ROW_H - lv_font_get_line_height(font)) / 2;
-    return (y < 0) ? 0 : y;
-}
 
 static int _source_index_from_label(const char *label)
 {
@@ -274,29 +257,6 @@ static void _apply_source_label(const char *label, int remember_as_feed_source)
     s_has_special_source_label = !_label_is_standard_source(s_active_source_label);
 
     if (s_lbl_source) lv_label_set_text(s_lbl_source, s_active_source_label);
-}
-
-static feed_mode_t _feed_mode_from_mode_string(const char *mode_str)
-{
-    if (!mode_str) return FEED_MODE_STANDARD;
-    if (strcmp(mode_str, "orders") == 0) return FEED_MODE_ORDERS;
-    if (strcmp(mode_str, "search") == 0) return FEED_MODE_SEARCH;
-    return FEED_MODE_STANDARD;
-}
-
-static feed_mode_t _feed_mode_from_source_label(const char *label)
-{
-    if (!label) return FEED_MODE_STANDARD;
-    if (strcmp(label, "ORDERS") == 0) return FEED_MODE_ORDERS;
-    if (strcmp(label, "SEARCH") == 0) return FEED_MODE_SEARCH;
-    return FEED_MODE_STANDARD;
-}
-
-static void _set_feed_mode(feed_mode_t mode)
-{
-    s_feed_mode = mode;
-    s_is_orders_mode = (mode == FEED_MODE_ORDERS);
-    s_is_search_mode = (mode == FEED_MODE_SEARCH);
 }
 
 static void _load_local_placeholder(void)
@@ -355,9 +315,11 @@ static const feed_surface_model_t *_current_surface_model(void)
     if (s_is_orders_mode) {
         static const feed_surface_model_t orders_model = {
             FEED_SURFACE_STANDARD,
+            "ORDERS",
+            0,
             "^ v MOVE",
-            " | VIEW ONLY",
-            "B Back | Y Port",
+            "Orders: view only",
+            "B BACK  Y PORT",
             0,
         };
         return &orders_model;
@@ -365,22 +327,23 @@ static const feed_surface_model_t *_current_surface_model(void)
     if (s_is_search_mode) {
         static const feed_surface_model_t search_model = {
             FEED_SURFACE_STANDARD,
+            "SEARCH",
+            0,
             "^ v MOVE",
-            " | B BACK TO FEED",
-            "> Detail | Y Portfolio",
+            "< X SOURCE OFF",
+            "> DETAIL  Y PORTFOLIO",
             0,
         };
         return &search_model;
     }
-    if (s_feed_surface != FEED_SURFACE_STANDARD) {
-        return _surface_model_for(s_feed_surface);
-    }
     if (s_has_special_source_label) {
         static const feed_surface_model_t special_model = {
             FEED_SURFACE_STANDARD,
+            "SPECIAL",
+            0,
             "^ v MOVE",
-            " | B BACK TO FEED",
-            "> Detail | Y Portfolio",
+            "< X SOURCE OFF",
+            "> DETAIL  Y PORTFOLIO",
             0,
         };
         return &special_model;
@@ -388,12 +351,20 @@ static const feed_surface_model_t *_current_surface_model(void)
     return _surface_model_for(s_feed_surface);
 }
 
+static void _update_mode_identity(const feed_surface_model_t *surface_model)
+{
+    if (!s_lbl_mode) return;
+
+    lv_label_set_text(s_lbl_mode, surface_model->mode_label);
+    lv_obj_set_style_text_color(s_lbl_mode, surface_model->mode_dim ? COLOR_GRAY : COLOR_WHITE, 0);
+}
+
 static void _update_mode_hint(const feed_surface_model_t *surface_model)
 {
     if (!s_lbl_src_hint || !s_lbl_action_hint || !s_lbl_nav_hint) return;
 
     lv_label_set_text(s_lbl_nav_hint, surface_model->nav_hint);
-    lv_label_set_text(s_lbl_src_hint, surface_model->top_hint);
+    lv_label_set_text(s_lbl_src_hint, surface_model->src_hint);
     lv_label_set_text(s_lbl_action_hint, surface_model->action_hint);
 }
 
@@ -418,17 +389,9 @@ static void _render_feed_surface(void)
     s_explore_idx = _clamp_explore_idx(s_explore_idx);
     s_source_menu_idx = _clamp_source_menu_idx(s_source_menu_idx);
 
+    _update_mode_identity(surface_model);
     _update_mode_hint(surface_model);
     _update_rows();
-}
-
-static void _sync_remote_browse_mode(feed_mode_t mode, const char *source_label)
-{
-    _set_feed_mode(mode);
-    _apply_source_label(source_label, 0);
-    if (s_top_bar) {
-        lv_obj_set_style_bg_color(s_top_bar, s_is_orders_mode ? COLOR_ORANGE : COLOR_BAR, 0);
-    }
 }
 
 static void _activate_current_explore_item(void)
@@ -436,9 +399,7 @@ static void _activate_current_explore_item(void)
     const feed_explore_item_t *item = _current_explore_item();
 
     if (item->id == FEED_EXPLORE_ITEM_ORDERS) {
-        _sync_remote_browse_mode(FEED_MODE_ORDERS, "ORDERS");
         ave_send_json("{\"type\":\"key_action\",\"action\":\"orders\"}");
-        s_cleanup_special_mode = 0;
         _close_feed_overlay();
         return;
     }
@@ -449,7 +410,6 @@ static void _activate_current_explore_item(void)
         _render_feed_surface();
         return;
     }
-
 
     if (item->surface == FEED_SURFACE_STANDARD) {
         return;
@@ -478,43 +438,17 @@ static void _activate_current_source_entry(void)
     _close_feed_overlay();
 }
 
-static void _request_current_feed_source(void)
-{
-    int idx = s_source_idx;
-    if (idx < 0 || idx >= N_SOURCES) idx = 0;
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd),
-             "{\"type\":\"key_action\",\"action\":\"feed_source\",\"source\":\"%s\"}",
-             SOURCE_KEYS[idx]);
-    ave_send_json(cmd);
-}
-
 static void _open_explore_panel(void)
 {
     s_feed_surface = FEED_SURFACE_EXPLORE_PANEL;
     s_explore_idx = 0;
-    _set_feed_mode(FEED_MODE_STANDARD);
     _render_feed_surface();
 }
 
 static void _close_feed_overlay(void)
 {
     s_feed_surface = FEED_SURFACE_STANDARD;
-    int refresh_requested = 0;
-
-    if (s_cleanup_special_mode) {
-        s_cleanup_special_mode = 0;
-        s_has_special_source_label = 0;
-        _set_feed_mode(FEED_MODE_STANDARD);
-        _apply_source_label(NULL, 0);
-        _load_local_placeholder();
-        refresh_requested = 1;
-    }
-
     _render_feed_surface();
-    if (refresh_requested) {
-        _request_current_feed_source();
-    }
 }
 
 /* ─── Chain helpers ───────────────────────────────────────────────────────── */
@@ -546,7 +480,6 @@ static lv_color_t _chain_color(const char *chain)
     return COLOR_GRAY;
 }
 
-
 /* ─── JSON parsing ────────────────────────────────────────────────────────── */
 static int _get_json_str_field(const char *obj, const char *key, char *out, int n)
 {
@@ -556,8 +489,14 @@ static int _get_json_str_field(const char *obj, const char *key, char *out, int 
     if (!p) return 0;
     p += strlen(needle);
     while (*p == ' ' || *p == ':') p++;
-    if (*p != '"') return 0;
-    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
+    if (*p == '"') {
+        p++;
+        int i = 0;
+        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
+        out[i] = '\0';
+        return 1;
+    }
+    return 0;
 }
 
 static int _get_json_int_field(const char *obj, const char *key, int def)
@@ -664,6 +603,14 @@ static void _feed_symbol_text(const feed_token_t *t, char *out, size_t out_n)
         out[0] = '\0';
         return;
     }
+    if (t->contract_tail[0]) {
+        snprintf(out, out_n, "%s *%s", t->symbol[0] ? t->symbol : "???", t->contract_tail);
+        return;
+    }
+    if (t->source_tag[0]) {
+        snprintf(out, out_n, "%s %s", t->symbol[0] ? t->symbol : "???", t->source_tag);
+        return;
+    }
     snprintf(out, out_n, "%s", t->symbol[0] ? t->symbol : "???");
 }
 
@@ -684,49 +631,12 @@ static void _set_row_text(feed_row_ui_t *ui,
     lv_label_set_text(ui->lbl_price, price ? price : "");
     lv_label_set_text(ui->lbl_chg, chg ? chg : "");
     lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
-    lv_label_set_text(ui->lbl_subtitle, "");
-    lv_label_set_text(ui->lbl_meta1, "");
-    lv_label_set_text(ui->lbl_meta2, "");
-    lv_label_set_text(ui->lbl_meta3, "");
-    lv_label_set_text(ui->lbl_meta4, "");
 }
 
 static void _clear_row(feed_row_ui_t *ui)
 {
     _set_row_text(ui, COLOR_BG, COLOR_GRAY, COLOR_GRAY, "", "", "", "");
 }
-
-static void _apply_overlay_row_layout(feed_row_ui_t *ui)
-{
-    if (!ui) return;
-    lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-    lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(ui->lbl_sym, COL_OVERLAY_TITLE_X, _center_text_y(ave_font_cjk_16()));
-    lv_obj_set_width(ui->lbl_sym, COL_OVERLAY_TITLE_W);
-    lv_obj_set_pos(ui->lbl_price, COL_OVERLAY_DETAIL_X, _center_text_y(&lv_font_montserrat_14));
-    lv_obj_set_width(ui->lbl_price, COL_OVERLAY_DETAIL_W);
-    lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_LEFT, 0);
-}
-
-static void _apply_token_row_layout(feed_row_ui_t *ui)
-{
-    if (!ui) return;
-    lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-    lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, _center_text_y(&lv_font_montserrat_12));
-    lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
-    lv_obj_set_width(ui->lbl_sym, 110);
-    lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
-    lv_obj_set_width(ui->lbl_price, 88);
-    lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
-}
-
 
 static void _update_overlay_rows(void)
 {
@@ -753,9 +663,7 @@ static void _update_overlay_rows(void)
 
     for (int r = 0; r < VISIBLE_ROWS; r++) {
         feed_row_ui_t *ui = &s_rows[r];
-        lv_obj_set_size(ui->row, 320, ROW_H);
-        lv_obj_set_pos(ui->row, 0, TOP_BAR_H + r * ROW_H);
-        _apply_overlay_row_layout(ui);
+
         if (s_feed_surface == FEED_SURFACE_EXPLORE_PANEL) {
             if (r >= FEED_EXPLORE_ITEM_COUNT) {
                 _clear_row(ui);
@@ -791,7 +699,7 @@ static void _update_overlay_rows(void)
                      s_last_search_query[0] ? s_last_search_query : "No recent search");
             const char *guide_price[VISIBLE_ROWS] = {
                 "Guided entry",
-                "Say token",
+                "FN 说币名",
                 "BONK / PEPE / DOGE",
                 last_search_line,
                 "Y stays global",
@@ -833,31 +741,12 @@ static void _update_overlay_rows(void)
     }
 }
 
-static void _refresh_count_hint(void)
-{
-    if (!s_lbl_count) return;
-    if (s_token_count > 0) {
-        char buf[24];
-        snprintf(buf, sizeof(buf), "%d/%d", s_token_idx + 1, s_token_count);
-        lv_label_set_text(s_lbl_count, buf);
-    } else {
-        lv_label_set_text(s_lbl_count, "");
-    }
-}
-
-static int _visible_row_count(void)
-{
-    return VISIBLE_ROWS;
-}
-
 static void _update_token_rows(void)
 {
     for (int r = 0; r < VISIBLE_ROWS; r++) {
         int tok_idx = s_scroll_top + r;
         feed_row_ui_t *ui = &s_rows[r];
-        lv_obj_set_size(ui->row, 320, ROW_H);
-        lv_obj_set_pos(ui->row, 0, TOP_BAR_H + r * ROW_H);
-        _apply_token_row_layout(ui);
+
         if (tok_idx >= s_token_count) {
             lv_obj_set_style_bg_color(ui->row, COLOR_BG, 0);
             lv_label_set_text(ui->lbl_chain, "");
@@ -869,7 +758,6 @@ static void _update_token_rows(void)
 
         const feed_token_t *t = &s_tokens[tok_idx];
         char sym_buf[48];
-        char price_buf[32];
         lv_color_t row_bg;
         if (tok_idx == s_token_idx)
             row_bg = COLOR_SEL;
@@ -882,10 +770,7 @@ static void _update_token_rows(void)
 
         _feed_symbol_text(t, sym_buf, sizeof(sym_buf));
         lv_label_set_text(ui->lbl_sym, sym_buf);
-        lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-        ave_fmt_price_text(price_buf, sizeof(price_buf), t->price[0] ? t->price : "$0");
-        lv_label_set_text(ui->lbl_price, price_buf);
-        lv_label_set_text(ui->lbl_subtitle, "");
+        lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : "$0");
 
         lv_label_set_text(ui->lbl_chg, t->change_24h[0] ? t->change_24h : "N/A");
         if (!t->change_24h[0] ||
@@ -899,7 +784,11 @@ static void _update_token_rows(void)
         }
     }
 
-    _refresh_count_hint();
+    if (s_lbl_count && s_token_count > 0) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%d/%d", s_token_idx + 1, s_token_count);
+        lv_label_set_text(s_lbl_count, buf);
+    }
 }
 
 static void _update_rows(void)
@@ -941,13 +830,13 @@ static void _build_screen(void)
     lv_obj_set_style_text_font(s_lbl_count, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_lbl_count, "");
 
-    s_lbl_src_hint = lv_label_create(s_top_bar);
-    lv_obj_set_pos(s_lbl_src_hint, 76, 6);
-    lv_obj_set_width(s_lbl_src_hint, 164);
-    lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
-    lv_label_set_text(s_lbl_src_hint, " | < Refresh | X Change");
+    s_lbl_mode = lv_label_create(s_top_bar);
+    lv_obj_align(s_lbl_mode, LV_ALIGN_RIGHT_MID, -74, 0);
+    lv_obj_set_width(s_lbl_mode, 64);
+    lv_label_set_long_mode(s_lbl_mode, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_mode, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_mode, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_lbl_mode, "FEED");
 
     /* ── List rows ───────────────────────────────────────────────────────── */
     for (int r = 0; r < VISIBLE_ROWS; r++) {
@@ -965,60 +854,35 @@ static void _build_screen(void)
 
         /* Chain badge */
         ui->lbl_chain = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, 5);
         lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chain, 32);
+        lv_obj_set_width(ui->lbl_chain, 38);
 
         /* Symbol */
         ui->lbl_sym = lv_label_create(ui->row);
-        lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
-        lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
+        lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, 4);
+        lv_obj_set_style_text_font(ui->lbl_sym, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
         lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_sym, 110);
+        lv_obj_set_width(ui->lbl_sym, 74);
 
         /* Price */
         ui->lbl_price = lv_label_create(ui->row);
-        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_14, 0);
-        lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
+        lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, 5);
+        lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_price, 88);
-        lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_width(ui->lbl_price, 112);
 
         /* Change % */
         ui->lbl_chg = lv_label_create(ui->row);
+        lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, 5);
         lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
-        lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chg, 60);
-        lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
-
-        ui->lbl_subtitle = lv_label_create(ui->row);
-        lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-        lv_label_set_long_mode(ui->lbl_subtitle, LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_color(ui->lbl_subtitle, COLOR_GRAY, 0);
-        lv_label_set_text(ui->lbl_subtitle, "");
-
-        ui->lbl_meta1 = lv_label_create(ui->row);
-        ui->lbl_meta2 = lv_label_create(ui->row);
-        ui->lbl_meta3 = lv_label_create(ui->row);
-        ui->lbl_meta4 = lv_label_create(ui->row);
-        lv_label_set_long_mode(ui->lbl_meta1, LV_LABEL_LONG_CLIP);
-        lv_label_set_long_mode(ui->lbl_meta2, LV_LABEL_LONG_CLIP);
-        lv_label_set_long_mode(ui->lbl_meta3, LV_LABEL_LONG_CLIP);
-        lv_label_set_long_mode(ui->lbl_meta4, LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_color(ui->lbl_meta1, COLOR_GRAY, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta2, COLOR_GRAY, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta3, COLOR_GRAY, 0);
-        lv_obj_set_style_text_color(ui->lbl_meta4, COLOR_GRAY, 0);
-        lv_label_set_text(ui->lbl_meta1, "");
-        lv_label_set_text(ui->lbl_meta2, "");
-        lv_label_set_text(ui->lbl_meta3, "");
-        lv_label_set_text(ui->lbl_meta4, "");
+        lv_obj_set_width(ui->lbl_chg, 82);
     }
 
     /* ── Divider ─────────────────────────────────────────────────────────── */
@@ -1039,39 +903,87 @@ static void _build_screen(void)
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_lbl_nav_hint = lv_label_create(bot);
+    /* Explicit left/center/right slots prevent overlap on 320x240. */
+    lv_obj_t *bot_left = lv_obj_create(bot);
+    lv_obj_set_size(bot_left, BOT_SLOT_LEFT_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_left, 0, 0);
+    lv_obj_set_style_bg_opa(bot_left, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_left, 0, 0);
+    lv_obj_set_style_pad_all(bot_left, 0, 0);
+    lv_obj_clear_flag(bot_left, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *bot_center = lv_obj_create(bot);
+    lv_obj_set_size(bot_center, BOT_SLOT_CENTER_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_center, BOT_SLOT_LEFT_W, 0);
+    lv_obj_set_style_bg_opa(bot_center, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_center, 0, 0);
+    lv_obj_set_style_pad_all(bot_center, 0, 0);
+    lv_obj_clear_flag(bot_center, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *bot_right = lv_obj_create(bot);
+    lv_obj_set_size(bot_right, BOT_SLOT_RIGHT_W, BOTTOM_BAR_H);
+    lv_obj_set_pos(bot_right, BOT_SLOT_LEFT_W + BOT_SLOT_CENTER_W, 0);
+    lv_obj_set_style_bg_opa(bot_right, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(bot_right, 0, 0);
+    lv_obj_set_style_pad_all(bot_right, 0, 0);
+    lv_obj_clear_flag(bot_right, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_lbl_nav_hint = lv_label_create(bot_left);
     lv_label_set_long_mode(s_lbl_nav_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_lbl_nav_hint, 88);
-    lv_obj_align(s_lbl_nav_hint, LV_ALIGN_LEFT_MID, 8, 0);
+    lv_obj_set_width(s_lbl_nav_hint, BOT_SLOT_LEFT_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_nav_hint, LV_ALIGN_LEFT_MID, BOT_SLOT_PAD_X, 0);
     lv_label_set_text(s_lbl_nav_hint, "^ v MOVE");
     lv_obj_set_style_text_color(s_lbl_nav_hint, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_nav_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_nav_hint, LV_TEXT_ALIGN_LEFT, 0);
 
-    s_lbl_action_hint = lv_label_create(bot);
+    s_lbl_src_hint = lv_label_create(bot_center);
+    lv_label_set_long_mode(s_lbl_src_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_lbl_src_hint, BOT_SLOT_CENTER_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_src_hint, LV_ALIGN_CENTER, 0, 0);
+    lv_label_set_text(s_lbl_src_hint, "< REFRESH  X SOURCE");
+    lv_obj_set_style_text_color(s_lbl_src_hint, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_src_hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_src_hint, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_lbl_action_hint = lv_label_create(bot_right);
     lv_label_set_long_mode(s_lbl_action_hint, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_lbl_action_hint, 200);
-    lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -8, 0);
-    lv_label_set_text(s_lbl_action_hint, "> Detail | Y Portfolio");
+    lv_obj_set_width(s_lbl_action_hint, BOT_SLOT_RIGHT_W - 2 * BOT_SLOT_PAD_X);
+    lv_obj_align(s_lbl_action_hint, LV_ALIGN_RIGHT_MID, -BOT_SLOT_PAD_X, 0);
+    lv_label_set_text(s_lbl_action_hint, "> DETAIL  Y PORTFOLIO");
     lv_obj_set_style_text_color(s_lbl_action_hint, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_action_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_action_hint, LV_TEXT_ALIGN_RIGHT, 0);
+
+    /* Vertical dividers between slots (also used by the screenshot gate).
+     * Create last so they stay visible even if a label ever regresses to overlap. */
+    lv_obj_t *vdiv1 = lv_obj_create(bot);
+    lv_obj_set_size(vdiv1, 1, BOTTOM_BAR_H);
+    lv_obj_set_pos(vdiv1, BOT_DIV_X1, 0);
+    lv_obj_set_style_bg_color(vdiv1, COLOR_DIVIDER, 0);
+    lv_obj_set_style_bg_opa(vdiv1, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(vdiv1, 0, 0);
+    lv_obj_set_style_pad_all(vdiv1, 0, 0);
+    lv_obj_clear_flag(vdiv1, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *vdiv2 = lv_obj_create(bot);
+    lv_obj_set_size(vdiv2, 1, BOTTOM_BAR_H);
+    lv_obj_set_pos(vdiv2, BOT_DIV_X2, 0);
+    lv_obj_set_style_bg_color(vdiv2, COLOR_DIVIDER, 0);
+    lv_obj_set_style_bg_opa(vdiv2, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(vdiv2, 0, 0);
+    lv_obj_set_style_pad_all(vdiv2, 0, 0);
+    lv_obj_clear_flag(vdiv2, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 /* ─── Public screen API ───────────────────────────────────────────────────── */
 
 void screen_feed_show(const char *json_data)
 {
-    char prev_selected_token_id[80] = {0};
-    int prev_token_idx = s_token_idx;
-    int prev_scroll_top = s_scroll_top;
-
     if (!s_screen) _build_screen();
     lv_screen_load(s_screen);
 
-    s_cleanup_special_mode = 0;
     if (_is_empty_payload(json_data)) {
-        _set_feed_mode(FEED_MODE_STANDARD);
         s_is_orders_mode = 0;
         s_is_search_mode = 0;
         s_feed_surface = FEED_SURFACE_STANDARD;
@@ -1084,9 +996,7 @@ void screen_feed_show(const char *json_data)
     }
 
     int has_tokens = (json_data && strstr(json_data, "\"tokens\"") != NULL);
-    int is_live_push = _get_json_int_field(json_data, "live", 0);
-    int incoming_feed_session = _get_json_int_field(json_data, "feed_session", -1);
-    int has_feed_session = (incoming_feed_session >= 0);
+    int is_live_push = (json_data && strstr(json_data, "\"live\":true") != NULL);
     char source_label[24] = {0};
     char search_query[24] = {0};
     char mode[16] = {0};
@@ -1094,22 +1004,7 @@ void screen_feed_show(const char *json_data)
     int has_source_label = _get_json_str_field(json_data, "source_label", source_label, sizeof(source_label));
     int has_search_query = _get_json_str_field(json_data, "search_query", search_query, sizeof(search_query));
     int has_mode = _get_json_str_field(json_data, "mode", mode, sizeof(mode));
-    feed_mode_t incoming_mode = FEED_MODE_STANDARD;
     int prev_orders_mode = s_is_orders_mode;
-
-    if (is_live_push) {
-        /* Live pushes are only valid for the current feed session. */
-        if (s_feed_session_valid) {
-            if (!has_feed_session) return;
-            if (incoming_feed_session != s_feed_session_id) return;
-        }
-    } else if (has_tokens && has_feed_session) {
-        s_feed_session_id = incoming_feed_session;
-        s_feed_session_valid = 1;
-    } else if (has_tokens) {
-        s_feed_session_id = 0;
-        s_feed_session_valid = 0;
-    }
 
     snprintf(prev_label, sizeof(prev_label), "%s", s_active_source_label);
 
@@ -1118,20 +1013,26 @@ void screen_feed_show(const char *json_data)
     }
 
     if (has_mode) {
-        incoming_mode = _feed_mode_from_mode_string(mode);
-    } else if (has_source_label) {
-        incoming_mode = _feed_mode_from_source_label(source_label);
-    } else if (has_tokens) {
-        incoming_mode = FEED_MODE_STANDARD;
+        s_is_orders_mode = (strcmp(mode, "orders") == 0);
+        s_is_search_mode = (strcmp(mode, "search") == 0);
+    } else {
+        if (has_source_label) {
+            s_is_search_mode = (strcmp(source_label, "SEARCH") == 0);
+        } else if (has_tokens) {
+            /* Fresh list without an explicit SEARCH label should clear SEARCH mode. */
+            s_is_search_mode = 0;
+        }
+
+        /* Fresh non-orders payloads should leave orders mode. */
+        if (has_tokens) s_is_orders_mode = 0;
     }
-    _set_feed_mode(incoming_mode);
 
     if (s_lbl_source) {
         if (has_source_label && source_label[0]) {
-            _apply_source_label(source_label, s_feed_mode == FEED_MODE_STANDARD);
-        } else if (s_feed_mode == FEED_MODE_ORDERS) {
+            _apply_source_label(source_label, !s_is_orders_mode);
+        } else if (s_is_orders_mode) {
             _apply_source_label("ORDERS", 0);
-        } else if (s_feed_mode == FEED_MODE_SEARCH) {
+        } else if (s_is_search_mode) {
             _apply_source_label("SEARCH", 0);
         } else if (!s_is_orders_mode && has_tokens) {
             _apply_source_label(NULL, 0);
@@ -1158,75 +1059,19 @@ void screen_feed_show(const char *json_data)
 
     if (has_tokens || s_token_count == 0) {
         int requested_cursor = _get_json_int_field(json_data, "cursor", -1);
-        int max_scroll_top = 0;
-
-        if (is_live_push &&
-            requested_cursor < 0 &&
-            prev_token_idx >= 0 &&
-            prev_token_idx < s_token_count &&
-            s_tokens[prev_token_idx].token_id[0]) {
-            snprintf(prev_selected_token_id,
-                     sizeof(prev_selected_token_id),
-                     "%s",
-                     s_tokens[prev_token_idx].token_id);
-        }
-
         _parse_tokens_from_json(json_data);
         if (has_tokens) {
-            /* Non-live list payloads reset to top unless a restore cursor is supplied.
-             * Live refreshes preserve the user's current selection/viewport when possible. */
+            /* New list payloads reset to top unless a restore cursor is supplied. */
             if (requested_cursor >= 0 && requested_cursor < s_token_count) {
                 s_token_idx = requested_cursor;
-            } else if (is_live_push && prev_selected_token_id[0]) {
-                int matched_idx = -1;
-                int i;
-                for (i = 0; i < s_token_count; i++) {
-                    if (strcmp(s_tokens[i].token_id, prev_selected_token_id) == 0) {
-                        matched_idx = i;
-                        break;
-                    }
-                }
-                if (matched_idx >= 0) {
-                    s_token_idx = matched_idx;
-                } else if (s_token_count > 0) {
-                    if (prev_token_idx < 0) prev_token_idx = 0;
-                    if (prev_token_idx >= s_token_count) prev_token_idx = s_token_count - 1;
-                    s_token_idx = prev_token_idx;
-                } else {
-                    s_token_idx = 0;
-                }
             } else {
                 s_token_idx = 0;
             }
-
-            int visible_rows = _visible_row_count();
-            max_scroll_top = (s_token_count > visible_rows) ? (s_token_count - visible_rows) : 0;
-            if (is_live_push && requested_cursor < 0) {
-                s_scroll_top = prev_scroll_top;
-                if (s_scroll_top < 0) s_scroll_top = 0;
-                if (s_scroll_top > max_scroll_top) s_scroll_top = max_scroll_top;
-                if (s_token_idx < s_scroll_top) {
-                    s_scroll_top = s_token_idx;
-                } else if (s_token_idx >= s_scroll_top + visible_rows) {
-                    s_scroll_top = s_token_idx - visible_rows + 1;
-                }
-            } else {
-                s_scroll_top = (s_token_idx >= visible_rows) ? (s_token_idx - visible_rows + 1) : 0;
-            }
+            s_scroll_top = (s_token_idx >= VISIBLE_ROWS) ? (s_token_idx - VISIBLE_ROWS + 1) : 0;
         }
     }
 
     _update_rows();
-}
-
-void screen_feed_reveal(void)
-{
-    if (!s_screen) {
-        screen_feed_show("{}");
-        return;
-    }
-    lv_screen_load(s_screen);
-    _render_feed_surface();
 }
 
 static void _move_selection(int delta)
@@ -1234,13 +1079,10 @@ static void _move_selection(int delta)
     if (s_token_count < 1) return;
     s_token_idx = (s_token_idx + delta + s_token_count) % s_token_count;
     /* Scroll window to keep selection visible */
-    int visible_rows = _visible_row_count();
     if (s_token_idx < s_scroll_top)
         s_scroll_top = s_token_idx;
-    else if (s_token_idx >= s_scroll_top + visible_rows)
-        s_scroll_top = s_token_idx - visible_rows + 1;
-    int max_scroll = (s_token_count > visible_rows) ? (s_token_count - visible_rows) : 0;
-    if (s_scroll_top > max_scroll) s_scroll_top = max_scroll;
+    else if (s_token_idx >= s_scroll_top + VISIBLE_ROWS)
+        s_scroll_top = s_token_idx - VISIBLE_ROWS + 1;
     _update_rows();
 }
 
@@ -1252,7 +1094,6 @@ static void _enter_selected_detail(void)
         {"token_id", ""},
         {"chain", ""},
         {"cursor", cursor_buf},
-        {"origin", "feed"},
     };
 
     if (s_token_count < 1) return;
@@ -1262,7 +1103,7 @@ static void _enter_selected_detail(void)
     snprintf(cursor_buf, sizeof(cursor_buf), "%d", s_token_idx);
     fields[0].value = t->token_id;
     fields[1].value = t->chain;
-    if (!ave_sm_build_key_action_json("watch", fields, 4, cmd, sizeof(cmd))) return;
+    if (!ave_sm_build_key_action_json("watch", fields, 3, cmd, sizeof(cmd))) return;
     ave_send_json(cmd);
     printf("[FEED] WATCH -> %s (%s)\n", t->symbol, t->chain);
 }
@@ -1310,7 +1151,7 @@ void screen_feed_key(int key)
     }
 
     if (key == AVE_KEY_B && _is_standard_feed_home()) {
-        ave_sm_open_explorer();
+        _open_explore_panel();
         return;
     }
 
@@ -1399,11 +1240,6 @@ bool screen_feed_should_ignore_live_push(void)
            s_is_search_mode ||
            s_has_special_source_label ||
            _feed_overlay_active();
-}
-
-const char *screen_feed_get_last_search_query(void)
-{
-    return s_last_search_query;
 }
 
 int screen_feed_get_selected_context_json(char *out, size_t out_n)

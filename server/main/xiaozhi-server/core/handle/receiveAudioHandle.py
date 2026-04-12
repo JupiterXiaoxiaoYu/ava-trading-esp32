@@ -56,6 +56,12 @@ async def startToChat(conn: "ConnectionHandler", text, message_payload=None):
     actual_text = text
     utterance_payload = message_payload if isinstance(message_payload, dict) else None
 
+    if utterance_payload is None:
+        cached_selection = getattr(conn, "pending_listen_selection", None)
+        if isinstance(cached_selection, dict):
+            utterance_payload = {"selection": copy.deepcopy(cached_selection)}
+        conn.pending_listen_selection = None
+
     try:
         # 尝试解析JSON格式的输入
         if text.strip().startswith("{") and text.strip().endswith("}"):

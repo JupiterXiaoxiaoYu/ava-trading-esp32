@@ -17,14 +17,14 @@ server:
   # 当你使用docker部署或使用公网部署(使用ssl、域名)时，不一定准确
   # 所以如果你使用docker部署时，将websocket设置成局域网地址
   # 如果你使用公网部署时，将vwebsocket设置成公网地址
-  websocket: wss://jupdev.tech/xiaozhi/v1/
+  websocket: ws://你的ip或者域名:端口号/xiaozhi/v1/
   # 视觉分析接口地址
   # 向设备发送的视觉分析的接口地址
   # 如果按下面默认的写法，系统会自动生成视觉识别地址，并输出在启动日志里，这个地址你可以直接用浏览器访问确认一下
   # 当你使用docker部署或使用公网部署(使用ssl、域名)时，不一定准确
   # 所以如果你使用docker部署时，将vision_explain设置成局域网地址
   # 如果你使用公网部署时，将vision_explain设置成公网地址
-  vision_explain: https://jupdev.tech/mcp/vision/explain
+  vision_explain: http://你的ip或者域名:端口号/mcp/vision/explain
   # OTA返回信息时区偏移量
   timezone_offset: +8
   # 认证配置
@@ -74,12 +74,6 @@ enable_stop_tts_notify: false
 stop_tts_notify_voice: "config/assets/tts_notify.mp3"
 # 是否启用WebSocket心跳保活机制
 enable_websocket_ping: true
-# 服务端主动向设备发送应用层 WebSocket ping 的间隔(秒)
-websocket_heartbeat_interval: 30
-# websockets 传输层 ping 间隔(秒)
-websocket_transport_ping_interval: 30
-# websockets 传输层 ping 超时(秒)
-websocket_transport_ping_timeout: 10
 
 
 # TTS音频发送延迟配置
@@ -112,48 +106,17 @@ module_test:
 
 # 唤醒词，用于识别唤醒词还是讲话内容
 wakeup_words:
-  - "Hey Ava"
-  - "Hi Ava"
-  - "Hello Ava"
-  - "Ava"
-  - "Hey Eva"
-  - "Hi Eva"
-  - "Hello Eva"
-  - "Eva"
-  - "Hey Ai Wa"
-  - "Hi Ai Wa"
-  - "Hello Ai Wa"
-  - "Ai Wa"
-  - "Ni Hao Ava"
-  - "Nihao Ava"
-  - "Ni Hao Eva"
-  - "Nihao Eva"
-  - "Ni Hao Ai Wa"
-  - "Nihao Ai Wa"
-  - "hey ava"
-  - "hi ava"
-  - "hello ava"
-  - "ava"
-  - "hey eva"
-  - "hi eva"
-  - "hello eva"
-  - "eva"
-  - "hey ai wa"
-  - "hi ai wa"
-  - "hello ai wa"
-  - "ai wa"
-  - "ni hao ava"
-  - "nihao ava"
-  - "ni hao eva"
-  - "nihao eva"
-  - "ni hao ai wa"
-  - "nihao ai wa"
-  - "你好Ava"
-  - "嗨Ava"
-  - "嘿Ava"
-  - "艾娃"
-  - "诶娃"
-  - "欸娃"
+  - "你好小智"
+  - "嘿你好呀"
+  - "你好小志"
+  - "小爱同学"
+  - "你好小鑫"
+  - "你好小新"
+  - "小美同学"
+  - "小龙小龙"
+  - "喵喵同学"
+  - "小滨小滨"
+  - "小冰小冰"
 # MCP接入点地址，地址格式为：ws://你的mcp接入点ip或者域名:端口号/mcp/?token=你的token
 # 详细教程 https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/mcp-endpoint-integration.md
 mcp_endpoint: 你的接入点 websocket地址
@@ -301,7 +264,7 @@ selected_module:
   # 将根据配置名称对应的type调用实际的LLM适配器
   LLM: AliLLM
   # 视觉语言大模型
-  VLLM: QwenVLVLLM
+  VLLM: ChatGLMVLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: EdgeTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
@@ -405,7 +368,7 @@ Memory:
       config:
         api_key: 你的嵌入模型API密钥
         model: text-embedding-v4
-        openai_base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+        openai_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
         # embedding_dims: 1024  # 向量维度，非1536时需配置
 
     # ========== Database 配置 ==========
@@ -605,7 +568,7 @@ ASR:
     # 3.Qwen3-ASR-Flash基于通义千问多模态基座，支持多语言识别、歌唱识别、噪声拒识等功能
     type: qwen3_asr_flash
     api_key: 你的阿里云百炼API密钥
-    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-asr-flash
     output_dir: tmp/
     # ASR选项配置
@@ -624,7 +587,6 @@ ASR:
     sample_rate: 16000
     output_dir: tmp/
     language: zh
-    context: "常用词：Ava、Eva、Ai Wa、艾娃、诶娃、欸娃、AVA、AVE、Hey Ava、Hi Ava、Hello Ava、Ni Hao Ava、代币详情页、详情页、spotlight、feed、钱包、持仓、买入、卖出、pump.fun、4.meme。若识别到接近 Ava / Eva / Ai Wa 的发音，优先输出 Ava。"  # 常用词/品牌词上下文，可提升专有词识别
     threshold: 0.2
     silence_duration_ms: 800
   XunfeiStreamASR:
@@ -687,7 +649,7 @@ LLM:
     # 定义LLM API类型
     type: openai
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
-    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     model_name: qwen3-235b-a22b
     api_key: 你的阿里云百炼API密钥
     temperature: 0.7  # 温度值
@@ -697,7 +659,7 @@ LLM:
   AliAppLLM:
     # 定义LLM API类型
     type: AliBL
-    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     app_id: 你的app_id
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     api_key: 你的api_key
@@ -824,7 +786,7 @@ VLLM:
   QwenVLVLLM:
     type: openai
     model_name: qwen2.5-vl-3b-instruct
-    url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1
     # 可在这里找到你的api key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     api_key: 你的api_key
   XunfeiSparkLLM:

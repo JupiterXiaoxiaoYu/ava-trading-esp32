@@ -40,22 +40,3 @@ def test_server_event_parser_surfaces_ready_and_final_transcript():
     )
     assert completed["server_ready"] is False
     assert completed["final_transcript"] == "进入代币详情页"
-
-
-def test_session_update_includes_corpus_when_context_configured():
-    provider = ASRProvider(
-        {
-            "api_key": "test-key",
-            "language": "zh",
-            "context": "Ava 艾娃 AVE 详情页",
-        },
-        delete_audio_file=True,
-    )
-
-    event = provider._build_session_update_event(manual_mode=False)
-
-    assert event["session"]["input_audio_transcription"]["language"] == "zh"
-    assert event["session"]["input_audio_transcription"]["corpus"] == {
-        "text": "Ava 艾娃 AVE 详情页"
-    }
-    assert event["session"]["turn_detection"]["type"] == "server_vad"

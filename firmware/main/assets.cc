@@ -19,8 +19,6 @@
 #define TAG "Assets"
 #define PARTITION_LABEL "assets"
 
-extern const lv_img_dsc_t ava_wifi_image;
-
 struct mmap_assets_table {
     char asset_name[32];          /*!< Name of the asset */
     uint32_t asset_size;          /*!< Size of the asset */
@@ -280,9 +278,6 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
                 }
             }
         }
-        // Keep local-only UI assets available even when the generated assets bundle overrides emojis.
-        custom_emoji_collection->AddEmoji("neutral", new LvglSourceImage(&ava_wifi_image));
-        custom_emoji_collection->AddEmoji("wifi_ava", new LvglSourceImage(&ava_wifi_image));
         if (light_theme != nullptr) {
             light_theme->set_emoji_collection(custom_emoji_collection);
         }
