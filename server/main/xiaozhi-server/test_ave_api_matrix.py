@@ -809,6 +809,20 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent[0][1]["amount_usd"], amount_usd)
             self.assertNotIn("out_amount", sent[0][1])
 
+    def test_token_amount_display_is_truncated_to_six_decimals(self):
+        self.assertEqual(
+            ave_tools._format_token_units("123456789", 8, "BONK"),
+            "1.234567 BONK",
+        )
+        self.assertEqual(
+            ave_tools._normalize_display_amount_text("1.23456789 BONK"),
+            "1.234567 BONK",
+        )
+        self.assertEqual(
+            ave_tools._normalize_display_amount_text("0.000000123456 BONK"),
+            "1.23456e-07 BONK",
+        )
+
     async def test_ave_risk_check_blocks_honeypot_and_pushes_notify(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)

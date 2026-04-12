@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -652,12 +652,13 @@ def _format_token_units(raw_amount, decimals=None, symbol: str = "") -> str:
     if decimals not in (None, ""):
         try:
             scaled = Decimal(amount_text) / (Decimal(10) ** int(decimals))
-            amount_text = format(scaled.normalize(), "f")
+            amount_text = _format_display_amount(scaled)
         except (InvalidOperation, TypeError, ValueError, OverflowError):
             amount_text = str(raw_amount)
-
-    if "." in amount_text:
-        amount_text = amount_text.rstrip("0").rstrip(".") or "0"
+    else:
+        parsed_amount = _parse_decimal_amount(amount_text)
+        if parsed_amount is not None:
+            amount_text = _format_display_amount(parsed_amount)
 
     return f"{amount_text} {symbol}".strip()
 
@@ -669,7 +670,7 @@ def _format_quote_out_amount(quote_resp: dict, symbol: str = "") -> str:
 
     formatted = data.get("outAmountFormatted", data.get("estimateOutFormatted", data.get("out_amount_formatted", "")))
     if formatted:
-        return str(formatted)
+        return _normalize_display_amount_text(str(formatted))
 
     return _format_token_units(
         data.get("estimateOut", data.get("outAmount", data.get("out_amount", ""))),
@@ -2084,6 +2085,43 @@ def _parse_decimal_amount(value):
         return None
 
 
+def _format_display_amount(value, *, max_decimals: int = 6) -> str:
+    amount = _parse_decimal_amount(value)
+    if amount is None:
+        return ""
+    if amount == 0:
+        return "0"
+
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    tiny_threshold = Decimal(1) / (Decimal(10) ** max_decimals)
+    if amount < tiny_threshold:
+        return f"{sign}{float(amount):.{max_decimals - 1}e}"
+
+    quant = Decimal(1) / (Decimal(10) ** max_decimals)
+    truncated = amount.quantize(quant, rounding=ROUND_DOWN)
+    text = format(truncated, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".") or "0"
+    return f"{sign}{text}"
+
+
+def _normalize_display_amount_text(text: str, *, max_decimals: int = 6) -> str:
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return ""
+
+    parts = raw_text.split(None, 1)
+    amount = _parse_decimal_amount(parts[0])
+    if amount is None:
+        return raw_text
+
+    formatted = _format_display_amount(amount, max_decimals=max_decimals)
+    if len(parts) == 1:
+        return formatted
+    return f"{formatted} {parts[1].strip()}".strip()
+
+
 def _decimal_to_string(value) -> str:
     if value is None:
         return ""
@@ -3046,7 +3084,7 @@ def _paper_position_key(addr: str, chain: str) -> str:
 
 
 def _format_paper_amount(amount: Decimal, symbol: str) -> str:
-    return f"{_decimal_to_string(amount)} {symbol}".strip()
+    return f"{_format_display_amount(amount)} {symbol}".strip()
 
 
 def _paper_market_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
@@ -3493,7 +3531,7 @@ def _pick_result_out_amount(data: dict) -> str:
     for key in ("outAmountFormatted", "out_amount_formatted", "estimateOutFormatted"):
         value = data.get(key)
         if value not in (None, ""):
-            return str(value)
+            return _normalize_display_amount_text(str(value))
 
     for key in ("outAmount", "out_amount", "estimateOut"):
         value = data.get(key)
