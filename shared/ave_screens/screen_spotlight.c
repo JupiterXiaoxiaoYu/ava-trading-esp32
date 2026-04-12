@@ -788,7 +788,7 @@ void screen_spotlight_show(const char *json_data)
     lv_label_set_text(s_lbl_change,change[0] ? change : "N/A");
     lv_obj_set_style_text_color(s_lbl_change,
         change_pos ? COLOR_GREEN : COLOR_RED, 0);
-    lv_label_set_text(s_lbl_origin, origin_hint[0] ? origin_hint : "");
+    lv_label_set_text(s_lbl_origin, "");
 
     /* Chart — parse pre-normalized int array (always [0..1000] from server) */
     int16_t pts[MAX_CHART_PTS];

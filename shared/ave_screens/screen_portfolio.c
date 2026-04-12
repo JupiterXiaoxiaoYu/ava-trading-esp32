@@ -12,6 +12,7 @@
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
 #include "ave_json_utils.h"
+#include "ave_price_fmt.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -451,6 +452,7 @@ static void _refresh_rows(void) {
         if (idx < s_holding_count) {
             holding_t *h = &s_holdings[idx];
             char sym_buf[64];
+            char avg_buf[24];
             char source_tag[8];
             _compact_upper_tag(h->source_tag, source_tag, sizeof(source_tag), 4);
             if (h->contract_tail[0] && source_tag[0]) {
@@ -465,7 +467,8 @@ static void _refresh_rows(void) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s", h->symbol);
             }
             lv_label_set_text(s_row_sym[i], sym_buf);
-            lv_label_set_text(s_row_avg[i], h->avg_cost_usd[0] ? h->avg_cost_usd : "N/A");
+            ave_fmt_price_text(avg_buf, sizeof(avg_buf), h->avg_cost_usd[0] ? h->avg_cost_usd : "N/A");
+            lv_label_set_text(s_row_avg[i], avg_buf);
             lv_label_set_text(s_row_val[i], h->value_usd[0] ? h->value_usd : "--");
             lv_label_set_text(s_row_pnl[i], h->pnl[0] ? h->pnl : "N/A");
             lv_color_t pnl_color;
@@ -829,6 +832,7 @@ void screen_portfolio_show(const char *json_data)
         char note[64] = {0};
         char buy_avg[24] = {0}, buy_total[24] = {0};
         char sell_avg[24] = {0}, sell_total[24] = {0};
+        char buy_avg_fmt[24] = {0}, sell_avg_fmt[24] = {0};
         char realized_pnl[24] = {0}, open_orders[16] = {0};
         char first_buy[24] = {0}, last_buy[24] = {0};
         char first_sell[24] = {0}, last_sell[24] = {0};
@@ -853,6 +857,8 @@ void screen_portfolio_show(const char *json_data)
         _str_portfolio_top_level(json_data, "addr", s_detail_addr, sizeof(s_detail_addr));
         _str_portfolio_top_level(json_data, "chain", s_detail_chain, sizeof(s_detail_chain));
         _str_portfolio_top_level(json_data, "symbol", s_detail_symbol, sizeof(s_detail_symbol));
+        ave_fmt_price_text(buy_avg_fmt, sizeof(buy_avg_fmt), buy_avg[0] ? buy_avg : "N/A");
+        ave_fmt_price_text(sell_avg_fmt, sizeof(sell_avg_fmt), sell_avg[0] ? sell_avg : "N/A");
 
         s_showing_detail = 1;
         lv_screen_load(s_detail_screen);
@@ -865,9 +871,9 @@ void screen_portfolio_show(const char *json_data)
         else snprintf(subtitle, sizeof(subtitle), "TOKEN ACTIVITY");
         lv_label_set_text(s_detail_lbl_subtitle, subtitle);
 
-        _set_detail_metric_cell(s_detail_metric[0][0], "Buy Avg", buy_avg);
+        _set_detail_metric_cell(s_detail_metric[0][0], "Buy Avg", buy_avg_fmt);
         _set_detail_metric_cell(s_detail_metric[0][1], "Buy Tot", buy_total);
-        _set_detail_metric_cell(s_detail_metric[1][0], "Sell Avg", sell_avg);
+        _set_detail_metric_cell(s_detail_metric[1][0], "Sell Avg", sell_avg_fmt);
         _set_detail_metric_cell(s_detail_metric[1][1], "Sell Tot", sell_total);
         _set_detail_metric_cell(s_detail_metric[2][0], "P&L", realized_pnl);
         _set_detail_metric_cell(s_detail_metric[2][1], "Open", open_orders);
