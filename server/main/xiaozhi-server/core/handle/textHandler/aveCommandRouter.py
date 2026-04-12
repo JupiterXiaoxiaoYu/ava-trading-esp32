@@ -67,6 +67,10 @@ _OPEN_ENDED_DEICTIC_PATTERN = re.compile(
 _SELECTION_GUARDED_SCREENS = {"feed", "browse", "portfolio", "spotlight", "confirm", "limit_confirm"}
 
 _WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
+_SEARCH_SYMBOL_PATTERN = re.compile(
+    r"^(?:搜索|搜一下|搜|查找|查一下|查|search|find|lookup)([A-Za-z][A-Za-z0-9._-]{1,63})$",
+    re.IGNORECASE,
+)
 _BUY_SYMBOL_PATTERN = re.compile(r"^买([A-Za-z][A-Za-z0-9._-]{1,15})$")
 _BUY_SYMBOL_FUZZY_PATTERN = re.compile(
     r"(?:买|买入|购买|buy|purchase)\s*([A-Za-z][A-Za-z0-9._-]{1,15})",
@@ -1030,6 +1034,14 @@ async def try_route_ave_command(
             )
         else:
             await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=symbol))
+        _refresh_turn_context()
+        return True
+
+    search_symbol_match = _SEARCH_SYMBOL_PATTERN.match(normalized)
+    if search_symbol_match:
+        keyword = search_symbol_match.group(1).upper()
+        await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
+        await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=keyword))
         _refresh_turn_context()
         return True
 

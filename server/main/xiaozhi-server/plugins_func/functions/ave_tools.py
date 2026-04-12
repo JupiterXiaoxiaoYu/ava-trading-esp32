@@ -4530,7 +4530,9 @@ ave_search_token_desc = {
 def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"):
     """搜索代币并推送结果到设备 FEED 屏幕"""
     try:
-        params = {"keyword": keyword, "chain": chain, "limit": 20}
+        params = {"keyword": keyword, "limit": 20}
+        if chain and chain != "all":
+            params["chain"] = chain
         resp = _data_get("/tokens", params)
         raw = resp.get("data", {})
         if isinstance(raw, dict):

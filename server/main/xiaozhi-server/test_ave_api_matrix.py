@@ -407,6 +407,41 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][1]["source_label"], "SEARCH")
         self.assertEqual(conn.ave_wss.feed_calls[0][1], "solana")
 
+    async def test_ave_search_token_omits_chain_param_for_all(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        requests = []
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        def _fake_data_get(path, params=None):
+            requests.append((path, params))
+            return {
+                "data": {
+                    "tokens": [
+                        {
+                            "token": "pepe-sol",
+                            "chain": "solana",
+                            "symbol": "PEPE",
+                            "current_price_usd": "0.001",
+                            "token_price_change_24h": "-2.5",
+                        }
+                    ]
+                }
+            }
+
+        with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            resp = ave_tools.ave_search_token(conn, keyword="PEPE", chain="all")
+            await asyncio.sleep(0)
+
+        self.assertEqual(resp.result, "Found 1 tokens matching 'PEPE'")
+        self.assertEqual(requests, [("/tokens", {"keyword": "PEPE", "limit": 20})])
+        self.assertEqual(sent[0][1]["chain"], "all")
+        self.assertEqual(conn.ave_wss.feed_calls[0][1], "all")
+
     async def test_ave_token_detail_maps_token_kline_and_contract_endpoints(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)

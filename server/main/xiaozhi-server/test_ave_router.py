@@ -634,6 +634,90 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         mock_search.assert_called_once_with(conn, keyword="ROCKET")
 
+    async def test_search_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜索ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_cha_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "查ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_search_english_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "search ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_sou_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_sou_yixia_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜一下ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_cha_yixia_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "查一下ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_lookup_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "look up ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
     async def test_buy_symbol_routes_to_buy_with_symbol_mapping(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
