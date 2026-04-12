@@ -63,7 +63,7 @@ DATA_BASE = "https://data.ave-api.xyz/v2"
 TRADE_BASE = "https://bot-api.ave.ai"
 
 # Default trade settings (overridable by voice)
-DEFAULT_BUY_SOL = 0.1           # SOL
+DEFAULT_BUY_NATIVE_AMOUNT = 0.1
 DEFAULT_TP_PCT = 25             # %
 DEFAULT_SL_PCT = 15             # %
 DEFAULT_SLIPPAGE = 100          # basis points (1%)
@@ -98,6 +98,13 @@ _PAPER_NATIVE_TOKEN_META = {
         "symbol": "BNB",
         "token_id": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c-bsc",
     },
+}
+
+_CHAIN_NATIVE_BASE_UNITS = {
+    "solana": Decimal("1000000000"),
+    "eth": Decimal("1000000000000000000"),
+    "base": Decimal("1000000000000000000"),
+    "bsc": Decimal("1000000000000000000"),
 }
 
 
@@ -308,6 +315,76 @@ def _signal_default_quote_symbol(chain: str) -> str:
     if normalized == "bsc":
         return "BNB"
     return "ETH"
+
+
+def _native_token_meta(chain: str) -> dict:
+    normalized = _normalize_chain_name(chain, "solana")
+    return dict(_PAPER_NATIVE_TOKEN_META.get(normalized) or _PAPER_NATIVE_TOKEN_META["solana"])
+
+
+def _native_token_address(chain: str) -> str:
+    normalized = _normalize_chain_name(chain, "solana")
+    if normalized == "solana":
+        return _normalize_quote_token_address(normalized, NATIVE_SOL)
+
+    token_id = str(_native_token_meta(normalized).get("token_id") or "")
+    addr, _ = _split_token_reference(token_id, normalized)
+    return addr
+
+
+def _native_amount_label(chain: str, amount) -> str:
+    native_symbol = str(_native_token_meta(chain).get("symbol") or "SOL")
+    return f"{amount} {native_symbol}"
+
+
+def _native_amount_to_base_units(chain: str, amount) -> int:
+    multiplier = _CHAIN_NATIVE_BASE_UNITS.get(
+        _normalize_chain_name(chain, "solana"),
+        Decimal("1000000000"),
+    )
+    try:
+        value = Decimal(str(amount))
+    except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+        value = Decimal("0")
+    if value <= 0:
+        return 0
+    return int((value * multiplier).to_integral_value())
+
+
+def _estimate_native_usd(chain: str, amount) -> float:
+    native_meta = _native_token_meta(chain)
+    native_token_id = str(native_meta.get("token_id") or "")
+    native_token_price_key = _normalize_batch_price_token_id(native_token_id)
+    fallback_prices = {
+        "solana": 150.0,
+        "eth": 3000.0,
+        "base": 3000.0,
+        "bsc": 600.0,
+    }
+
+    try:
+        amount_num = float(amount)
+    except (TypeError, ValueError):
+        return 0.0
+
+    try:
+        price_resp = _data_post("/tokens/price", _build_batch_price_payload([native_token_id]))
+        price_data = price_resp.get("data", {})
+        if isinstance(price_data, dict):
+            native_entry = (
+                price_data.get(native_token_id)
+                or price_data.get(native_token_price_key)
+                or {}
+            )
+            native_price = float(native_entry.get("current_price_usd", 0) or 0)
+        elif isinstance(price_data, list) and price_data:
+            native_price = float(price_data[0].get("current_price_usd", 0) or 0)
+        else:
+            native_price = 0
+    except Exception:
+        native_price = fallback_prices.get(_normalize_chain_name(chain, "solana"), 0.0)
+
+    return amount_num * native_price
 
 
 def _fmt_signal_amount(value) -> str:
@@ -644,6 +721,23 @@ def _asset_identity_fields(token: dict) -> dict:
     }
 
 
+def _extract_main_pair_id(token: dict) -> str:
+    token_data = token if isinstance(token, dict) else {}
+    raw_main_pair = token_data.get("main_pair")
+    if isinstance(raw_main_pair, str):
+        return raw_main_pair.strip()
+    if isinstance(raw_main_pair, dict):
+        for key in ("pair_id", "pair_address", "pair", "address", "id"):
+            value = str(raw_main_pair.get(key) or "").strip()
+            if value:
+                return value
+    for key in ("pair_id", "pair_address", "main_pair_address"):
+        value = str(token_data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _build_disambiguation_payload(items: list[dict], *, nav_from: str = "feed") -> dict:
     normalized_items = []
     for item in items or []:
@@ -853,6 +947,21 @@ async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain
             token = token[0]
 
         kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
+        if not is_live_second and not kline_points:
+            main_pair_id = _extract_main_pair_id(token)
+            if main_pair_id:
+                try:
+                    pair_kline_resp = await asyncio.to_thread(
+                        _data_get,
+                        f"/klines/pair/{main_pair_id}-{chain}",
+                        {"interval": interval, "limit": kline_limit},
+                    )
+                    kline_points = _trim_points(
+                        pair_kline_resp.get("data", {}).get("points", []),
+                        kline_limit,
+                    )
+                except Exception:
+                    pass
         raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
         raw_times = [int(p.get("time", p.get("t", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
         price_now = float(token.get("current_price_usd", token.get("price", 0)) or 0)
@@ -1355,36 +1464,6 @@ def _resolve_spotlight_origin_hint(
     *,
     previous_screen: str = "",
 ) -> str:
-    previous_screen = str(previous_screen or "").strip().lower()
-    feed_mode = str(state.get("feed_mode") or "").strip().lower()
-
-    current_token = state.get("current_token")
-    if isinstance(current_token, dict):
-        current_addr, current_chain = _split_token_reference(
-            current_token.get("addr", ""),
-            current_token.get("chain", chain),
-        )
-        nav_from = str(state.get("nav_from") or "").strip().lower()
-        keep_existing_hint = (
-            previous_screen == "spotlight" and nav_from == "feed"
-        )
-        if current_addr == addr and current_chain == chain and keep_existing_hint:
-            hint = str(
-                state.get("spotlight_origin_hint")
-                or current_token.get("origin_hint")
-                or ""
-            ).strip()
-            if hint:
-                return hint
-
-    nav_from = str(state.get("nav_from") or "").strip().lower()
-    allow_feed_origin = previous_screen in {"feed", "browse", "disambiguation"}
-    if previous_screen == "spotlight" and nav_from == "feed":
-        allow_feed_origin = True
-    if allow_feed_origin and feed_mode == "signals":
-        return "From Signal"
-    if allow_feed_origin and feed_mode == "watchlist":
-        return "In Watchlist"
     return ""
 
 
@@ -4929,27 +5008,15 @@ def ave_buy_token(
             )
 
         # 2. Apply defaults
-        sol = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_SOL
+        trade_amount = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_NATIVE_AMOUNT
         tp = tp_pct if tp_pct is not None else DEFAULT_TP_PCT
         sl = sl_pct if sl_pct is not None else DEFAULT_SL_PCT
         slippage = DEFAULT_SLIPPAGE
 
         # 3. Get current price for USD estimate
-        try:
-            sol_token_id = f"{NATIVE_SOL}-solana"
-            price_resp = _data_post("/tokens/price", _build_batch_price_payload([sol_token_id]))
-            price_data = price_resp.get("data", {})
-            if isinstance(price_data, dict):
-                sol_price = float(price_data.get(sol_token_id, {}).get("current_price_usd", 0) or 0)
-            elif isinstance(price_data, list) and price_data:
-                sol_price = float(price_data[0].get("current_price_usd", 0) or 0)
-            else:
-                sol_price = 0
-        except Exception:
-            sol_price = 150.0  # fallback
-
-        usd_est = sol * sol_price
-        in_amount_lamports = int(sol * 1_000_000_000)
+        native_amount_text = _native_amount_label(chain, trade_amount)
+        usd_est = _estimate_native_usd(chain, trade_amount)
+        in_amount_lamports = _native_amount_to_base_units(chain, trade_amount)
 
         # 4. Get assetsId (fall back to SIM_MOCK so CONFIRM screen shows in simulator)
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
@@ -4958,7 +5025,7 @@ def ave_buy_token(
         trade_params = {
             "chain": chain,
             "assetsId": assets_id,
-            "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "inTokenAddress": _native_token_address(chain),
             "outTokenAddress": addr,
             "inAmount": str(in_amount_lamports),
             "swapType": "buy",
@@ -4977,7 +5044,7 @@ def ave_buy_token(
                     "type": "default",
                 },
             ],
-            "paper_native_amount": str(sol),
+            "paper_native_amount": str(trade_amount),
             "paper_symbol": symbol,
         }
         if chain == "solana":
@@ -4995,8 +5062,8 @@ def ave_buy_token(
             trade_type="market_buy",
             action="BUY",
             symbol=symbol,
-            amount_native=f"{sol} SOL",
-            amount_usd=f"≈ ${usd_est:.2f}",
+            amount_native=native_amount_text,
+            amount_usd=f"${usd_est:.2f}",
             chain=chain,
             asset_token_address=addr,
         )
@@ -5006,12 +5073,12 @@ def ave_buy_token(
         if chain == "solana":
             try:
                 from plugins_func.functions.ave_trade_mgr import _trade_post
-                in_amount_lamports_quote = int(float(sol) * 1e9)
+                in_amount_lamports_quote = _native_amount_to_base_units(chain, trade_amount)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     quote_resp = pool.submit(_trade_post, "/v1/thirdParty/chainWallet/getAmountOut", {
                         "chain": chain,
                         "inAmount": str(in_amount_lamports_quote),
-                        "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+                        "inTokenAddress": _native_token_address(chain),
                         "outTokenAddress": addr,
                         "swapType": "buy",
                     }).result()
@@ -5028,8 +5095,8 @@ def ave_buy_token(
             **identity,
             "trade_id": tid,
             "action": "BUY",
-            "amount_native": f"{sol} SOL",
-            "amount_usd": f"≈ ${usd_est:.2f}",
+            "amount_native": native_amount_text,
+            "amount_usd": f"${usd_est:.2f}",
             "tp_pct": tp,
             "sl_pct": sl,
             "slippage_pct": slippage / 100,
@@ -5115,8 +5182,9 @@ def ave_limit_order(
         except Exception as e:
             logger.bind(tag=TAG).warning(f"ave_limit_order risk check skipped: {e}")
 
-        sol = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_SOL
-        in_amount_lamports = int(sol * 1_000_000_000)
+        trade_amount = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_NATIVE_AMOUNT
+        native_amount_text = _native_amount_label(chain, trade_amount)
+        in_amount_lamports = _native_amount_to_base_units(chain, trade_amount)
         expire_secs = expire_hours * 3600
         # Fall back to SIM_MOCK so LIMIT_CONFIRM screen shows in simulator
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
@@ -5124,7 +5192,7 @@ def ave_limit_order(
         trade_params = {
             "chain": chain,
             "assetsId": assets_id,
-            "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "inTokenAddress": _native_token_address(chain),
             "outTokenAddress": addr,
             "inAmount": str(in_amount_lamports),
             "swapType": "buy",
@@ -5132,7 +5200,7 @@ def ave_limit_order(
             "useMev": True,
             "limitPrice": str(limit_price),
             "expireTime": str(expire_secs),
-            "paper_native_amount": str(sol),
+            "paper_native_amount": str(trade_amount),
             "paper_current_price": str(current_price if current_price is not None else ""),
             "paper_symbol": symbol,
         }
@@ -5148,7 +5216,7 @@ def ave_limit_order(
             trade_type="limit_buy",
             action="LIMIT BUY",
             symbol=symbol,
-            amount_native=f"{sol} SOL",
+            amount_native=native_amount_text,
             amount_usd="",
             screen="limit_confirm",
             chain=chain,
@@ -5170,7 +5238,7 @@ def ave_limit_order(
             "limit_price_raw": limit_price,
             "current_price": _fmt_price(current_price),
             "distance": dist_str,
-            "amount_native": f"{sol} SOL",
+            "amount_native": native_amount_text,
             "expire_hours": expire_hours,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
             "mode_label": _trade_mode_marker(conn),
@@ -5238,7 +5306,7 @@ def ave_sell_token(
             "chain": chain,
             "assetsId": assets_id,
             "inTokenAddress": addr,
-            "outTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "outTokenAddress": _native_token_address(chain),
             "inAmount": str(in_amount) if in_amount > 0 else "0",
             "swapType": "sell",
             "slippage": str(DEFAULT_SLIPPAGE),
@@ -5587,12 +5655,14 @@ ave_cancel_trade_desc = {
 @register_function("ave_cancel_trade", ave_cancel_trade_desc, ToolType.SYSTEM_CTL)
 def ave_cancel_trade(conn: "ConnectionHandler"):
     """取消 pending trade，返回 FEED"""
+    state = _ensure_ave_state(conn)
     pending = _get_pending_trade(conn)
     trade_id = pending.get("trade_id", "")
     symbol = pending.get("symbol", "TOKEN")
     trade_type = pending.get("trade_type", "")
     if trade_id:
         trade_mgr.cancel(trade_id)
+    state.pop("deferred_result_queue", None)
     _clear_pending_trade(conn, trade_id)
     refresh_resp = _refresh_home_feed(conn)
     if isinstance(refresh_resp, ActionResponse) and refresh_resp.action != Action.NONE:

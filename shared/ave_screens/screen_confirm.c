@@ -3,11 +3,15 @@
  * @brief CONFIRM screen — countdown timer for trade confirmation.
  *
  * Layout (320x240 landscape):
- *   y=  0..22   top bar: "BUY  BONK  0.5 SOL  ~ $71.15"  (14px)
- *   y= 26       TP/SL/Slip row  (12px, gray)
- *   y= 44       trade_id  (12px, gray)
- *   y= 70..90   countdown bar (320x20), green->orange->red
- *   y= 95       countdown label "X.Xs"  (14px, centered)
+ *   y=  0..22   top bar: "[PAPER] BUY"
+ *   y= 28       asset row: "BONK  SOL"
+ *   y= 48       CA row: "CA: 0x1234..."
+ *   y= 68       amount row: "Spend 0.1 SOL   Est. $8.24"
+ *   y= 88       TP/SL/Slip row
+ *   y=106       trade_id
+ *   y=128..148  countdown bar (300x20), green->orange->red
+ *   y=154       countdown label "X.Xs"
+ *   y=172       helper hint
  *   y=215..240   divider + bottom bar: "< CANCEL"  "CONFIRM >"
  */
 #include "ave_screen_manager.h"
@@ -30,6 +34,10 @@ void screen_result_show(const char *json_data);
 #define COLOR_GREEN   lv_color_hex(0x00C853)
 #define COLOR_RED     lv_color_hex(0xFF1744)
 #define COLOR_ORANGE  lv_color_hex(0xFF6D00)
+#define COLOR_SOL     lv_color_hex(0x9945FF)
+#define COLOR_ETH     lv_color_hex(0x627EEA)
+#define COLOR_BSC     lv_color_hex(0xF3BA2F)
+#define COLOR_BASE    lv_color_hex(0x0052FF)
 #define COLOR_WHITE   lv_color_hex(0xFFFFFF)
 #define COLOR_GRAY    lv_color_hex(0x9E9E9E)
 #define COLOR_BG      lv_color_hex(0x0A0A0A)
@@ -39,10 +47,14 @@ void screen_result_show(const char *json_data);
 /* ─── LVGL objects ──────────────────────────────────────────────────────── */
 static lv_obj_t   *s_screen       = NULL;
 static lv_obj_t   *s_lbl_top      = NULL;
+static lv_obj_t   *s_lbl_asset    = NULL;
+static lv_obj_t   *s_lbl_contract = NULL;
+static lv_obj_t   *s_lbl_amount   = NULL;
 static lv_obj_t   *s_lbl_params   = NULL;
 static lv_obj_t   *s_lbl_trade_id = NULL;
 static lv_obj_t   *s_bar           = NULL;
 static lv_obj_t   *s_lbl_countdown = NULL;
+static lv_obj_t   *s_lbl_hint     = NULL;
 static lv_obj_t   *s_lbl_left     = NULL;
 static lv_obj_t   *s_lbl_right    = NULL;
 
@@ -148,6 +160,54 @@ static int _is_action(const char *action, const char *expected)
     return (*action == '\0' && *expected == '\0');
 }
 
+static const char *_chain_short(const char *chain)
+{
+    if (!chain || !chain[0]) return "";
+    if (strncmp(chain, "solana", 6) == 0) return "SOL";
+    if (strncmp(chain, "eth", 3) == 0) return "ETH";
+    if (strncmp(chain, "bsc", 3) == 0) return "BSC";
+    if (strncmp(chain, "base", 4) == 0) return "BASE";
+
+    static char buf[8];
+    int i = 0;
+    while (chain[i] && i < 4) {
+        char c = chain[i];
+        buf[i++] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+    }
+    buf[i] = '\0';
+    return buf;
+}
+
+static const char *_chain_color_hex(const char *chain)
+{
+    if (!chain) return "9E9E9E";
+    if (strncmp(chain, "solana", 6) == 0) return "9945FF";
+    if (strncmp(chain, "eth", 3) == 0) return "627EEA";
+    if (strncmp(chain, "bsc", 3) == 0) return "F3BA2F";
+    if (strncmp(chain, "base", 4) == 0) return "0052FF";
+    return "9E9E9E";
+}
+
+static void _sanitize_ascii_in_place(char *text)
+{
+    char *src = text;
+    char *dst = text;
+
+    if (!text) return;
+
+    while (*src) {
+        unsigned char c = (unsigned char)*src++;
+        if (c >= 32 && c <= 126) {
+            *dst++ = (char)c;
+        } else if (dst == text || *(dst - 1) != ' ') {
+            *dst++ = ' ';
+        }
+    }
+
+    while (dst > text && *(dst - 1) == ' ') dst--;
+    *dst = '\0';
+}
+
 static double _get_float(const char *json, const char *key, double def)
 {
     char needle[64];
@@ -243,22 +303,56 @@ static void _build_screen(void)
     lv_obj_set_style_text_color(s_lbl_top, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_top, ave_font_cjk_14(), 0);
 
+    /* ── Asset row ──────────────────────────────────────────────────────── */
+    s_lbl_asset = lv_label_create(s_screen);
+    lv_obj_align(s_lbl_asset, LV_ALIGN_TOP_LEFT, 8, 28);
+    lv_obj_set_width(s_lbl_asset, 304);
+    lv_label_set_long_mode(s_lbl_asset, LV_LABEL_LONG_CLIP);
+    lv_label_set_recolor(s_lbl_asset, true);
+    lv_obj_set_style_text_color(s_lbl_asset, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(s_lbl_asset, ave_font_cjk_16(), 0);
+    lv_obj_set_style_text_align(s_lbl_asset, LV_TEXT_ALIGN_LEFT, 0);
+
+    /* ── Contract row ───────────────────────────────────────────────────── */
+    s_lbl_contract = lv_label_create(s_screen);
+    lv_obj_align(s_lbl_contract, LV_ALIGN_TOP_LEFT, 8, 48);
+    lv_obj_set_width(s_lbl_contract, 304);
+    lv_label_set_long_mode(s_lbl_contract, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_color(s_lbl_contract, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_contract, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_contract, LV_TEXT_ALIGN_LEFT, 0);
+
+    /* ── Amount row ─────────────────────────────────────────────────────── */
+    s_lbl_amount = lv_label_create(s_screen);
+    lv_obj_align(s_lbl_amount, LV_ALIGN_TOP_LEFT, 8, 68);
+    lv_obj_set_width(s_lbl_amount, 304);
+    lv_label_set_long_mode(s_lbl_amount, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(s_lbl_amount, COLOR_WHITE, 0);
+    lv_obj_set_style_text_font(s_lbl_amount, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(s_lbl_amount, LV_TEXT_ALIGN_LEFT, 0);
+
     /* ── TP / SL / Slippage row ─────────────────────────────────────────── */
     s_lbl_params = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_params, LV_ALIGN_TOP_MID, 0, 26);
+    lv_obj_align(s_lbl_params, LV_ALIGN_TOP_LEFT, 8, 88);
+    lv_obj_set_width(s_lbl_params, 304);
+    lv_label_set_long_mode(s_lbl_params, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_params, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_params, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_params, LV_TEXT_ALIGN_LEFT, 0);
 
     /* ── Trade ID ───────────────────────────────────────────────────────── */
     s_lbl_trade_id = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_trade_id, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_align(s_lbl_trade_id, LV_ALIGN_TOP_LEFT, 8, 106);
+    lv_obj_set_width(s_lbl_trade_id, 304);
+    lv_label_set_long_mode(s_lbl_trade_id, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(s_lbl_trade_id, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_trade_id, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_align(s_lbl_trade_id, LV_TEXT_ALIGN_LEFT, 0);
 
     /* ── Countdown bar ──────────────────────────────────────────────────── */
     s_bar = lv_bar_create(s_screen);
     lv_obj_set_size(s_bar, 300, 20);
-    lv_obj_align(s_bar, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_align(s_bar, LV_ALIGN_TOP_MID, 0, 128);
     lv_bar_set_range(s_bar, 0, 100);
     lv_bar_set_value(s_bar, 100, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_bar, COLOR_DIVIDER, 0);          /* track color */
@@ -266,9 +360,15 @@ static void _build_screen(void)
 
     /* ── Countdown label ────────────────────────────────────────────────── */
     s_lbl_countdown = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_countdown, LV_ALIGN_TOP_MID, 0, 95);
+    lv_obj_align(s_lbl_countdown, LV_ALIGN_TOP_MID, 0, 154);
     lv_obj_set_style_text_color(s_lbl_countdown, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_countdown, &lv_font_montserrat_14, 0);
+
+    s_lbl_hint = lv_label_create(s_screen);
+    lv_obj_align(s_lbl_hint, LV_ALIGN_TOP_MID, 0, 172);
+    lv_obj_set_style_text_color(s_lbl_hint, COLOR_GRAY, 0);
+    lv_obj_set_style_text_font(s_lbl_hint, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_lbl_hint, "Auto-cancels when timer ends");
 
     /* ── Divider above bottom bar ───────────────────────────────────────── */
     lv_obj_t *div = lv_obj_create(s_screen);
@@ -307,7 +407,7 @@ void screen_confirm_show(const char *json_data)
     char action[16] = {0}, symbol[24] = {0}, mode_label[16] = {0};
     char amount_native[32] = {0}, amount_usd[32] = {0};
     char out_amount[32] = {0};
-    char chain[16] = {0}, contract_tail[12] = {0};
+    char chain[16] = {0}, token_id[96] = {0};
     s_trade_id[0] = '\0';
     _get_str(json_data, "trade_id",      s_trade_id,     sizeof(s_trade_id));
     _get_str(json_data, "action",        action,         sizeof(action));
@@ -317,7 +417,7 @@ void screen_confirm_show(const char *json_data)
     _get_str(json_data, "amount_usd",    amount_usd,     sizeof(amount_usd));
     _get_str(json_data, "out_amount",    out_amount,     sizeof(out_amount));
     _get_str(json_data, "chain",         chain,          sizeof(chain));
-    _get_str(json_data, "contract_tail", contract_tail,  sizeof(contract_tail));
+    _get_str(json_data, "token_id",      token_id,       sizeof(token_id));
 
     int tp_pct = 0, sl_pct = 0;
     int has_tp = _get_optional_int(json_data, "tp_pct", &tp_pct);
@@ -327,16 +427,20 @@ void screen_confirm_show(const char *json_data)
 
     /* Top bar text */
     char top_buf[128];
-    char identity_buf[48];
+    char identity_buf[96];
+    char contract_buf[112];
+    char amount_buf[128];
+    const char *chain_short = _chain_short(chain);
+    _sanitize_ascii_in_place(amount_usd);
     _buf_reset(identity_buf, sizeof(identity_buf));
     _buf_append(identity_buf, sizeof(identity_buf), symbol);
-    if (chain[0]) {
+    if (chain_short[0]) {
+        _buf_append(identity_buf, sizeof(identity_buf), "  ");
+        _buf_append(identity_buf, sizeof(identity_buf), "#");
+        _buf_append(identity_buf, sizeof(identity_buf), _chain_color_hex(chain));
         _buf_append(identity_buf, sizeof(identity_buf), " ");
-        _buf_append(identity_buf, sizeof(identity_buf), chain);
-    }
-    if (contract_tail[0]) {
-        _buf_append(identity_buf, sizeof(identity_buf), " *");
-        _buf_append(identity_buf, sizeof(identity_buf), contract_tail);
+        _buf_append(identity_buf, sizeof(identity_buf), chain_short);
+        _buf_append(identity_buf, sizeof(identity_buf), "#");
     }
     _buf_reset(top_buf, sizeof(top_buf));
     if (mode_label[0]) {
@@ -345,24 +449,30 @@ void screen_confirm_show(const char *json_data)
         _buf_append(top_buf, sizeof(top_buf), "] ");
     }
     _buf_append(top_buf, sizeof(top_buf), action);
-    if (strlen(out_amount) > 0) {
-        /* Exact quote available: "BUY <out_amount> BONK  0.1 SOL" */
-        _buf_append(top_buf, sizeof(top_buf), "  ");
-        _buf_append(top_buf, sizeof(top_buf), out_amount);
-        _buf_append(top_buf, sizeof(top_buf), " ");
-        _buf_append(top_buf, sizeof(top_buf), identity_buf);
-        _buf_append(top_buf, sizeof(top_buf), "  ");
-        _buf_append(top_buf, sizeof(top_buf), amount_native);
-    } else {
-        /* Fallback: "BUY  BONK  0.1 SOL  ≈ $15.00" */
-        _buf_append(top_buf, sizeof(top_buf), "  ");
-        _buf_append(top_buf, sizeof(top_buf), identity_buf);
-        _buf_append(top_buf, sizeof(top_buf), "  ");
-        _buf_append(top_buf, sizeof(top_buf), amount_native);
-        _buf_append(top_buf, sizeof(top_buf), "  ");
-        _buf_append(top_buf, sizeof(top_buf), amount_usd);
-    }
     lv_label_set_text(s_lbl_top, top_buf);
+    lv_label_set_text(s_lbl_asset, identity_buf[0] ? identity_buf : "TOKEN");
+    snprintf(contract_buf, sizeof(contract_buf), "CA: %s", token_id[0] ? token_id : "--");
+    lv_label_set_text(s_lbl_contract, contract_buf);
+
+    _buf_reset(amount_buf, sizeof(amount_buf));
+    if (_is_action(action, "SELL")) {
+        _buf_append(amount_buf, sizeof(amount_buf), "Sell ");
+    } else if (_is_action(action, "CANCEL")) {
+        _buf_append(amount_buf, sizeof(amount_buf), "Cancel ");
+    } else {
+        _buf_append(amount_buf, sizeof(amount_buf), "Spend ");
+    }
+    _buf_append(amount_buf, sizeof(amount_buf), amount_native[0] ? amount_native : "--");
+    if (strlen(out_amount) > 0) {
+        _buf_append(amount_buf, sizeof(amount_buf), "   Get ");
+        _buf_append(amount_buf, sizeof(amount_buf), out_amount);
+        _buf_append(amount_buf, sizeof(amount_buf), " ");
+        _buf_append(amount_buf, sizeof(amount_buf), symbol[0] ? symbol : "TOKEN");
+    } else if (amount_usd[0]) {
+        _buf_append(amount_buf, sizeof(amount_buf), "   Est. ");
+        _buf_append(amount_buf, sizeof(amount_buf), amount_usd);
+    }
+    lv_label_set_text(s_lbl_amount, amount_buf);
 
     /* Params row */
     char params_buf[96];
@@ -372,12 +482,12 @@ void screen_confirm_show(const char *json_data)
     else snprintf(tp_buf, sizeof(tp_buf), "--");
     if (!no_tp_sl && has_sl) snprintf(sl_buf, sizeof(sl_buf), "-%d%%", sl_pct);
     else snprintf(sl_buf, sizeof(sl_buf), "--");
-    snprintf(params_buf, sizeof(params_buf), "TP: %s   SL: %s   Slip: %.1f%%", tp_buf, sl_buf, slippage);
+    snprintf(params_buf, sizeof(params_buf), "TP %s   SL %s   Slip %.1f%%", tp_buf, sl_buf, slippage);
     lv_label_set_text(s_lbl_params, params_buf);
 
     /* Trade ID */
     char tid_buf[96];
-    snprintf(tid_buf, sizeof(tid_buf), "trade_id: %s", s_trade_id);
+    snprintf(tid_buf, sizeof(tid_buf), "Trade ID %s", s_trade_id);
     lv_label_set_text(s_lbl_trade_id, tid_buf);
 
     /* Initialize countdown */
@@ -390,6 +500,7 @@ void screen_confirm_show(const char *json_data)
     char cd_buf[16];
     snprintf(cd_buf, sizeof(cd_buf), "%d.0s", timeout_sec);
     lv_label_set_text(s_lbl_countdown, cd_buf);
+    lv_label_set_text(s_lbl_hint, "Auto-cancels when timer ends");
 
     lv_screen_load(s_screen);
 

@@ -58,7 +58,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         _, screen, payload = send_display.await_args.args
         self.assertEqual(screen, "browse")
         self.assertEqual(payload["mode"], "signals")
-        self.assertEqual(payload["source_label"], "SIGNALS")
+        self.assertEqual(payload["source_label"], "SIGNALS SOL")
         self.assertEqual(payload["tokens"][0]["token_id"], "Token111")
         self.assertEqual(payload["tokens"][0]["signal_label"], "BUY")
         self.assertEqual(payload["tokens"][0]["signal_value"], "BUY 3.5 SOL")
@@ -148,7 +148,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         _, screen, payload = send_display.await_args.args
         self.assertEqual(screen, "browse")
         self.assertEqual(payload["mode"], "watchlist")
-        self.assertEqual(payload["source_label"], "WATCHLIST")
+        self.assertEqual(payload["source_label"], "WATCHLIST ALL")
         self.assertEqual(payload["tokens"][0]["symbol"], "BONK")
         self.assertEqual(self.conn.ave_state["screen"], "browse")
         self.assertEqual(self.conn.ave_state["feed_mode"], "watchlist")
@@ -163,7 +163,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(send_display.await_count, 1)
         _, _, payload = send_display.await_args.args
         self.assertEqual(payload["mode"], "watchlist")
-        self.assertEqual(payload["source_label"], "WATCHLIST")
+        self.assertEqual(payload["source_label"], "WATCHLIST ALL")
         self.assertEqual(payload["tokens"][0]["symbol"], "WATCHLIST")
 
     def test_ave_add_current_watchlist_token_refreshes_spotlight(self):
@@ -315,7 +315,7 @@ class SignalsWatchlistToolTests(unittest.TestCase):
             self.loop.run_until_complete(asyncio.sleep(0))
 
         loading_payload = send_display.await_args_list[0].args[2]
-        self.assertEqual(loading_payload.get("origin_hint"), "From Signal")
+        self.assertEqual(loading_payload.get("origin_hint"), "")
         self.assertTrue(loading_payload.get("is_watchlisted"))
 
     def test_ave_token_detail_from_portfolio_clears_stale_feed_origin_hint(self):
@@ -426,7 +426,70 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertGreaterEqual(send_display.await_count, 1)
         _, screen, payload = send_display.await_args_list[0].args
         self.assertEqual(screen, "spotlight")
-        self.assertEqual(payload.get("origin_hint"), "From Signal")
+        self.assertEqual(payload.get("origin_hint"), "")
+
+    def test_ave_token_detail_async_falls_back_to_pair_klines_when_token_klines_empty(self):
+        self.conn.ave_state = {
+            "screen": "spotlight",
+            "spotlight_request_seq": 11,
+            "current_token": {"addr": "Token111", "chain": "solana", "symbol": "BONK"},
+        }
+
+        def _data_get_side_effect(path, params=None):
+            if path.startswith("/tokens/"):
+                return {
+                    "data": {
+                        "token": {
+                            "symbol": "BONK",
+                            "current_price_usd": 1.5,
+                            "token_price_change_24h": 5.2,
+                            "holders": 123,
+                            "main_pair_tvl": 10000,
+                            "token_tx_volume_usd_24h": 20000,
+                            "market_cap": 500000,
+                            "main_pair": "Pair111",
+                        }
+                    }
+                }
+            if path.startswith("/klines/token/"):
+                return {"data": {"points": []}}
+            if path.startswith("/klines/pair/"):
+                return {
+                    "data": {
+                        "points": [
+                            {"close": 1.2, "time": 1710000000},
+                            {"close": 1.5, "time": 1710003600},
+                        ]
+                    }
+                }
+            if path.startswith("/contracts/"):
+                return {"data": {"risk_score": 10, "is_honeypot": False, "has_mint_method": False, "has_black_method": False}}
+            raise AssertionError(f"unexpected path {path}")
+
+        with patch.object(ave_tools, "_data_get", side_effect=_data_get_side_effect), patch.object(
+            ave_tools, "_safe_top100_summary_get", return_value={}
+        ), patch.object(ave_tools, "watchlist_contains", return_value=False), patch.object(
+            ave_tools, "_send_display", new=AsyncMock()
+        ) as send_display, patch("plugins_func.functions.ave_tools.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k))):
+            self.loop.run_until_complete(
+                ave_tools._ave_token_detail_async(
+                    self.conn,
+                    addr="Token111",
+                    chain="solana",
+                    symbol="BONK",
+                    interval="240",
+                    feed_cursor=0,
+                    feed_total=1,
+                    request_seq=11,
+                    previous_screen="feed",
+                )
+            )
+
+        self.assertGreaterEqual(send_display.await_count, 1)
+        _, screen, payload = send_display.await_args_list[0].args
+        self.assertEqual(screen, "spotlight")
+        self.assertEqual(payload.get("interval"), "240")
+        self.assertEqual(payload.get("chart"), [0, 1000])
 
 
 if __name__ == "__main__":

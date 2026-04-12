@@ -68,11 +68,15 @@ void screen_notify_show(const char *json_data)
     if (s_overlay) { lv_obj_del(s_overlay); s_overlay = NULL; }
 
     /* Parse JSON fields */
-    char level[16] = {0}, title[80] = {0}, body[128] = {0}, subtitle[128] = {0};
+    char level[16] = {0}, title[80] = {0}, body[128] = {0}, subtitle[128] = {0}, explain_state[32] = {0};
     _getf(json_data, "level", level, sizeof(level));
     _getf(json_data, "title", title, sizeof(title));
     _getf(json_data, "body",  body,  sizeof(body));
     _getf(json_data, "subtitle", subtitle, sizeof(subtitle));
+    _getf(json_data, "explain_state", explain_state, sizeof(explain_state));
+    if (strcmp(explain_state, "deferred_result") == 0) {
+        return;
+    }
     if (body[0] == '\0' && subtitle[0] != '\0') {
         strncpy(body, subtitle, sizeof(body) - 1);
         body[sizeof(body) - 1] = '\0';

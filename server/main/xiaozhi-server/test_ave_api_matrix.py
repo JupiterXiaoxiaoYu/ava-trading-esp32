@@ -743,8 +743,71 @@ class AveApiMatrixTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("trade_id=buy-fallback", resp.result)
         self.assertEqual(sent[0][0], "confirm")
-        self.assertEqual(sent[0][1]["amount_usd"], "≈ $30.00")
+        self.assertEqual(sent[0][1]["amount_usd"], "$30.00")
         self.assertNotIn("out_amount", sent[0][1])
+
+    async def test_ave_buy_token_uses_chain_native_token_for_evm_chains(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+
+        cases = [
+            ("eth", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2-eth", "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2", "0.2 ETH", "3000", "$600.00"),
+            ("base", "0x4200000000000000000000000000000000000006-base", "0x4200000000000000000000000000000000000006", "0.2 ETH", "3000", "$600.00"),
+            ("bsc", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c-bsc", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "0.2 BNB", "600", "$120.00"),
+        ]
+
+        def _env_get(key, default=None):
+            if key == "AVE_PROXY_WALLET_ID":
+                return "wallet-evm"
+            return default
+
+        for chain, native_token_id, native_addr, amount_native, native_price, amount_usd in cases:
+            sent = []
+            data_get_requests = []
+            data_post_requests = []
+
+            async def _fake_send_display(conn, screen, payload):
+                sent.append((screen, payload))
+
+            def _fake_data_get(path, params=None):
+                data_get_requests.append((path, params))
+                return {"data": {"risk_score": 5}}
+
+            def _fake_data_post(path, payload):
+                data_post_requests.append((path, payload))
+                return {"data": {native_token_id: {"current_price_usd": native_price}}}
+
+            with patch("plugins_func.functions.ave_tools._data_get", side_effect=_fake_data_get), \
+                 patch("plugins_func.functions.ave_tools._data_post", side_effect=_fake_data_post), \
+                 patch("plugins_func.functions.ave_tools.trade_mgr.create", return_value=f"buy-{chain}") as mock_create, \
+                 patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display), \
+                 patch("plugins_func.functions.ave_tools.os.environ.get", side_effect=_env_get):
+                resp = ave_tools.ave_buy_token(
+                    conn,
+                    addr=f"token-{chain}",
+                    chain=chain,
+                    in_amount_sol=0.2,
+                    symbol="BONK",
+                )
+                await asyncio.sleep(0)
+
+            self.assertIn(f"trade_id=buy-{chain}", resp.result)
+            self.assertEqual(data_get_requests, [(f"/contracts/token-{chain}", None)])
+            self.assertEqual(data_post_requests, [("/tokens/price", {"token_ids": [native_token_id]})])
+            trade_type, trade_params, passed_conn = mock_create.call_args[0]
+            self.assertEqual(trade_type, "market_buy")
+            self.assertIs(passed_conn, conn)
+            self.assertEqual(trade_params["assetsId"], "wallet-evm")
+            self.assertEqual(trade_params["inTokenAddress"], native_addr)
+            self.assertEqual(trade_params["outTokenAddress"], "token")
+            self.assertEqual(trade_params["inAmount"], "200000000000000000")
+            self.assertEqual(trade_params["paper_native_amount"], "0.2")
+            self.assertNotIn("gas", trade_params)
+            self.assertNotIn("autoGas", trade_params)
+            self.assertEqual(sent[0][0], "confirm")
+            self.assertEqual(sent[0][1]["amount_native"], amount_native)
+            self.assertEqual(sent[0][1]["amount_usd"], amount_usd)
+            self.assertNotIn("out_amount", sent[0][1])
 
     async def test_ave_risk_check_blocks_honeypot_and_pushes_notify(self):
         loop = asyncio.get_running_loop()
