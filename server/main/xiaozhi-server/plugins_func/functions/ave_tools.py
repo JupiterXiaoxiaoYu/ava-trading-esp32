@@ -3995,6 +3995,26 @@ ave_open_watchlist_desc = {
 }
 
 
+ave_add_watchlist_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_add_current_watchlist_token",
+        "description": "将当前选中的代币加入 Watchlist。优先用于 spotlight 页面上的收藏语音命令。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+ave_remove_watchlist_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_remove_current_watchlist_voice",
+        "description": "将当前选中的代币从 Watchlist 移除。优先用于 spotlight 页面上的取消收藏语音命令。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
 @register_function("ave_list_signals", ave_list_signals_desc, ToolType.SYSTEM_CTL)
 def ave_list_signals(conn: "ConnectionHandler", chain: str = ""):
     try:
@@ -4123,6 +4143,7 @@ def ave_open_watchlist(conn: "ConnectionHandler", cursor=None, chain_filter: str
         return ActionResponse(action=Action.RESPONSE, result=str(exc), response="观察列表暂时不可用")
 
 
+@register_function("ave_add_current_watchlist_token", ave_add_watchlist_desc, ToolType.SYSTEM_CTL)
 def ave_add_current_watchlist_token(conn: "ConnectionHandler", token: dict | None = None):
     state = _ensure_ave_state(conn)
     target = _resolve_watchlist_target(state, token)
@@ -4164,6 +4185,7 @@ def ave_add_current_watchlist_token(conn: "ConnectionHandler", token: dict | Non
     return _refresh_spotlight_for_token(conn, target)
 
 
+@register_function("ave_remove_current_watchlist_voice", ave_remove_watchlist_desc, ToolType.SYSTEM_CTL)
 def ave_remove_current_watchlist_voice(conn: "ConnectionHandler", token: dict | None = None):
     state = _ensure_ave_state(conn)
     target = _resolve_watchlist_target(state, token)

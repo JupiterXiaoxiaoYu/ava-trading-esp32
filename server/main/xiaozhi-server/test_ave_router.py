@@ -332,6 +332,66 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         add_current.assert_not_called()
         send_stt.assert_awaited_once_with(conn, missing_selection_reply("收藏这个币"))
 
+    async def test_spotlight_add_to_watchlist_routes_phrase_variant_directly(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_add_current_watchlist_token") as add_current:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "帮我收藏这个币",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        add_current.assert_called_once_with(
+            conn,
+            token={"addr": "a1", "chain": "solana", "symbol": "BONK"},
+        )
+
+    async def test_spotlight_remove_watchlist_routes_phrase_variant_directly(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_remove_current_watchlist_voice") as remove_current:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "帮我取消收藏这个币",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        remove_current.assert_called_once_with(
+            conn,
+            token={"addr": "a1", "chain": "solana", "symbol": "BONK"},
+        )
+
     async def test_open_watchlist_routes_without_llm(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn({"screen": "feed"})

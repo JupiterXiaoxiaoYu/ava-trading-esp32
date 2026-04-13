@@ -897,12 +897,17 @@ void Application::HandleWakeWordDetectedEvent() {
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
-    // Check state again in case it was changed during scheduling
-    if (GetDeviceState() != kDeviceStateConnecting) {
+    // Wake-word follow-up can arrive either after we intentionally moved into the
+    // connecting state, or while already idle with an open audio channel.
+    auto state = GetDeviceState();
+    if (state != kDeviceStateConnecting && state != kDeviceStateIdle) {
         return;
     }
 
     if (!protocol_->IsAudioChannelOpened()) {
+        if (state != kDeviceStateConnecting) {
+            SetDeviceState(kDeviceStateConnecting);
+        }
         if (!protocol_->OpenAudioChannel()) {
             audio_service_.EnableWakeWordDetection(true);
             return;

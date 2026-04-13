@@ -26,8 +26,8 @@ _OPEN_ORDERS_COMMANDS = {
 }
 _WATCH_CURRENT_COMMANDS = {"看这个", "详情", "进入"}
 _BUY_CURRENT_COMMANDS = {"买这个"}
-_ADD_WATCHLIST_COMMANDS = {"收藏这个币", "加入观察列表", "收藏它"}
-_REMOVE_WATCHLIST_COMMANDS = {"取消收藏", "从观察列表移除", "移除这个币"}
+_ADD_WATCHLIST_COMMANDS = {"收藏", "收藏这个币", "加入观察列表", "加入自选", "加入watchlist", "收藏它"}
+_REMOVE_WATCHLIST_COMMANDS = {"取消收藏", "取消自选", "从观察列表移除", "移除这个币", "移除收藏", "移出watchlist"}
 _CONFIRM_COMMANDS = {"确认", "确认购买", "执行"}
 _CANCEL_COMMANDS = {"取消", "算了", "不买了"}
 _BACK_COMMANDS = {"返回", "回去", "首页", "回到热门"}
@@ -270,6 +270,31 @@ def has_trusted_selection(selection_payload: Optional[Dict[str, Any]]) -> bool:
     ) is not None
 
 
+def _contains_any(text: str, phrases: tuple[str, ...] | list[str] | set[str]) -> bool:
+    return any(phrase and phrase in text for phrase in phrases)
+
+
+def _is_add_watchlist_command(normalized: str) -> bool:
+    if normalized in _ADD_WATCHLIST_COMMANDS:
+        return True
+    if _contains_any(normalized, ("取消收藏", "取消自选", "移除收藏", "移出watchlist", "从观察列表移除")):
+        return False
+    if _contains_any(normalized, ("加入观察列表", "加入自选", "加入watchlist", "加到watchlist", "加入收藏")):
+        return True
+    if "收藏" in normalized and _contains_any(normalized, _DEICTIC_MARKERS + ("这个币", "这只币", "当前", "当前这个币")):
+        return True
+    return normalized.startswith("帮我收藏") or normalized.startswith("把它收藏")
+
+
+def _is_remove_watchlist_command(normalized: str) -> bool:
+    if normalized in _REMOVE_WATCHLIST_COMMANDS:
+        return True
+    return _contains_any(
+        normalized,
+        ("取消收藏", "取消自选", "移除收藏", "移出watchlist", "从观察列表移除", "把它移出观察列表"),
+    )
+
+
 def missing_selection_reply(_: str = "") -> str:
     return "请先在界面上选中你要操作的代币，然后再说一次。"
 
@@ -283,8 +308,8 @@ def requires_trusted_selection(
     if (
         normalized in _WATCH_CURRENT_COMMANDS
         or normalized in _BUY_CURRENT_COMMANDS
-        or normalized in _ADD_WATCHLIST_COMMANDS
-        or normalized in _REMOVE_WATCHLIST_COMMANDS
+        or _is_add_watchlist_command(normalized)
+        or _is_remove_watchlist_command(normalized)
     ):
         return True
     if normalized in _DEICTIC_RISK_PHRASES:
@@ -1032,7 +1057,7 @@ async def try_route_ave_command(
         _refresh_turn_context()
         return True
 
-    if normalized in _ADD_WATCHLIST_COMMANDS:
+    if _is_add_watchlist_command(normalized):
         token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
         if not token:
             await _send_router_reply(conn, missing_selection_reply(utterance))
@@ -1044,7 +1069,7 @@ async def try_route_ave_command(
         _refresh_turn_context()
         return True
 
-    if normalized in _REMOVE_WATCHLIST_COMMANDS:
+    if _is_remove_watchlist_command(normalized):
         token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
         if not token:
             await _send_router_reply(conn, missing_selection_reply(utterance))
