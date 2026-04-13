@@ -138,6 +138,17 @@ void lv_obj_align(lv_obj_t *obj, lv_align_t align, int32_t x_ofs, int32_t y_ofs)
     (void)y_ofs;
 }
 
+void lv_obj_update_layout(const lv_obj_t *obj)
+{
+    (void)obj;
+}
+
+int32_t lv_obj_get_width(const lv_obj_t *obj)
+{
+    (void)obj;
+    return 0;
+}
+
 lv_obj_t *lv_label_create(lv_obj_t *parent)
 {
     return lv_obj_create(parent);
