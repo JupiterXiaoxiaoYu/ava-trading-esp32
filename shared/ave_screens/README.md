@@ -1,6 +1,6 @@
-# AVE Screens
+# Ava Box Screens
 
-This directory is the implementation home for the AVE shared LVGL screens.
+This directory is the implementation home for the Ava Box shared LVGL screens.
 
 These files define the market-facing UI surfaces that are shown on both the ESP32 device and the simulator, including feed, spotlight, portfolio, disambiguation, confirm, result, and related pages.
 

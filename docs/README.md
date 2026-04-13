@@ -1,6 +1,6 @@
 # Docs Directory
 
-This directory now holds the small set of current product/reference documents that still matter for the AVE repo state.
+This directory now holds the small set of current product/reference documents that still matter for the Ava Box repo state.
 
 Older exploratory notes and superseded documentation were intentionally removed. Do not assume missing historical docs still represent the product.
 
@@ -18,7 +18,7 @@ Older exploratory notes and superseded documentation were intentionally removed.
 ## Better starting points for implementation
 
 - [`../README.md`](../README.md) - monorepo overview and navigation
-- [`../shared/README.md`](../shared/README.md) - shared AVE UI layer
+- [`../shared/README.md`](../shared/README.md) - shared Ava Box UI layer
 - [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - concrete screen implementation surface
 - [`../firmware/main/README.md`](../firmware/main/README.md) - device runtime internals
 - [`../server/main/README_en.md`](../server/main/README_en.md) - backend module map

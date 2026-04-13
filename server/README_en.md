@@ -43,18 +43,18 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 
 ---
 
-## AVE Monorepo Note
+## Ava Box Monorepo Note
 
 Within this monorepo, `server/` is the backend foundation used by AVE.
 
-Use these entry points when working on the AVE product rather than the upstream generic server alone:
+Use these entry points when working on the Ava Box product rather than the upstream generic server alone:
 
 - [`../README.md`](../README.md) - monorepo entry point
 - [`main/README_en.md`](main/README_en.md) - backend module map for `xiaozhi-server`, `manager-api`, `manager-web`, and `manager-mobile`
-- [`../docs/README.md`](../docs/README.md) - AVE architecture, audits, and deployment notes
-- `main/xiaozhi-server/` - the active Python backend runtime where AVE routing, websocket, tool, and trading logic live
+- [`../docs/README.md`](../docs/README.md) - Ava Box architecture, audits, and deployment notes
+- `main/xiaozhi-server/` - the active Python backend runtime where Ava Box routing, websocket, tool, and trading logic live
 
-This directory still contains the upstream XiaoZhi server stack, but the surrounding repo documentation describes how AVE uses and customizes it today.
+This directory still contains the upstream XiaoZhi server stack, but the surrounding repo documentation describes how Ava Box uses and customizes it today.
 
 ## Target Users 👥
 

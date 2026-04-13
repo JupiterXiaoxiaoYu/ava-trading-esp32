@@ -12,19 +12,19 @@ As a voice interaction entry, the XiaoZhi AI chatbot leverages the AI capabiliti
 
 <img src="docs/mcp-based-graph.jpg" alt="Control everything via MCP" width="320">
 
-## AVE Monorepo Note
+## Ava Box Monorepo Note
 
 In this monorepo, `firmware/` is the upstream XiaoZhi firmware base used by AVE.
 
-For AVE contributors, the most important navigation paths are:
+For Ava Box contributors, the most important navigation paths are:
 
 - [`../README.md`](../README.md) - monorepo entry point
 - [`main/README.md`](main/README.md) - ESP32 runtime internals and board integration map
-- [`../shared/README.md`](../shared/README.md) - shared cross-target AVE UI layer
+- [`../shared/README.md`](../shared/README.md) - shared cross-target Ava Box UI layer
 - [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - screen implementations used by both device and simulator
 - [`../simulator/README.md`](../simulator/README.md) - desktop validation path before flashing hardware
 
-The currently active AVE hardware work in this repo centers on the Scratch Arcade style ESP32-S3 build, while the rest of this directory preserves the broader upstream firmware capabilities.
+The currently active Ava Box hardware work in this repo centers on the Scratch Arcade style ESP32-S3 build, while the rest of this directory preserves the broader upstream firmware capabilities.
 
 ## Version Notes
 

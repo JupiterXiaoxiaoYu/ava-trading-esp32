@@ -4,18 +4,18 @@
 
 This project is pre-configured for VSCode and should work work on Windows, Linux and MacOs as well. FreeRTOS is also included and can be optionally enabled to better simulate embedded system's behavior. 
 
-## AVE Monorepo Note
+## Ava Box Monorepo Note
 
-In this monorepo, `simulator/` is the desktop validation harness for the AVE screen layer.
+In this monorepo, `simulator/` is the desktop validation harness for the Ava Box screen layer.
 
 Use it together with:
 
 - [`../README.md`](../README.md) - monorepo entry point
 - [`../shared/README.md`](../shared/README.md) - why the shared UI layer exists
-- [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - the actual AVE pages compiled into this simulator
+- [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - the actual Ava Box pages compiled into this simulator
 - [`../docs/simulator-ui-guide.md`](../docs/simulator-ui-guide.md) - AVE-specific simulator usage notes
 
-The upstream LVGL simulator instructions below still apply, but AVE contributors should think of this folder primarily as the fastest way to validate UI and navigation changes before flashing hardware.
+The upstream LVGL simulator instructions below still apply, but Ava Box contributors should think of this folder primarily as the fastest way to validate UI and navigation changes before flashing hardware.
 
 ## Get started
 
