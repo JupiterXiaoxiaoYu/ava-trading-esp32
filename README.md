@@ -46,7 +46,7 @@ Key Ava Box coupling points:
 - `shared/ave_screens/` is the single source of truth for the Ava Box screen layer
 - `firmware/main/boards/scratch-arcade/` is the main active hardware target in this repo
 - `firmware/main/ave_transport_idf.cc` bridges device events into the shared screen/runtime layer
-- `server/main/xiaozhi-server/` contains AVE-specific router, WSS, trading, and context behavior
+- `server/main/xiaozhi-server/` contains Ava Box-specific router, WSS, trading, and context behavior
 - `simulator/` is used to validate layout, navigation, mock scenes, and screen regressions before flashing hardware
 
 ## Repository navigation

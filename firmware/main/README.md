@@ -2,7 +2,7 @@
 
 This directory contains the core ESP32 device runtime used by AVE.
 
-The broader `firmware/` folder still carries the upstream XiaoZhi firmware foundation, but `main/` is where the concrete runtime wiring lives: application startup, board selection, display/audio integration, transport protocols, settings, OTA, and the AVE-specific bridge into the shared screen layer.
+The broader `firmware/` folder still carries the upstream XiaoZhi firmware foundation, but `main/` is where the concrete runtime wiring lives: application startup, board selection, display/audio integration, transport protocols, settings, OTA, and the Ava Box-specific bridge into the shared screen layer.
 
 ## Key entry points
 

@@ -14,7 +14,9 @@
 
 The product is designed to solve a specific problem: most crypto tools split monitoring, discovery, analysis, and execution across too many browser tabs and too much cognitive overhead. Ava Box compresses those flows into a dedicated handheld experience.
 
-The product personality is `Ava`: a voice-first, embodied trading assistant. The platform layer behind it is `AVE Claw`, which provides the capability stack and Skills used by the box.
+`Ava` is the product IP we created specifically for `Ava Box`, not just the name of an assistant. It defines the device's interaction personality, voice identity, and product memory: a voice-first on-chain trading assistant whose final source of truth is still the screen.  
+For users, this means Ava Box is not just "a trading terminal." It becomes a character-driven device that can be awakened, spoken to, and relied on across discovery, analysis, and execution flows.  
+Under that IP layer, the platform behind the product is `AVE Claw`, which provides the capability stack and Skills used by the box.
 
 Because the runtime foundation is built on `ESP32`, this project is also effectively an intelligent hardware framework for `AVE Skills`. In practice, that means the AVE trading system is not limited to one handheld form factor: any ESP32-class device, including watches, robots, touch displays, and other embedded terminals, can be adapted into the same AVE-powered trading experience.
 
@@ -225,6 +227,24 @@ This means Ava Box is not just "voice on top of a screen." It is a screen-native
 - voice can route into navigation,
 - voice can route into trading drafts,
 - but execution still stays guarded by confirm screens.
+
+### 8.4 Ava as product IP
+
+Inside Ava Box, `Ava` is not an abstract AI label. It is the product IP designed for this device.
+
+That IP serves several product functions:
+
+- it gives the hardware a consistent personality and memory point,
+- it unifies the voice assistant, trading terminal, and handheld device into one recognizable product identity,
+- it makes wake words, voice interaction, screen flows, and hardware form factor feel like parts of the same product,
+- it shifts the user's perception from "tool" to "companion-like on-chain assistant."
+
+So in the product narrative:
+
+- `Ava Box` is the product form,
+- `Ava` is the product IP and interaction persona,
+- `AVE Claw` is the capability platform behind it,
+- `AVE Skills` are the capability modules the product consumes.
 
 ## 9. How AVE Claw and AVE Skills Are Used
 

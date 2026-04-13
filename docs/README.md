@@ -6,7 +6,7 @@ Older exploratory notes and superseded documentation were intentionally removed.
 
 ## What is here now
 
-- `ave-claw-hackathon-product-document-2026-04-13.md` - current AVE-facing product/reference write-up
+- `ave-claw-hackathon-product-document-2026-04-13.md` - current Ava Box-facing product/reference write-up
 - `ava-box-product-document-zh-2026-04-13.md` - Chinese product/reference document
 
 ## How to use this folder
