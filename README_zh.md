@@ -6,6 +6,8 @@
 
 AVE 是一个语音驱动的交易助手，建立在 XiaoZhi 系固件、Python 后端以及可同时运行在硬件和桌面模拟器上的共享 LVGL 界面层之上。当前产品重点是 Scratch Arcade 风格的 ESP32-S3 板卡：320x240 屏幕、摇杆输入、语音唤醒，以及 AVE 的 feed、spotlight、portfolio、watchlist 和订单等页面。
 
+AVE 的后端与设备运行时栈中有一部分代码基于 [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32)。这套架构不仅服务于当前的 Scratch Arcade 目标板，也可以继续扩展到各种 ESP32 形态的硬件设备上，例如手表、触摸显示屏、机器人以及其他带语音能力的终端。
+
 ## 仓库内容
 
 - `firmware/` - ESP32 固件运行时、板级适配、音频链路、OTA、协议实现和 AVE 设备集成层
@@ -40,6 +42,7 @@ speech + input
 
 与 AVE 直接相关的关键耦合点：
 
+- 这套栈从设计上就支持迁移到更广泛的 ESP32 设备形态，而不只局限于当前这块板卡，包括手表、触摸屏、机器人和其他自定义设备
 - `shared/ave_screens/` 是 AVE 页面层的单一事实来源
 - `firmware/main/boards/scratch-arcade/` 是当前仓库里最重要的目标硬件
 - `firmware/main/ave_transport_idf.cc` 负责把设备事件桥接到共享页面运行时

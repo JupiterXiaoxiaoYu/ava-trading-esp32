@@ -6,6 +6,8 @@ This repository is the active monorepo for the AVE hardware + backend + simulato
 
 AVE is a voice-driven trading assistant built on top of XiaoZhi-derived ESP32 firmware, a Python backend, and a shared LVGL screen layer that runs on both hardware and the desktop simulator. The current product focus is the Scratch Arcade style ESP32-S3 board with a 320x240 display, joystick input, voice wake-up, and AVE market pages such as feed, spotlight, portfolio, watchlist, and order flows.
 
+Parts of the AVE backend and device-runtime stack are based on [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32). The same architecture is designed to scale beyond the current Scratch Arcade target and can be extended to many ESP32 form factors, including watches, touch displays, robots, and other voice-enabled devices.
+
 ## What lives here
 
 - `firmware/` - ESP32 firmware runtime, board ports, audio pipeline, OTA, protocols, and the AVE device integration layer
@@ -40,6 +42,7 @@ speech + input
 
 Key AVE-specific coupling points:
 
+- the stack is intentionally portable across a wide range of ESP32 hardware classes, not only the current board, including watches, touch screens, robots, and other custom devices
 - `shared/ave_screens/` is the single source of truth for the AVE screen layer
 - `firmware/main/boards/scratch-arcade/` is the main active hardware target in this repo
 - `firmware/main/ave_transport_idf.cc` bridges device events into the shared screen/runtime layer
