@@ -16,6 +16,8 @@ The product is designed to solve a specific problem: most crypto tools split mon
 
 The product personality is `Ava`: a voice-first, embodied trading assistant. The platform layer behind it is `AVE Claw`, which provides the capability stack and Skills used by the box.
 
+Because the runtime foundation is built on `ESP32`, this project is also effectively an intelligent hardware framework for `AVE Skills`. In practice, that means the AVE trading system is not limited to one handheld form factor: any ESP32-class device, including watches, robots, touch displays, and other embedded terminals, can be adapted into the same AVE-powered trading experience.
+
 ## 2. Why It Matters for This Hackathon
 
 The hackathon describes `AVE Claw` as an AI-powered capability platform for the on-chain ecosystem, with Skill modules such as:
@@ -280,6 +282,8 @@ That is why the project is stronger than a demo-only mockup:
 - the realtime logic exists,
 - the voice logic exists,
 - the device runtime exists.
+
+At a platform level, this also means Ava Box is the first product form of a broader ESP32-native AVE hardware framework. The same capability stack can be carried into different ESP32 devices, including wearable screens, robots, touch displays, and other embedded hardware surfaces, without changing the core AVE trading backend.
 
 ## 11. What Makes Ava Box Different
 
