@@ -862,6 +862,42 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         mock_search.assert_called_once_with(conn, keyword="ROCKET")
 
+    async def test_natural_language_search_chinese_token_name_routes_deterministically(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "帮我搜索派普币"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="派普")
+
+    async def test_natural_language_search_ascii_token_name_routes_deterministically(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "帮我搜索 pipe"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="PIPE")
+
+    async def test_generic_search_topic_still_falls_through_to_chat(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "帮我搜索一下热门币"})
+
+        mock_search.assert_not_called()
+        start_chat.assert_awaited_once()
+
     async def test_buy_symbol_routes_to_buy_with_symbol_mapping(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(

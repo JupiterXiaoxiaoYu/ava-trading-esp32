@@ -80,8 +80,47 @@ _SELECTION_GUARDED_SCREENS = {"feed", "browse", "portfolio", "spotlight", "confi
 
 _WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
 _SEARCH_SYMBOL_PATTERN = re.compile(
-    r"^(?:搜索|搜一下|搜|查找|查一下|查|search|find|lookup)([A-Za-z][A-Za-z0-9._-]{1,63})$",
+    r"^(?:搜索|搜一下|搜下|搜|查找|查一下|查下|查|search|find|lookup)([A-Za-z][A-Za-z0-9._-]{1,63})$",
     re.IGNORECASE,
+)
+_NATURAL_SEARCH_PATTERN = re.compile(
+    r"^(?:请|请你|帮我|给我|麻烦(?:你)?|我想|想|让我|能不能(?:帮我)?|可以(?:帮我)?)"
+    r"(?:搜索|搜一下|搜下|搜|查找|查一下|查下|查|search|find|lookup)(.+)$",
+    re.IGNORECASE,
+)
+_SEARCH_KEYWORD_INVALID_EXACT = {
+    "",
+    "一下",
+    "一个",
+    "这个",
+    "这个币",
+    "这只币",
+    "代币",
+    "币",
+    "token",
+    "coin",
+    "热门",
+    "热门币",
+    "热门代币",
+    "价格",
+    "走势",
+    "详情",
+}
+_SEARCH_KEYWORD_INVALID_CONTAINS = (
+    "价格",
+    "走势",
+    "详情",
+    "介绍",
+    "分析",
+    "怎么买",
+    "怎么卖",
+    "热门",
+    "持仓",
+    "观察列表",
+    "watchlist",
+    "订单",
+    "挂单",
+    "限价",
 )
 _BUY_SYMBOL_PATTERN = re.compile(r"^买([A-Za-z][A-Za-z0-9._-]{1,15})$")
 _BUY_SYMBOL_FUZZY_PATTERN = re.compile(
@@ -148,6 +187,48 @@ def _extract_utterance_text(raw_text: str) -> str:
 def _normalize_utterance(raw_text: str) -> str:
     _, normalized = remove_punctuation_and_length(raw_text or "")
     return normalized.strip()
+
+
+def _clean_search_keyword(keyword: str) -> str:
+    candidate = str(keyword or "").strip()
+    if not candidate:
+        return ""
+
+    candidate = re.sub(r"^(?:一下|一下子|一个|一只|这个|这个币|这个代币|这只币|代币|币种|币|token|coin)", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"^(?:叫做|名叫|叫)", "", candidate, flags=re.IGNORECASE)
+
+    previous = None
+    while candidate and candidate != previous:
+        previous = candidate
+        candidate = re.sub(
+            r"(?:这个币|这个代币|这只币|币种|代币|token|coin|币)$",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    lowered = candidate.lower()
+    if not candidate or lowered in _SEARCH_KEYWORD_INVALID_EXACT:
+        return ""
+    if any(marker in lowered for marker in _SEARCH_KEYWORD_INVALID_CONTAINS):
+        return ""
+    if len(candidate) > 64:
+        return ""
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", candidate):
+        return candidate.upper()
+    return candidate
+
+
+def _extract_search_keyword(normalized: str) -> str:
+    search_symbol_match = _SEARCH_SYMBOL_PATTERN.match(normalized)
+    if search_symbol_match:
+        return _clean_search_keyword(search_symbol_match.group(1))
+
+    natural_search_match = _NATURAL_SEARCH_PATTERN.match(normalized)
+    if natural_search_match:
+        return _clean_search_keyword(natural_search_match.group(1))
+
+    return ""
 
 
 def _normalize_token(entry: Any, *, require_chain: bool = False) -> Optional[Dict[str, str]]:
@@ -1267,11 +1348,10 @@ async def try_route_ave_command(
         _refresh_turn_context()
         return True
 
-    search_symbol_match = _SEARCH_SYMBOL_PATTERN.match(normalized)
-    if search_symbol_match:
-        keyword = search_symbol_match.group(1).upper()
+    search_keyword = _extract_search_keyword(normalized)
+    if search_keyword:
         await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
-        await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=keyword))
+        await _handle_tool_response(conn, ave_tools.ave_search_token(conn, keyword=search_keyword))
         _refresh_turn_context()
         return True
 
