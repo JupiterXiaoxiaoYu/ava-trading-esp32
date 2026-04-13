@@ -1708,17 +1708,23 @@ def _build_watchlist_rows(saved_rows: list[dict]) -> list[dict]:
         addr = row["addr"]
         chain = row["chain"]
         live_token = live_tokens.get((addr, chain), {})
-        price_value = _coalesce_numeric_value(
-            live_token.get("current_price_usd"),
-            live_token.get("price"),
+        price_value = _parse_numeric_value(
+            _coalesce_numeric_value(
+                live_token.get("current_price_usd"),
+                live_token.get("price"),
+            )
         )
-        change_value = _coalesce_numeric_value(
-            live_token.get("token_price_change_24h"),
-            live_token.get("price_change_24h"),
+        change_value = _parse_numeric_value(
+            _coalesce_numeric_value(
+                live_token.get("token_price_change_24h"),
+                live_token.get("price_change_24h"),
+            )
         )
-        market_cap_value = _coalesce_numeric_value(
-            live_token.get("market_cap"),
-            live_token.get("fdv"),
+        market_cap_value = _parse_numeric_value(
+            _coalesce_numeric_value(
+                live_token.get("market_cap"),
+                live_token.get("fdv"),
+            )
         )
         identity = _asset_identity_fields(
             {
