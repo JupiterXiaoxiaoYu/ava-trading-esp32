@@ -1652,8 +1652,18 @@ def _build_signals_rows(items: list[dict]) -> list[dict]:
     return rows[:20]
 
 
+def _extract_watchlist_token_payload(resp: dict) -> dict:
+    data = resp.get("data", resp)
+    token = data.get("token", data) if isinstance(data, dict) else data
+    if isinstance(token, list):
+        token = token[0] if token else {}
+    return token if isinstance(token, dict) else {}
+
+
 def _build_watchlist_rows(saved_rows: list[dict]) -> list[dict]:
-    rows = []
+    import concurrent.futures
+
+    prepared_rows: list[dict] = []
     for row in saved_rows[:20]:
         if not isinstance(row, dict):
             continue
@@ -1664,21 +1674,73 @@ def _build_watchlist_rows(saved_rows: list[dict]) -> list[dict]:
         chain = _normalize_chain_name(chain, "solana")
         if not addr or chain not in _SUPPORTED_FEED_CHAINS:
             continue
-        identity = _asset_identity_fields(
+        prepared_rows.append(
             {
-                "token_id": addr,
+                "addr": addr,
                 "chain": chain,
                 "symbol": row.get("symbol"),
+            }
+        )
+
+    if not prepared_rows:
+        return []
+
+    live_tokens: dict[tuple[str, str], dict] = {}
+    max_workers = min(6, len(prepared_rows)) or 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_map = {
+            pool.submit(_data_get, f"/tokens/{row['addr']}-{row['chain']}"): (row["addr"], row["chain"])
+            for row in prepared_rows
+        }
+        for future, token_key in future_map.items():
+            try:
+                token = _extract_watchlist_token_payload(future.result())
+            except Exception as exc:
+                logger.bind(tag=TAG).warning(
+                    f"watchlist token snapshot failed for {token_key[0]}-{token_key[1]}: {exc}"
+                )
+                continue
+            if token:
+                live_tokens[token_key] = token
+
+    rows = []
+    for row in prepared_rows:
+        addr = row["addr"]
+        chain = row["chain"]
+        live_token = live_tokens.get((addr, chain), {})
+        price_value = _coalesce_numeric_value(
+            live_token.get("current_price_usd"),
+            live_token.get("price"),
+        )
+        change_value = _coalesce_numeric_value(
+            live_token.get("token_price_change_24h"),
+            live_token.get("price_change_24h"),
+        )
+        market_cap_value = _coalesce_numeric_value(
+            live_token.get("market_cap"),
+            live_token.get("fdv"),
+        )
+        identity = _asset_identity_fields(
+            {
+                **live_token,
+                "token_id": addr,
+                "addr": addr,
+                "chain": chain,
+                "symbol": live_token.get("symbol") or row.get("symbol"),
                 "source": "watchlist",
             }
         )
         rows.append(
             {
                 **identity,
-                "price": "--",
-                "change_24h": "--",
-                "change_positive": True,
-                "headline": "Saved token",
+                "price": _fmt_price(price_value) if price_value is not None else "--",
+                "change_24h": _fmt_change(change_value) if change_value is not None else "--",
+                "change_positive": True if change_value is None else change_value >= 0,
+                "headline": (
+                    f"MC {_fmt_volume(market_cap_value)}"
+                    if market_cap_value is not None
+                    else "Saved token"
+                ),
                 "source": "watchlist",
             }
         )

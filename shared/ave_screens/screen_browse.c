@@ -410,8 +410,8 @@ static void _render_rows(void)
             lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
             const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
             lv_color_t chg_color = COLOR_GRAY;
-            lv_label_set_text(ui->lbl_price, "");
-            lv_label_set_text(ui->lbl_subtitle, t->price[0] ? t->price : "--");
+            lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : "--");
+            lv_label_set_text(ui->lbl_subtitle, t->headline[0] ? t->headline : "Saved token");
             lv_label_set_text(ui->lbl_chg, chg_text);
             lv_label_set_text(ui->lbl_meta1, "");
             lv_label_set_text(ui->lbl_meta2, "");

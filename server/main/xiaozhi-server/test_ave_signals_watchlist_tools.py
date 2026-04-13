@@ -140,6 +140,19 @@ class SignalsWatchlistToolTests(unittest.TestCase):
             ave_tools,
             "list_watchlist_entries",
             return_value=[{"addr": "Token111", "chain": "solana", "symbol": "BONK"}],
+        ), patch.object(
+            ave_tools,
+            "_data_get",
+            return_value={
+                "data": {
+                    "token": {
+                        "symbol": "BONK",
+                        "current_price_usd": 0.1234,
+                        "token_price_change_24h": 12.5,
+                        "market_cap": 2500000,
+                    }
+                }
+            },
         ), patch.object(ave_tools, "_send_display", new=AsyncMock()) as send_display:
             ave_tools.ave_open_watchlist(self.conn)
             self.loop.run_until_complete(asyncio.sleep(0))
@@ -150,6 +163,9 @@ class SignalsWatchlistToolTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "watchlist")
         self.assertEqual(payload["source_label"], "WATCHLIST ALL")
         self.assertEqual(payload["tokens"][0]["symbol"], "BONK")
+        self.assertEqual(payload["tokens"][0]["price"], "$0.123400")
+        self.assertEqual(payload["tokens"][0]["change_24h"], "+12.50%")
+        self.assertEqual(payload["tokens"][0]["headline"], "MC $2.5M")
         self.assertEqual(self.conn.ave_state["screen"], "browse")
         self.assertEqual(self.conn.ave_state["feed_mode"], "watchlist")
 
