@@ -362,6 +362,90 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             token={"addr": "a1", "chain": "solana", "symbol": "BONK"},
         )
 
+    async def test_feed_add_to_watchlist_reply_is_spoken(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "feed",
+                "feed_cursor": 0,
+                "feed_token_list": [{"addr": "a1", "chain": "solana", "symbol": "BONK"}],
+            }
+        )
+        conn.tts = _FakeTTS()
+        conn.sentence_id = "router-reply-1"
+        conn.dialogue = Dialogue()
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("core.handle.intentHandler.speak_txt") as speak_txt, \
+             patch("plugins_func.functions.ave_tools.ave_add_current_watchlist_token") as add_current:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "收藏这个币",
+                    "selection": {
+                        "screen": "feed",
+                        "cursor": 0,
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        add_current.assert_not_called()
+        send_stt.assert_awaited_once_with(conn, "请先进入代币详情页，再说收藏这个币。")
+        speak_txt.assert_called_once_with(conn, "请先进入代币详情页，再说收藏这个币。")
+
+    async def test_spotlight_explain_current_token_routes_to_spoken_summary(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                "spotlight_snapshot": {
+                    "symbol": "BONK",
+                    "chain": "solana",
+                    "price": "$0.123400",
+                    "change_24h": "+12.50%",
+                    "market_cap": "$2.5M",
+                    "volume_24h": "$800.0K",
+                    "liquidity": "$300.0K",
+                    "risk_level": "LOW",
+                },
+            }
+        )
+        conn.tts = _FakeTTS()
+        conn.sentence_id = "router-reply-2"
+        conn.dialogue = Dialogue()
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("core.handle.intentHandler.speak_txt") as speak_txt, \
+             patch("plugins_func.functions.ave_tools.ave_token_detail") as token_detail:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "介绍一下这个币",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        token_detail.assert_not_called()
+        summary = send_stt.await_args.args[1]
+        self.assertIn("BONK", summary)
+        self.assertIn("SOLANA", summary)
+        self.assertIn("$0.123400", summary)
+        self.assertIn("风险等级 LOW", summary)
+        speak_txt.assert_called_once_with(conn, summary)
+
     async def test_spotlight_remove_watchlist_routes_phrase_variant_directly(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(

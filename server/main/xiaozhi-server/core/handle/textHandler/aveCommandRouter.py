@@ -64,6 +64,18 @@ _DEICTIC_RISK_PHRASES = {
 _OPEN_ENDED_DEICTIC_PATTERN = re.compile(
     r"(?:(?:给我讲讲|讲讲|说说|聊聊|看看|看下|分析)(?:这只币|这币|它)|(?:这只币|这币|它)(?:怎么样|如何))"
 )
+_EXPLAIN_CURRENT_TOKEN_PATTERNS = (
+    "介绍一下这个币",
+    "介绍这个币",
+    "介绍下这个币",
+    "讲讲这个币",
+    "说说这个币",
+    "聊聊这个币",
+    "分析一下这个币",
+    "分析这个币",
+    "这个币怎么样",
+    "这个币如何",
+)
 _SELECTION_GUARDED_SCREENS = {"feed", "browse", "portfolio", "spotlight", "confirm", "limit_confirm"}
 
 _WATCH_SYMBOL_PATTERN = re.compile(r"^(?:看|看看)([A-Za-z][A-Za-z0-9._-]{1,15})$")
@@ -911,9 +923,52 @@ def build_ave_context(
     }
 
 
+def _build_spotlight_voice_summary(state: Dict[str, Any]) -> str:
+    snapshot = state.get("spotlight_snapshot")
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    current = state.get("current_token")
+    if not isinstance(current, dict):
+        current = {}
+
+    symbol = str(snapshot.get("symbol") or current.get("symbol") or "这个币").strip() or "这个币"
+    chain = str(snapshot.get("chain") or current.get("chain") or "").strip().lower()
+    price = str(snapshot.get("price") or "").strip()
+    change = str(snapshot.get("change_24h") or "").strip()
+    market_cap = str(snapshot.get("market_cap") or "").strip()
+    volume_24h = str(snapshot.get("volume_24h") or "").strip()
+    liquidity = str(snapshot.get("liquidity") or "").strip()
+    risk_level = str(snapshot.get("risk_level") or "").strip()
+
+    parts = []
+    if chain:
+        parts.append(f"{symbol} 是 {chain.upper()} 链上的代币")
+    else:
+        parts.append(f"{symbol} 是当前选中的代币")
+    if price and change:
+        parts.append(f"当前价格 {price}，24 小时涨跌 {change}")
+    elif price:
+        parts.append(f"当前价格 {price}")
+    elif change:
+        parts.append(f"24 小时涨跌 {change}")
+    if market_cap and market_cap != "N/A":
+        parts.append(f"市值 {market_cap}")
+    if volume_24h and volume_24h != "N/A":
+        parts.append(f"24 小时成交额 {volume_24h}")
+    if liquidity and liquidity != "N/A":
+        parts.append(f"流动性 {liquidity}")
+    if risk_level and risk_level not in {"N/A", "LOADING", "UNKNOWN"}:
+        parts.append(f"风险等级 {risk_level}")
+    return "，".join(parts) + "。"
+
+
 async def _send_router_reply(conn: "ConnectionHandler", text: str) -> None:
     if text:
         await send_stt_message(conn, text)
+        if hasattr(conn, "tts") and hasattr(conn, "sentence_id"):
+            conn.client_abort = False
+            from core.handle.intentHandler import speak_txt
+            speak_txt(conn, text)
 
 
 async def _handle_tool_response(conn: "ConnectionHandler", response: Any) -> None:
@@ -1000,6 +1055,20 @@ async def try_route_ave_command(
     if normalized in _OPEN_ORDERS_COMMANDS:
         await _cancel_pending_trade_for_exit(conn, state, effective_screen, ave_tools)
         await _handle_tool_response(conn, ave_tools.ave_list_orders(conn))
+        _refresh_turn_context()
+        return True
+
+    if normalized in _EXPLAIN_CURRENT_TOKEN_PATTERNS:
+        token = _resolve_selection_token(selection_payload) if has_trusted_selection(selection_payload) else None
+        if not token:
+            token = _normalize_token(state.get("current_token"))
+        if not token:
+            await _send_router_reply(conn, missing_selection_reply(utterance))
+            return True
+        if effective_screen != "spotlight":
+            await _send_router_reply(conn, "请先进入代币详情页，再让我介绍这个币。")
+            return True
+        await _send_router_reply(conn, _build_spotlight_voice_summary(state))
         _refresh_turn_context()
         return True
 
