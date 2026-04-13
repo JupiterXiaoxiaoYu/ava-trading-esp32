@@ -47,13 +47,18 @@ from config.logger import setup_logging
 from plugins_func.functions.ave_trade_mgr import _send_display, _SWAP_TERMINAL_STATUSES
 from plugins_func.functions.ave_tools import (
     _build_result_payload,
+    _clear_search_state,
+    _current_feed_session,
     _build_trade_state_notify_payload,
     _clear_pending_trade,
+    _present_trade_result_or_defer,
     _clear_submitted_trade,
     _ensure_ave_state,
     _get_pending_trade,
+    _next_feed_session,
     _get_submitted_trades,
     _queue_deferred_result_payload,
+    _set_feed_navigation_state,
 )
 
 if TYPE_CHECKING:
@@ -189,6 +194,59 @@ def _fmt_chart_time(ts: int) -> str:
         return datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
     except Exception:
         return ""
+
+
+def _fmt_y_label(price) -> str:
+    if price is None or float(price) <= 0:
+        return "N/A"
+    price = float(price)
+    if price >= 1000:
+        return f"${price:,.0f}"
+    if price >= 1:
+        return f"${price:.2f}"
+    if price >= 0.001:
+        return f"${price:.4f}"
+    exp = int(math.floor(math.log10(abs(price))))
+    mantissa = price / (10 ** exp)
+    return f"{mantissa:.2f}e{exp}"
+
+
+def _normalized_interval(interval: str) -> str:
+    value = str(interval or "").strip().lower()
+    if value.startswith("k"):
+        return value[1:]
+    return value
+
+
+def _is_live_chart_interval(interval: str) -> bool:
+    return _normalized_interval(interval) in {"s1", "1"}
+
+
+def _interval_matches_selected(selected_interval: str, incoming_interval: str) -> bool:
+    if not incoming_interval:
+        return True
+    return _normalized_interval(selected_interval) == _normalized_interval(incoming_interval)
+
+
+def _build_spotlight_chart_patch(raw_closes: list[float], raw_times: list[int]) -> dict:
+    valid = [float(v) for v in raw_closes if v is not None and float(v) > 0]
+    if not valid:
+        return {}
+
+    times = [int(v) for v in raw_times if v]
+    n_times = len(times)
+    chart_min = min(valid)
+    chart_max = max(valid)
+    return {
+        "chart": _normalize_kline(valid),
+        "chart_min": _fmt_price(chart_min),
+        "chart_max": _fmt_price(chart_max),
+        "chart_min_y": _fmt_y_label(chart_min),
+        "chart_max_y": _fmt_y_label(chart_max),
+        "chart_t_start": _fmt_chart_time(times[0]) if n_times > 0 else "",
+        "chart_t_mid": _fmt_chart_time(times[n_times // 2]) if n_times > 0 else "",
+        "chart_t_end": "now",
+    }
 
 
 def _infer_event_trade_type(msg: dict) -> str:
@@ -331,6 +389,7 @@ class AveWssManager:
         self._feed_token_ids: List[str] = []      # ["addr-chain", ...]
         self._feed_display: dict = {}              # token_id → display dict
         self._feed_chain: str = "solana"
+        self._feed_session: int = 0
 
         # Spotlight state
         self._spotlight_id: Optional[str] = None
@@ -340,6 +399,9 @@ class AveWssManager:
         self._spotlight_data: dict = {}
         self._spotlight_raw_closes: List[float] = []   # live 1s closes only
         self._spotlight_raw_times: List[int] = []
+        self._spotlight_raw_owner_token_id: str = ""
+        self._spotlight_raw_owner_chain: str = ""
+        self._spotlight_raw_owner_interval: str = ""
         self._spotlight_initial_times: List[int] = []
 
         # Resubscribe signal (set when feed/spotlight changes)
@@ -408,8 +470,100 @@ class AveWssManager:
         self._feed_token_ids = ids
         self._feed_display = display
         self._feed_chain = chain
+        self._feed_session = _current_feed_session(_ensure_ave_state(self.conn))
         self._resubscribe.set()
         logger.bind(tag=TAG).debug(f"set_feed_tokens: {len(ids)} tokens, chain={chain}")
+
+    def invalidate_feed_session(
+        self,
+        session: Optional[int] = None,
+        *,
+        chain: Optional[str] = None,
+        clear_tokens: bool = True,
+    ) -> int:
+        """
+        Drop pending live FEED flush state before a screen/session transition.
+
+        Clearing cached tokens prevents late price events or deferred flushes from repainting
+        the old FEED context while a slower REST-driven rebuild is still in flight.
+        """
+        state = _ensure_ave_state(self.conn)
+        if session is None:
+            session = _next_feed_session(state)
+        else:
+            try:
+                session = int(session)
+            except (TypeError, ValueError):
+                session = _next_feed_session(state)
+            else:
+                state["feed_session"] = session
+
+        self._feed_session = session
+        if chain is not None:
+            self._feed_chain = chain
+
+        self._feed_dirty = False
+        flush_task = self._feed_flush_task
+        self._feed_flush_task = None
+        if flush_task is not None and not flush_task.done():
+            flush_task.cancel()
+
+        if clear_tokens:
+            self._feed_token_ids = []
+            self._feed_display = {}
+
+        self._resubscribe.set()
+        logger.bind(tag=TAG).debug(
+            f"invalidate_feed_session: session={session}, clear_tokens={clear_tokens}"
+        )
+        return session
+
+    def begin_spotlight_transition(
+        self,
+        pair_addr: str,
+        chain: str,
+        display_data: dict,
+        *,
+        interval: str = "k60",
+    ):
+        """
+        Prime spotlight state for an interval/token refresh without repainting a loading shell.
+
+        Keeps the current visible snapshot on screen, but updates internal selection state so
+        live price/poll pushes stop using the old interval while fresh REST data is in flight.
+        """
+        next_data = dict(self._spotlight_data or {})
+        next_data.update(dict(display_data or {}))
+        token_id = next_data.get(
+            "token_id",
+            f"{next_data.get('addr', pair_addr)}-{chain}",
+        )
+        prev_token_id = str(self._spotlight_id or "")
+        prev_chain = str(self._spotlight_chain or "").strip().lower()
+        prev_interval = _normalized_interval(getattr(self, "_spotlight_interval", "k60"))
+        next_interval = _normalized_interval(interval)
+
+        self._spotlight_id = token_id
+        self._spotlight_pair = pair_addr
+        self._spotlight_chain = chain
+        self._spotlight_interval = interval
+        next_data["interval"] = str(next_data.get("interval", "60"))
+        self._spotlight_data = next_data
+
+        # When token/chain/interval identity changes, old live raw buffers become stale.
+        if (
+            prev_token_id != token_id
+            or prev_chain != str(chain or "").strip().lower()
+            or prev_interval != next_interval
+        ):
+            self._spotlight_raw_closes = []
+            self._spotlight_raw_times = []
+            self._spotlight_raw_owner_token_id = token_id
+            self._spotlight_raw_owner_chain = str(chain or "").strip().lower()
+            self._spotlight_raw_owner_interval = next_interval
+
+        self._resubscribe.set()
+        logger.bind(tag=TAG).debug(f"begin_spotlight_transition: {token_id} interval={interval}")
 
     def set_spotlight(
         self,
@@ -442,6 +596,9 @@ class AveWssManager:
         # normalization (new token: historical high ≈1000, current low ≈0).
         self._spotlight_raw_closes: List[float] = []
         self._spotlight_raw_times: List[int] = []
+        self._spotlight_raw_owner_token_id = token_id
+        self._spotlight_raw_owner_chain = str(chain or "").strip().lower()
+        self._spotlight_raw_owner_interval = _normalized_interval(interval)
         self._spotlight_initial_times = list(raw_times or [])
         self._resubscribe.set()
         logger.bind(tag=TAG).debug(f"set_spotlight: {token_id}")
@@ -670,11 +827,14 @@ class AveWssManager:
             if isinstance(kline_data, dict):
                 id_str = result.get("id", "")
                 pair = id_str.rsplit("-", 1)[0] if "-" in id_str else ""
+                incoming_interval = result.get("interval", "")
                 for denom_val in kline_data.values():
                     if isinstance(denom_val, dict) and "close" in denom_val:
                         normalized = dict(denom_val)
                         if pair:
                             normalized["pair"] = pair
+                        if incoming_interval:
+                            normalized["interval"] = incoming_interval
                         await self._on_kline_event(normalized)
                         break
                 return
@@ -701,6 +861,7 @@ class AveWssManager:
         # {"id":"pair-chain","interval":"s1","kline":{"eth":{"close":"...","high":"...","low":"...","open":"...","time":...}},"topic":"..."}
         kline_data = msg.get("kline")
         if isinstance(kline_data, dict):
+            incoming_interval = msg.get("interval", "")
             for denom_val in kline_data.values():
                 if isinstance(denom_val, dict) and "close" in denom_val:
                     normalized = dict(denom_val)
@@ -708,6 +869,8 @@ class AveWssManager:
                     id_str = msg.get("id", "")
                     if "-" in id_str:
                         normalized["pair"] = id_str.rsplit("-", 1)[0]
+                    if incoming_interval:
+                        normalized["interval"] = incoming_interval
                     await self._on_kline_event(normalized)
                     break
             return
@@ -821,14 +984,16 @@ class AveWssManager:
             return
         self._feed_dirty = False
         self._last_feed_push = time.monotonic()
+        feed_session = self._feed_session or _current_feed_session(_ensure_ave_state(self.conn))
         await _send_display(self.conn, "feed", {
             "tokens": list(self._feed_display.values()),
             "chain": self._feed_chain,
             "live": True,
+            "feed_session": feed_session,
         })
 
     async def _on_kline_event(self, evt: dict):
-        """Append new kline point and push a SPOTLIGHT refresh."""
+        """Buffer kline points; only s1 live interval redraws spotlight chart."""
         if not self._spotlight_data:
             return
 
@@ -850,32 +1015,40 @@ class AveWssManager:
                 self._spotlight_raw_times.append(ts)
                 if len(self._spotlight_raw_times) > MAX_CHART_POINTS:
                     self._spotlight_raw_times = self._spotlight_raw_times[-MAX_CHART_POINTS:]
+            self._spotlight_raw_owner_token_id = str(
+                self._spotlight_id or self._spotlight_data.get("token_id", "")
+            )
+            self._spotlight_raw_owner_chain = str(
+                self._spotlight_chain or self._spotlight_data.get("chain", "")
+            ).strip().lower()
+            self._spotlight_raw_owner_interval = _normalized_interval(
+                evt.get("interval", "") or self._spotlight_interval
+            )
 
             # Do NOT update price from kline close — kline uses "eth" denomination
-            # and may lag by 1-2s.  Price is kept current by _on_price_event only.
+            # and may lag by 1-2s. Price is kept current by _on_price_event only.
+            #
+            selected_interval = getattr(self, "_spotlight_interval", "k60")
+            incoming_interval = evt.get("interval", "")
+            selected_normalized = _normalized_interval(selected_interval)
+            if selected_normalized != "s1":
+                return
+            if not _interval_matches_selected(selected_interval, incoming_interval):
+                return
 
-            # Switch to live chart once we have ≥10 points with price variation.
-            # Until then keep the initial REST chart to avoid a near-empty view.
-            valid = [v for v in self._spotlight_raw_closes if v > 0]
-            has_variation = len(valid) >= 10 and max(valid) != min(valid)
-            if has_variation:
-                self._spotlight_data["chart"] = _normalize_kline(self._spotlight_raw_closes)
-                self._spotlight_data["chart_min"] = _fmt_price(min(valid))
-                self._spotlight_data["chart_max"] = _fmt_price(max(valid))
-                # X-axis: live window start/mid
-                n_t = len(self._spotlight_raw_times)
-                if n_t > 0:
-                    self._spotlight_data["chart_t_start"] = _fmt_chart_time(self._spotlight_raw_times[0])
-                    self._spotlight_data["chart_t_mid"]   = _fmt_chart_time(self._spotlight_raw_times[n_t // 2])
-                self._spotlight_data["chart_t_end"] = "now"
-            else:
-                # Keep REST chart; update only the rightmost time label
-                self._spotlight_data["chart_t_end"] = "now"
+            chart_patch = _build_spotlight_chart_patch(
+                self._spotlight_raw_closes,
+                self._spotlight_raw_times,
+            )
+            if not chart_patch:
+                return
 
-        await _send_display(self.conn, "spotlight", {
-            **self._spotlight_data,
-            "live": True,
-        })
+            self._spotlight_data.update(chart_patch)
+            await _send_display(self.conn, "spotlight", {
+                **self._spotlight_data,
+                "live": True,
+            })
+        return
 
     # ── Spotlight holders/liq poll ────────────────────────────────────────────
 
@@ -884,18 +1057,28 @@ class AveWssManager:
         import asyncio as _asyncio
         from plugins_func.functions.ave_tools import _data_get, _fmt_volume
         loop = _asyncio.get_event_loop()
+        chain_norm = str(chain or "").strip().lower()
+
+        def _identity_matches() -> bool:
+            if not isinstance(self._spotlight_data, dict):
+                return False
+            current_addr = str(self._spotlight_data.get("addr", "") or "")
+            current_chain = str(self._spotlight_data.get("chain", chain_norm) or chain_norm).strip().lower()
+            return current_addr == addr and current_chain == chain_norm
 
         while not self._stopped and self._spotlight_data:
             await _asyncio.sleep(5)
             if self._stopped or not self._spotlight_data:
                 break
             # Spotlight may have changed while we were sleeping
-            if self._spotlight_data.get("addr") != addr:
+            if not _identity_matches():
                 break
             try:
                 resp = await loop.run_in_executor(
                     None, lambda: _data_get(f"/tokens/{addr}-{chain}")
                 )
+                if self._stopped or not self._spotlight_data or not _identity_matches():
+                    break
                 token_data = resp.get("data", resp)
                 token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
                 if isinstance(token, list) and token:
@@ -915,7 +1098,40 @@ class AveWssManager:
                         pass
                 if liq_raw is not None:
                     self._spotlight_data["liquidity"] = _fmt_volume(liq_raw)
+
+                # L1M should keep moving even when upstream k1 pushes are sparse.
+                # Refresh 1-minute chart from REST on each spotlight poll tick.
+                selected_interval = _normalized_interval(
+                    str(self._spotlight_data.get("interval", self._spotlight_interval))
+                )
+                if selected_interval == "1":
+                    kline_resp = await loop.run_in_executor(
+                        None,
+                        lambda: _data_get(
+                            f"/klines/token/{addr}-{chain}",
+                            {"interval": "1", "limit": MAX_CHART_POINTS},
+                        ),
+                    )
+                    if self._stopped or not self._spotlight_data or not _identity_matches():
+                        break
+                    points = kline_resp.get("data", {}).get("points", [])
+                    closes = []
+                    times = []
+                    for point in points:
+                        close_value = point.get("close", point.get("c"))
+                        if close_value is None:
+                            continue
+                        close_float = float(close_value)
+                        if close_float <= 0:
+                            continue
+                        closes.append(close_float)
+                        times.append(int(point.get("time", point.get("t", 0)) or 0))
+                    chart_patch = _build_spotlight_chart_patch(closes, times)
+                    if chart_patch:
+                        self._spotlight_data.update(chart_patch)
                 # Push on every successful poll so both labels refresh together
+                if self._stopped or not self._spotlight_data or not _identity_matches():
+                    break
                 await _send_display(self.conn, "spotlight", {
                     **self._spotlight_data,
                     "live": True,
@@ -1132,12 +1348,11 @@ class AveWssManager:
                     },
                 }, pending=matched_submitted or pending)
                 if matched_submitted:
-                    if has_pending and not matches_pending:
-                        _queue_deferred_result_payload(self.conn, payload)
-                        await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
-                    else:
-                        _ensure_ave_state(self.conn)["screen"] = "result"
-                        await _send_display(self.conn, "result", payload)
+                    await _present_trade_result_or_defer(
+                        self.conn,
+                        payload,
+                        current_trade_id=str(matched_submitted.get("trade_id", "") or ""),
+                    )
                     _clear_submitted_trade(
                         self.conn,
                         trade_id=str(matched_submitted.get("trade_id", "") or ""),
@@ -1148,20 +1363,22 @@ class AveWssManager:
                     _queue_deferred_result_payload(self.conn, payload)
                     await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
                     return
-                _ensure_ave_state(self.conn)["screen"] = "result"
-                await _send_display(self.conn, "result", payload)
+                await _present_trade_result_or_defer(
+                    self.conn,
+                    payload,
+                    current_trade_id=pending.get("trade_id", "") if matches_pending else "",
+                )
                 if matches_pending:
                     _clear_pending_trade(self.conn, pending.get("trade_id", ""))
 
         elif status in {"error", "failed"}:
             payload = _terminal_failure_payload(cancel_state=False)
             if matched_submitted:
-                if has_pending and not matches_pending:
-                    _queue_deferred_result_payload(self.conn, payload)
-                    await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
-                else:
-                    _ensure_ave_state(self.conn)["screen"] = "result"
-                    await _send_display(self.conn, "result", payload)
+                await _present_trade_result_or_defer(
+                    self.conn,
+                    payload,
+                    current_trade_id=str(matched_submitted.get("trade_id", "") or ""),
+                )
                 _clear_submitted_trade(
                     self.conn,
                     trade_id=str(matched_submitted.get("trade_id", "") or ""),
@@ -1172,8 +1389,11 @@ class AveWssManager:
                 _queue_deferred_result_payload(self.conn, payload)
                 await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
                 return
-            _ensure_ave_state(self.conn)["screen"] = "result"
-            await _send_display(self.conn, "result", payload)
+            await _present_trade_result_or_defer(
+                self.conn,
+                payload,
+                current_trade_id=pending.get("trade_id", "") if matches_pending else "",
+            )
             if matches_pending:
                 _clear_pending_trade(self.conn, pending.get("trade_id", ""))
 
@@ -1181,12 +1401,11 @@ class AveWssManager:
             if resolved_trade_type in {"market_buy", "market_sell", "limit_buy", "cancel_order"} or matched_submitted or matches_pending:
                 payload = _terminal_failure_payload(cancel_state=True)
                 if matched_submitted:
-                    if has_pending and not matches_pending:
-                        _queue_deferred_result_payload(self.conn, payload)
-                        await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
-                    else:
-                        _ensure_ave_state(self.conn)["screen"] = "result"
-                        await _send_display(self.conn, "result", payload)
+                    await _present_trade_result_or_defer(
+                        self.conn,
+                        payload,
+                        current_trade_id=str(matched_submitted.get("trade_id", "") or ""),
+                    )
                     _clear_submitted_trade(
                         self.conn,
                         trade_id=str(matched_submitted.get("trade_id", "") or ""),
@@ -1197,8 +1416,11 @@ class AveWssManager:
                     _queue_deferred_result_payload(self.conn, payload)
                     await _send_display(self.conn, "notify", _build_trade_state_notify_payload("deferred_result"))
                     return
-                _ensure_ave_state(self.conn)["screen"] = "result"
-                await _send_display(self.conn, "result", payload)
+                await _present_trade_result_or_defer(
+                    self.conn,
+                    payload,
+                    current_trade_id=pending.get("trade_id", "") if matches_pending else "",
+                )
                 if matches_pending:
                     _clear_pending_trade(self.conn, pending.get("trade_id", ""))
             else:
@@ -1263,8 +1485,9 @@ async def initial_feed_push(conn: "ConnectionHandler"):
                 if i < len(lst):
                     t   = lst[i]
                     tid = t.get("token", t.get("token_id", t.get("address", "")))
-                    if tid and tid not in seen:
-                        seen.add(tid)
+                    dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
+                    if tid and dedupe_key not in seen:
+                        seen.add(dedupe_key)
                         raw_all.append(t)
 
         tokens = []
@@ -1289,7 +1512,16 @@ async def initial_feed_push(conn: "ConnectionHandler"):
         if not tokens:
             return
 
-        await _send_display(conn, "feed", {"tokens": tokens, "chain": "all"})
+        state = _ensure_ave_state(conn)
+        feed_session = _next_feed_session(state)
+        state["screen"] = "feed"
+        state["feed_source"] = "trending"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "standard"
+        state.pop("nav_from", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, tokens, cursor=0)
+        await _send_display(conn, "feed", {"tokens": tokens, "chain": "all", "feed_session": feed_session})
 
         if hasattr(conn, "ave_wss"):
             conn.ave_wss.set_feed_tokens(tokens, "all")

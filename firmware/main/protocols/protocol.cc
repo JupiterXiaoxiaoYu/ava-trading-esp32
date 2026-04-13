@@ -1,54 +1,9 @@
 #include "protocol.h"
-
 #include "ave_screen_manager.h"
 
 #include <esp_log.h>
 
 #define TAG "Protocol"
-
-namespace {
-
-bool AppendSelectionJson(std::string& message) {
-    char selection[384];
-    if (!ave_sm_get_selection_context_json(selection, sizeof(selection))) {
-        return false;
-    }
-    message += ",\"selection\":";
-    message += selection;
-    return true;
-}
-
-std::string BuildListenMessage(const std::string& session_id,
-                              const char* state,
-                              const char* text,
-                              const char* mode) {
-    std::string message = "{\"session_id\":\"" + session_id + "\"";
-    message += ",\"type\":\"listen\",\"state\":\"";
-    message += state;
-    message += "\"";
-
-    if (text != nullptr) {
-        char escaped_text[256];
-        if (!ave_sm_json_escape_string(text, escaped_text, sizeof(escaped_text))) {
-            escaped_text[0] = '\0';
-        }
-        message += ",\"text\":\"";
-        message += escaped_text;
-        message += "\"";
-    }
-
-    if (mode != nullptr) {
-        message += ",\"mode\":\"";
-        message += mode;
-        message += "\"";
-    }
-
-    AppendSelectionJson(message);
-    message += "}";
-    return message;
-}
-
-}  // namespace
 
 void Protocol::OnIncomingJson(std::function<void(const cJSON* root)> callback) {
     on_incoming_json_ = callback;
@@ -80,6 +35,10 @@ void Protocol::OnDisconnected(std::function<void()> callback) {
 
 void Protocol::SetError(const std::string& message) {
     error_occurred_ = true;
+    if (suppress_network_error_) {
+        ESP_LOGW(TAG, "Suppressed network error: %s", message.c_str());
+        return;
+    }
     if (on_network_error_ != nullptr) {
         on_network_error_(message);
     }
@@ -95,17 +54,28 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
 }
 
 void Protocol::SendWakeWordDetected(const std::string& wake_word) {
-    SendText(BuildListenMessage(session_id_, "detect", wake_word.c_str(), nullptr));
+    std::string json = "{\"session_id\":\"" + session_id_ + 
+                      "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
+    SendText(json);
 }
 
 void Protocol::SendStartListening(ListeningMode mode) {
-    const char* mode_text = "manual";
+    char selection[384];
+    std::string message = "{\"session_id\":\"" + session_id_ + "\"";
+    message += ",\"type\":\"listen\",\"state\":\"start\"";
     if (mode == kListeningModeRealtime) {
-        mode_text = "realtime";
+        message += ",\"mode\":\"realtime\"";
     } else if (mode == kListeningModeAutoStop) {
-        mode_text = "auto";
+        message += ",\"mode\":\"auto\"";
+    } else {
+        message += ",\"mode\":\"manual\"";
     }
-    SendText(BuildListenMessage(session_id_, "start", nullptr, mode_text));
+    if (ave_sm_get_selection_context_json(selection, sizeof(selection))) {
+        message += ",\"selection\":";
+        message += selection;
+    }
+    message += "}";
+    SendText(message);
 }
 
 void Protocol::SendStopListening() {
@@ -123,7 +93,9 @@ bool Protocol::SendRawJson(const std::string& message) {
 }
 
 bool Protocol::IsTimeout() const {
-    const int kTimeoutSeconds = 120;
+    // The server now sends periodic heartbeats, so keep the quiet-channel timeout generous
+    // to avoid false reconnects while the user is just browsing on-screen content.
+    const int kTimeoutSeconds = 1800;
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_incoming_time_);
     bool timeout = duration.count() > kTimeoutSeconds;

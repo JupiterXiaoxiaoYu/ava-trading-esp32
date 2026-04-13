@@ -38,6 +38,7 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
             symbol="BONK",
             amount_native="0.10 SOL",
         )
+        conn.ave_state["nav_from"] = "portfolio"
 
         with patch.object(ave_tools.trade_mgr, "confirm", new=AsyncMock(return_value={
             "trade_type": "market_buy",
@@ -54,6 +55,7 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][1]["body"], "Waiting for chain confirmation.")
         self.assertEqual(sent[1][1]["reason"], "trade_submitted")
         self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertNotIn("nav_from", conn.ave_state)
         self.assertEqual(conn.ave_state.get("submitted_trades", [])[0]["swap_order_id"], "doc-order-id")
         self.assertEqual(conn.ave_state.get("submitted_trades", [])[0]["trade_type"], "market_buy")
         self.assertEqual(conn.ave_state.get("screen"), "feed")
@@ -75,6 +77,7 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
             symbol="BONK",
             amount_native="100% holdings",
         )
+        conn.ave_state["nav_from"] = "portfolio"
 
         with patch.object(ave_tools.trade_mgr, "confirm", new=AsyncMock(return_value={
             "trade_type": "market_sell",
@@ -94,9 +97,47 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][1]["body"], "Waiting for chain confirmation.")
         self.assertEqual(sent[1][1]["reason"], "trade_submitted")
         self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertNotIn("nav_from", conn.ave_state)
         self.assertEqual(conn.ave_state.get("submitted_trades", [])[0]["swap_order_id"], "doc-order-id")
         self.assertEqual(conn.ave_state.get("submitted_trades", [])[0]["trade_type"], "market_sell")
         self.assertEqual(conn.ave_state.get("screen"), "feed")
+
+    async def test_trade_action_cancel_rebuilds_home_feed_and_clears_nav_from(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        handler = TradeActionHandler()
+        conn.ave_state.update({
+            "feed_source": "gainer",
+            "feed_mode": "search",
+            "search_query": "BONK",
+            "screen": "confirm",
+            "nav_from": "portfolio",
+        })
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="cancel-1",
+            trade_type="market_buy",
+            action="BUY",
+            symbol="BONK",
+            amount_native="0.10 SOL",
+        )
+
+        with patch.object(ave_tools.trade_mgr, "cancel") as mock_cancel, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending, \
+             patch("plugins_func.functions.ave_trade_mgr._send_display", new=AsyncMock()) as mock_send:
+            await handler.handle(conn, {
+                "type": "trade_action",
+                "action": "cancel",
+                "trade_id": "cancel-1",
+            })
+            await asyncio.sleep(0)
+
+        mock_cancel.assert_called_once_with("cancel-1")
+        mock_trending.assert_called_once_with(conn, topic="gainer")
+        mock_send.assert_not_awaited()
+        self.assertEqual(conn.ave_state.get("screen"), "feed")
+        self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertNotIn("nav_from", conn.ave_state)
 
     async def test_key_action_back_on_confirm_uses_trade_cancel_path(self):
         loop = asyncio.get_running_loop()
@@ -124,10 +165,6 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
     async def test_ave_back_to_feed_cancels_pending_confirm_trade(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
-        sent = []
-
-        async def _fake_send_display(conn, screen, payload):
-            sent.append((screen, payload))
 
         conn.ave_state["screen"] = "confirm"
         ave_tools._set_pending_trade(
@@ -140,14 +177,15 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(ave_tools.trade_mgr, "cancel") as mock_cancel, \
-             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending, \
+             patch("plugins_func.functions.ave_tools._send_display", new=AsyncMock()) as mock_send:
             resp = ave_tools.ave_back_to_feed(conn)
             await asyncio.sleep(0)
 
         self.assertEqual(resp.result, "已取消买入BONK，返回热门列表")
         mock_cancel.assert_called_once_with("buy-1")
-        self.assertEqual([screen for screen, _ in sent], ["feed"])
-        self.assertEqual(sent[0][1]["reason"], "user_cancel")
+        mock_trending.assert_called_once_with(conn, topic="trending")
+        mock_send.assert_not_awaited()
         self.assertEqual(conn.ave_state.get("screen"), "feed")
         self.assertNotIn("pending_trade", conn.ave_state)
 
@@ -208,6 +246,8 @@ class TradeContractFixTests(unittest.IsolatedAsyncioTestCase):
         mock_create.assert_not_called()
         self.assertEqual(sent[0][0], "notify")
         self.assertEqual(sent[0][1]["level"], "error")
+        self.assertEqual(sent[0][1]["title"], "Dangerous Token Blocked")
+        self.assertEqual(sent[0][1]["body"], "Honeypot contract detected. Limit order cancelled.")
         self.assertEqual(conn.ave_state.get("screen"), None)
 
 

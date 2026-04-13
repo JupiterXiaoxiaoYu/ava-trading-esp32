@@ -287,8 +287,6 @@ public:
         InitializeLcdDisplay();
         InitializeButtons();
         InitializeJoystick();
-        // This board has no dedicated speaker volume controls, so keep boot volume at max.
-        GetAudioCodec()->SetOutputVolume(100);
         GetBacklight()->RestoreBrightness();
     }
 

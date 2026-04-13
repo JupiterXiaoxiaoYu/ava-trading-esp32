@@ -20,6 +20,10 @@
 
 #define TAG "Application"
 
+namespace {
+constexpr int kIdleReconnectInitialDelaySeconds = 5;
+constexpr int kIdleReconnectRetryIntervalSeconds = 15;
+}
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -249,20 +253,14 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
-            clock_ticks_++;
-            auto display = Board::GetInstance().GetDisplay();
-            display->UpdateStatusBar();
-        
-            // Print debug info every 10 seconds
-            if (clock_ticks_ % 10 == 0) {
-                SystemInfo::PrintHeapStats();
-            }
+            HandleClockTickEvent();
         }
     }
 }
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+    network_connected_ = true;
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
@@ -284,9 +282,15 @@ void Application::HandleNetworkConnectedEvent() {
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar(true);
+
+    if (state == kDeviceStateIdle && protocol_ && !protocol_->IsAudioChannelOpened()) {
+        next_idle_reconnect_tick_ = 1;
+    }
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    network_connected_ = false;
+
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening || state == kDeviceStateSpeaking) {
@@ -322,6 +326,50 @@ void Application::HandleActivationDoneEvent() {
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
 }
+
+void Application::HandleClockTickEvent() {
+    clock_ticks_++;
+    auto display = Board::GetInstance().GetDisplay();
+    display->UpdateStatusBar();
+
+    if (clock_ticks_ % 10 == 0) {
+        SystemInfo::PrintHeapStats();
+    }
+
+    if (clock_ticks_ >= next_idle_reconnect_tick_) {
+        TryAutoReconnectInIdle();
+    }
+}
+
+void Application::TryAutoReconnectInIdle() {
+    if (!network_connected_ || !protocol_) {
+        return;
+    }
+    if (GetDeviceState() != kDeviceStateIdle) {
+        return;
+    }
+    if (protocol_->IsAudioChannelOpened()) {
+        return;
+    }
+    if (!audio_service_.IsIdle()) {
+        return;
+    }
+
+    next_idle_reconnect_tick_ = clock_ticks_ + kIdleReconnectRetryIntervalSeconds;
+    ESP_LOGI(TAG, "Idle channel closed, attempting background reconnect");
+
+    protocol_->SetSuppressNetworkError(true);
+    bool reopened = protocol_->OpenAudioChannel();
+    protocol_->SetSuppressNetworkError(false);
+
+    if (reopened) {
+        ESP_LOGI(TAG, "Background reconnect succeeded");
+        return;
+    }
+
+    ESP_LOGW(TAG, "Background reconnect failed, will retry in %d seconds", kIdleReconnectRetryIntervalSeconds);
+}
+
 
 void Application::ActivationTask() {
     // Create OTA object for activation process
@@ -597,6 +645,8 @@ void Application::InitializeProtocol() {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
             }
+        } else if (strcmp(type->valuestring, "ping") == 0 || strcmp(type->valuestring, "pong") == 0) {
+            // WebSocket keepalive frames are handled by the protocol layer; no UI action needed.
         } else if (strcmp(type->valuestring, "alert") == 0) {
             auto status = cJSON_GetObjectItem(root, "status");
             auto message = cJSON_GetObjectItem(root, "message");
@@ -794,20 +844,24 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
-    if (!protocol_) {
-        return;
-    }
-
     auto state = GetDeviceState();
     auto wake_word = audio_service_.GetLastWakeWord();
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
 
+    if (state == kDeviceStateWifiConfiguring || state == kDeviceStateActivating) {
+        // Leave setup/activation overlays and handle the wake flow like the normal idle state.
+        SetDeviceState(kDeviceStateIdle);
+        state = GetDeviceState();
+    }
+
+    if (!protocol_) {
+        ESP_LOGW(TAG, "Ignore wake word because protocol is not initialized");
+        return;
+    }
+
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
         auto wake_word = audio_service_.GetLastWakeWord();
-        // Give immediate local feedback so the user knows wake word detection fired
-        // even before the websocket round-trip finishes.
-        audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
 
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
@@ -884,6 +938,7 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+            next_idle_reconnect_tick_ = kIdleReconnectInitialDelaySeconds;
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
@@ -937,8 +992,9 @@ void Application::HandleStateChangedEvent() {
             audio_service_.ResetDecoder();
             break;
         case kDeviceStateWifiConfiguring:
+        case kDeviceStateActivating:
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(false);
+            audio_service_.EnableWakeWordDetection(true);
             break;
         default:
             // Do nothing

@@ -20,10 +20,26 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config.logger import setup_logging
+from plugins_func.functions.ave_paper_store import (
+    PaperStoreError,
+    get_paper_account,
+    get_trade_mode as load_trade_mode,
+    list_open_orders as list_paper_open_orders,
+    mutate_account as mutate_paper_account,
+    set_trade_mode as persist_trade_mode,
+)
+from plugins_func.functions.ave_watchlist_store import (
+    add_watchlist_entry,
+    list_watchlist_entries,
+    remove_watchlist_entry,
+    watchlist_contains,
+)
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from plugins_func.functions.ave_trade_mgr import (
     TRADE_CONFIRM_TIMEOUT_SEC,
@@ -47,15 +63,49 @@ DATA_BASE = "https://data.ave-api.xyz/v2"
 TRADE_BASE = "https://bot-api.ave.ai"
 
 # Default trade settings (overridable by voice)
-DEFAULT_BUY_SOL = 0.1           # SOL
+DEFAULT_BUY_NATIVE_AMOUNT = 0.1
 DEFAULT_TP_PCT = 25             # %
 DEFAULT_SL_PCT = 15             # %
 DEFAULT_SLIPPAGE = 100          # basis points (1%)
 _BATCH_PRICE_EVM_SUFFIXES = ("-bsc", "-eth", "-base")
 _CHAIN_SUFFIXES = ("solana", "bsc", "eth", "base")
+_SUPPORTED_FEED_CHAINS = frozenset(_CHAIN_SUFFIXES)
+_CHAIN_CYCLE_ORDER = ("solana", "base", "eth", "bsc")
+_SIGNALS_SUPPORTED_CHAINS = frozenset({"solana", "bsc"})
+_SIGNALS_CHAIN_CYCLE_ORDER = ("solana", "bsc")
 _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
+_WATCHLIST_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_watchlists.json"
+_PAPER_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_paper_accounts.json"
+_TRADE_MODE_REAL = "real"
+_TRADE_MODE_PAPER = "paper"
+_VALID_TRADE_MODES = frozenset({_TRADE_MODE_REAL, _TRADE_MODE_PAPER})
+_PAPER_NATIVE_TOKEN_META = {
+    "solana": {
+        "symbol": "SOL",
+        "token_id": f"{NATIVE_SOL}-solana",
+    },
+    "eth": {
+        "symbol": "ETH",
+        "token_id": "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2-eth",
+    },
+    "base": {
+        "symbol": "ETH",
+        "token_id": "0x4200000000000000000000000000000000000006-base",
+    },
+    "bsc": {
+        "symbol": "BNB",
+        "token_id": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c-bsc",
+    },
+}
+
+_CHAIN_NATIVE_BASE_UNITS = {
+    "solana": Decimal("1000000000"),
+    "eth": Decimal("1000000000000000000"),
+    "base": Decimal("1000000000000000000"),
+    "bsc": Decimal("1000000000000000000"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -137,12 +187,25 @@ def _fmt_y_label(price) -> str:
 
 def _kline_limit_for_interval(interval: str) -> int:
     interval_to_size = {
+        "s1": 48,
+        "1": 48,
         "5": 48,
         "60": 48,
         "240": 42,
         "1440": 30,
     }
     return interval_to_size.get(str(interval), 48)
+
+
+def _to_wss_kline_interval(interval: str) -> str:
+    value = str(interval or "60").strip().lower()
+    if not value:
+        return "k60"
+    if value == "s1":
+        return "s1"
+    if value.startswith("k"):
+        return value
+    return f"k{value}"
 
 
 def _fmt_change(pct) -> str:
@@ -167,12 +230,383 @@ def _fmt_chart_time(ts: int) -> str:
 def _fmt_volume(vol) -> str:
     if vol is None:
         return "N/A"
-    vol = float(vol)
+    if isinstance(vol, str):
+        text = vol.strip().replace(",", "")
+        if not text or text.lower() in {"n/a", "na", "none", "null", "--"}:
+            return "N/A"
+        vol = text
+    try:
+        vol = float(vol)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not math.isfinite(vol):
+        return "N/A"
     if vol >= 1_000_000:
         return f"${vol/1_000_000:.1f}M"
     if vol >= 1_000:
         return f"${vol/1_000:.1f}K"
     return f"${vol:.0f}"
+
+
+def _fmt_signed_volume(vol) -> str:
+    numeric = _parse_numeric_value(vol)
+    if numeric is None:
+        return "N/A"
+    sign = "+" if numeric >= 0 else "-"
+    return f"{sign}{_fmt_volume(abs(numeric))}"
+
+
+def _fmt_portfolio_pnl(vol) -> str:
+    numeric = _parse_numeric_value(vol)
+    if numeric is None:
+        return "N/A"
+    sign = "+" if numeric >= 0 else "-"
+    abs_value = abs(float(numeric))
+    if abs_value >= 1_000:
+        return f"{sign}{_fmt_volume(abs_value)}"
+    return f"{sign}${abs_value:.2f}"
+
+
+def _parse_numeric_value(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if not math.isfinite(float(value)):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().replace(",", "")
+        if not text or text.lower() in {"n/a", "na", "none", "null", "--"}:
+            return None
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        try:
+            num = float(text)
+        except ValueError:
+            return None
+        if not math.isfinite(num):
+            return None
+        return num
+    return None
+
+
+def _coalesce_numeric_value(primary, fallback=None):
+    if _parse_numeric_value(primary) is not None:
+        return primary
+    if _parse_numeric_value(fallback) is not None:
+        return fallback
+    return None
+
+
+def _fmt_percent(value, *, normalize_fraction: bool = False) -> str:
+    if value in (None, ""):
+        return "N/A"
+    has_percent_suffix = isinstance(value, str) and "%" in value
+    pct = _parse_numeric_value(value)
+    if pct is None:
+        return "N/A"
+    if normalize_fraction and not has_percent_suffix and 0 <= pct <= 1:
+        pct *= 100
+    return f"{pct:.1f}%"
+
+
+def _contract_short(addr: str) -> str:
+    text = str(addr or "").strip()
+    if not text:
+        return "N/A"
+    if len(text) <= 8:
+        return text
+    return f"{text[:4]}...{text[-4:]}"
+
+
+def _signal_default_quote_symbol(chain: str) -> str:
+    normalized = _normalize_chain_name(chain, "solana")
+    if normalized == "solana":
+        return "SOL"
+    if normalized == "bsc":
+        return "BNB"
+    return "ETH"
+
+
+def _native_token_meta(chain: str) -> dict:
+    normalized = _normalize_chain_name(chain, "solana")
+    return dict(_PAPER_NATIVE_TOKEN_META.get(normalized) or _PAPER_NATIVE_TOKEN_META["solana"])
+
+
+def _native_token_address(chain: str) -> str:
+    normalized = _normalize_chain_name(chain, "solana")
+    if normalized == "solana":
+        return _normalize_quote_token_address(normalized, NATIVE_SOL)
+
+    token_id = str(_native_token_meta(normalized).get("token_id") or "")
+    addr, _ = _split_token_reference(token_id, normalized)
+    return addr
+
+
+def _native_amount_label(chain: str, amount) -> str:
+    native_symbol = str(_native_token_meta(chain).get("symbol") or "SOL")
+    return f"{amount} {native_symbol}"
+
+
+def _native_amount_to_base_units(chain: str, amount) -> int:
+    multiplier = _CHAIN_NATIVE_BASE_UNITS.get(
+        _normalize_chain_name(chain, "solana"),
+        Decimal("1000000000"),
+    )
+    try:
+        value = Decimal(str(amount))
+    except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+        value = Decimal("0")
+    if value <= 0:
+        return 0
+    return int((value * multiplier).to_integral_value())
+
+
+def _estimate_native_usd(chain: str, amount) -> float:
+    native_meta = _native_token_meta(chain)
+    native_token_id = str(native_meta.get("token_id") or "")
+    native_token_price_key = _normalize_batch_price_token_id(native_token_id)
+    fallback_prices = {
+        "solana": 150.0,
+        "eth": 3000.0,
+        "base": 3000.0,
+        "bsc": 600.0,
+    }
+
+    try:
+        amount_num = float(amount)
+    except (TypeError, ValueError):
+        return 0.0
+
+    try:
+        price_resp = _data_post("/tokens/price", _build_batch_price_payload([native_token_id]))
+        price_data = price_resp.get("data", {})
+        if isinstance(price_data, dict):
+            native_entry = (
+                price_data.get(native_token_id)
+                or price_data.get(native_token_price_key)
+                or {}
+            )
+            native_price = float(native_entry.get("current_price_usd", 0) or 0)
+        elif isinstance(price_data, list) and price_data:
+            native_price = float(price_data[0].get("current_price_usd", 0) or 0)
+        else:
+            native_price = 0
+    except Exception:
+        native_price = fallback_prices.get(_normalize_chain_name(chain, "solana"), 0.0)
+
+    return amount_num * native_price
+
+
+def _fmt_signal_amount(value) -> str:
+    amount = _parse_numeric_value(value)
+    if amount is None:
+        return "0"
+    amount = abs(float(amount))
+    if amount >= 1_000_000:
+        return f"{amount / 1_000_000:.1f}M"
+    if amount >= 1_000:
+        return f"{amount / 1_000:.1f}K"
+    if amount >= 100:
+        return f"{amount:.1f}".rstrip("0").rstrip(".")
+    if amount >= 1:
+        return f"{amount:.2f}".rstrip("0").rstrip(".")
+    return f"{amount:.4f}".rstrip("0").rstrip(".")
+
+
+def _fmt_signal_age(raw_ts, now_ts=None) -> str:
+    ts = _parse_numeric_value(raw_ts)
+    if ts is None or ts <= 0:
+        return ""
+    now_value = int(now_ts if now_ts is not None else time.time())
+    delta = max(0, now_value - int(ts))
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
+
+
+def _signal_label_from_totals(buy_total: float, sell_total: float) -> str:
+    if buy_total > 0 and buy_total >= sell_total:
+        return "BUY"
+    if sell_total > 0:
+        return "SELL"
+    return ""
+
+
+def _signal_label_from_item(item: dict) -> str:
+    text = str(item.get("action_type") or item.get("signal_type") or "").strip().lower()
+    if "sell" in text:
+        return "SELL"
+    if "buy" in text:
+        return "BUY"
+    return ""
+
+
+def _build_signal_meta_fields(item: dict, now_ts=None) -> tuple[str, str, str, str, str]:
+    first_age = _fmt_signal_age(item.get("first_signal_time"), now_ts)
+    first_text = f"First {first_age}" if first_age else "First -"
+
+    last_age = _fmt_signal_age(item.get("signal_time"), now_ts)
+    last_text = f"Last {last_age}" if last_age else "Last -"
+
+    action_count = _parse_numeric_value(item.get("action_count"))
+    if action_count is not None and action_count > 0:
+        count_text = f"Count {int(action_count)}"
+    else:
+        count_text = "Count -"
+
+    volume_value = _coalesce_numeric_value(
+        _coalesce_numeric_value(item.get("tx_volume_u_24h"), item.get("token_tx_volume_usd_24h")),
+        item.get("volume_24h"),
+    )
+    volume_text = _fmt_volume(volume_value)
+    if volume_text != "N/A":
+        vol_text = f"Vol {volume_text}"
+    else:
+        vol_text = "Vol -"
+
+    summary = f"{first_text} {last_text} {count_text} {vol_text}"
+    return first_text, last_text, count_text, vol_text, summary
+
+
+def _build_signal_display(item: dict, chain: str) -> tuple[str, str, str, str, str, str, str]:
+    actions = item.get("actions")
+    label = _signal_label_from_item(item)
+    value_text = label or "SIGNAL"
+    first_text, last_text, count_text, vol_text, summary = _build_signal_meta_fields(item)
+    if not isinstance(actions, list) or not actions:
+        return label, value_text, first_text, last_text, count_text, vol_text, summary
+
+    buy_total = 0.0
+    sell_total = 0.0
+    unit = ""
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("action_type") or "").strip().lower()
+        volume = _parse_numeric_value(action.get("quote_token_volume"))
+        if volume is None:
+            volume = _parse_numeric_value(action.get("volume_usd"))
+        if volume is None:
+            volume = _parse_numeric_value(action.get("base_token_volume"))
+        if volume is None:
+            continue
+
+        quote_token = str(action.get("quote_token_symbol") or action.get("quote_token") or "").strip()
+        base_token = str(action.get("base_token_symbol") or action.get("base_token") or "").strip()
+        if not unit:
+            if quote_token and len(quote_token) <= 12 and quote_token.isascii():
+                unit = quote_token.upper()
+            elif base_token and len(base_token) <= 12 and base_token.isascii():
+                unit = base_token.upper()
+
+        if action_type == "sell":
+            sell_total += volume
+        else:
+            buy_total += volume
+
+    if not unit:
+        unit = _signal_default_quote_symbol(chain)
+
+    label = _signal_label_from_totals(buy_total, sell_total)
+    amount_total = 0.0
+    if label == "BUY":
+        amount_total = buy_total
+    elif label == "SELL":
+        amount_total = sell_total
+
+    if label and amount_total > 0:
+        value_text = f"{label} {_fmt_signal_amount(amount_total)} {unit}"
+    else:
+        label = label or _signal_label_from_item(item)
+        value_text = label or "SIGNAL"
+
+    return label, value_text, first_text, last_text, count_text, vol_text, summary
+
+
+def _balance_ratio_to_percent_points(raw_value):
+    """
+    Convert a top-holder share value into percent points.
+
+    /tokens/top100 balance_ratio is expected to be a fraction-of-1 value
+    (for example 0.334417 -> 33.4417%), while explicit percent strings
+    ("33.4%") are already percent points.
+    """
+    parsed = _parse_numeric_value(raw_value)
+    if parsed is None:
+        return None
+    if isinstance(raw_value, str) and "%" in raw_value:
+        pct = parsed
+    elif 0 <= parsed <= 1:
+        pct = parsed * 100
+    elif 0 <= parsed <= 100:
+        # Backward compatibility with payloads that already send percent points.
+        pct = parsed
+    else:
+        return None
+    if not math.isfinite(pct):
+        return None
+    return pct
+
+
+def _extract_top100_concentration(top100_resp: dict) -> str:
+    root = top100_resp if isinstance(top100_resp, dict) else top100_resp
+    payload = root.get("data", root) if isinstance(root, dict) else root
+    summary_nodes = []
+    top100_lists = []
+
+    if isinstance(payload, dict):
+        summary_nodes.append(payload)
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            summary_nodes.append(summary)
+        for key in ("top100", "holders", "items", "list", "data"):
+            entries = payload.get(key)
+            if isinstance(entries, list) and entries:
+                top100_lists.append(entries)
+    elif isinstance(payload, list):
+        top100_lists.append(payload)
+        for item in payload:
+            if isinstance(item, dict):
+                summary_nodes.append(item)
+
+    for node in summary_nodes:
+        if not isinstance(node, dict):
+            continue
+        for key in ("top100_concentration", "top_100_holding_rate", "top100_holding_rate", "top100_rate"):
+            if node.get(key) not in (None, ""):
+                return _fmt_percent(node.get(key), normalize_fraction=True)
+
+    for entries in top100_lists:
+        total = 0.0
+        seen = False
+        for top_holder in entries[:100]:
+            if not isinstance(top_holder, dict):
+                continue
+            share = top_holder.get(
+                "balance_ratio",
+                top_holder.get("holding_rate", top_holder.get("rate", top_holder.get("percentage"))),
+            )
+            percent_points = _balance_ratio_to_percent_points(share)
+            if percent_points is None:
+                continue
+            total += percent_points
+            seen = True
+        if seen:
+            return _fmt_percent(total)
+    return "N/A"
+
+
+def _safe_top100_summary_get(addr: str, chain: str) -> dict:
+    try:
+        return _data_get(f"/tokens/top100/{addr}-{chain}")
+    except Exception as exc:
+        logger.bind(tag=TAG).warning(
+            f"top100 lookup failed; returning empty summary token={addr} chain={chain} error={exc}"
+        )
+        return {}
 
 
 def _normalize_batch_price_token_id(token_id: str) -> str:
@@ -229,12 +663,13 @@ def _format_token_units(raw_amount, decimals=None, symbol: str = "") -> str:
     if decimals not in (None, ""):
         try:
             scaled = Decimal(amount_text) / (Decimal(10) ** int(decimals))
-            amount_text = format(scaled.normalize(), "f")
+            amount_text = _format_display_amount(scaled)
         except (InvalidOperation, TypeError, ValueError, OverflowError):
             amount_text = str(raw_amount)
-
-    if "." in amount_text:
-        amount_text = amount_text.rstrip("0").rstrip(".") or "0"
+    else:
+        parsed_amount = _parse_decimal_amount(amount_text)
+        if parsed_amount is not None:
+            amount_text = _format_display_amount(parsed_amount)
 
     return f"{amount_text} {symbol}".strip()
 
@@ -246,7 +681,7 @@ def _format_quote_out_amount(quote_resp: dict, symbol: str = "") -> str:
 
     formatted = data.get("outAmountFormatted", data.get("estimateOutFormatted", data.get("out_amount_formatted", "")))
     if formatted:
-        return str(formatted)
+        return _normalize_display_amount_text(str(formatted))
 
     return _format_token_units(
         data.get("estimateOut", data.get("outAmount", data.get("out_amount", ""))),
@@ -298,6 +733,23 @@ def _asset_identity_fields(token: dict) -> dict:
     }
 
 
+def _extract_main_pair_id(token: dict) -> str:
+    token_data = token if isinstance(token, dict) else {}
+    raw_main_pair = token_data.get("main_pair")
+    if isinstance(raw_main_pair, str):
+        return raw_main_pair.strip()
+    if isinstance(raw_main_pair, dict):
+        for key in ("pair_id", "pair_address", "pair", "address", "id"):
+            value = str(raw_main_pair.get(key) or "").strip()
+            if value:
+                return value
+    for key in ("pair_id", "pair_address", "main_pair_address"):
+        value = str(token_data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _build_disambiguation_payload(items: list[dict], *, nav_from: str = "feed") -> dict:
     normalized_items = []
     for item in items or []:
@@ -329,6 +781,366 @@ def _ensure_ave_state(conn: "ConnectionHandler") -> dict:
     return conn.ave_state
 
 
+def _resolve_spotlight_symbol(state: dict, addr: str, chain: str, symbol: str = "", cursor=None) -> str:
+    resolved_symbol = str(symbol or "").strip()
+    if resolved_symbol:
+        return resolved_symbol
+
+    current_token = state.get("current_token")
+    if isinstance(current_token, dict):
+        cur_addr, cur_chain = _split_token_reference(
+            current_token.get("addr", ""),
+            current_token.get("chain", chain),
+        )
+        if cur_addr == addr and cur_chain == chain:
+            resolved_symbol = str(current_token.get("symbol") or "").strip()
+            if resolved_symbol:
+                return resolved_symbol
+
+    feed_list = state.get("feed_token_list", [])
+    if isinstance(feed_list, list):
+        if cursor is not None:
+            try:
+                idx = int(cursor)
+            except (TypeError, ValueError):
+                idx = -1
+            if 0 <= idx < len(feed_list):
+                item = feed_list[idx]
+                if isinstance(item, dict):
+                    item_addr, item_chain = _split_token_reference(
+                        item.get("addr", ""),
+                        item.get("chain", chain),
+                    )
+                    if item_addr == addr and item_chain == chain:
+                        resolved_symbol = str(item.get("symbol") or "").strip()
+                        if resolved_symbol:
+                            return resolved_symbol
+
+        for item in feed_list:
+            if not isinstance(item, dict):
+                continue
+            item_addr, item_chain = _split_token_reference(
+                item.get("addr", ""),
+                item.get("chain", chain),
+            )
+            if item_addr == addr and item_chain == chain:
+                resolved_symbol = str(item.get("symbol") or "").strip()
+                if resolved_symbol:
+                    return resolved_symbol
+
+    return addr[:8] if addr else "?"
+
+
+def _resolve_trade_symbol(conn: "ConnectionHandler", addr: str, chain: str, symbol: str = "") -> str:
+    resolved_symbol = str(symbol or "").strip()
+    if resolved_symbol and resolved_symbol != "TOKEN":
+        return resolved_symbol
+
+    state = _ensure_ave_state(conn)
+    spotlight_symbol = _resolve_spotlight_symbol(state, addr, chain, "")
+    if spotlight_symbol and spotlight_symbol not in {"?", addr[:8] if addr else ""}:
+        return spotlight_symbol
+
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    positions = account.get("positions", {})
+    if isinstance(positions, dict):
+        existing = positions.get(_paper_position_key(addr, chain))
+        if isinstance(existing, dict):
+            existing_symbol = str(existing.get("symbol") or "").strip()
+            if existing_symbol and existing_symbol != "TOKEN":
+                return existing_symbol
+
+    return resolved_symbol or "TOKEN"
+
+
+def _build_spotlight_loading_payload(addr: str, chain: str, *, symbol: str = "",
+                                     interval: str = "60", feed_cursor=None, feed_total=None,
+                                     origin_hint: str = "", is_watchlisted: bool = False) -> dict:
+    resolved_symbol = str(symbol or "").strip() or (addr[:8] if addr else "?")
+    identity = _asset_identity_fields(
+        {
+            "addr": addr,
+            "chain": chain,
+            "symbol": resolved_symbol,
+            "token_id": f"{addr}-{chain}",
+        }
+    )
+    spotlight_data = {
+        **identity,
+        "addr": addr,
+        "interval": str(interval or "60"),
+        "pair": f"{resolved_symbol} / USDC",
+        "price": "--",
+        "price_raw": 0,
+        "change_24h": "Loading",
+        "change_positive": True,
+        "holders": "--",
+        "liquidity": "--",
+        "volume_24h": "--",
+        "market_cap": "--",
+        "top100_concentration": "--",
+        "contract_short": _contract_short(addr),
+        "chart": [500] * 12,
+        "chart_min": "--",
+        "chart_max": "--",
+        "chart_min_y": "--",
+        "chart_mid_y": "--",
+        "chart_max_y": "--",
+        "chart_t_start": "",
+        "chart_t_mid": "",
+        "chart_t_end": "now",
+        "is_honeypot": False,
+        "is_mintable": False,
+        "is_freezable": False,
+        "risk_level": "LOADING",
+        "origin_hint": str(origin_hint or "").strip(),
+        "is_watchlisted": bool(is_watchlisted),
+    }
+    if feed_cursor is not None and feed_total is not None:
+        spotlight_data["cursor"] = feed_cursor
+        spotlight_data["total"] = feed_total
+    return spotlight_data
+
+
+def _is_same_spotlight_token(state: dict, addr: str, chain: str) -> bool:
+    if str(state.get("screen") or "") != "spotlight":
+        return False
+    current_token = state.get("current_token")
+    if not isinstance(current_token, dict):
+        return False
+    cur_addr, cur_chain = _split_token_reference(
+        current_token.get("addr", ""),
+        current_token.get("chain", chain),
+    )
+    return cur_addr == addr and cur_chain == chain
+
+
+def _spotlight_request_is_current(state: dict, request_seq: int) -> bool:
+    return int(state.get("spotlight_request_seq", 0) or 0) == int(request_seq or 0)
+
+
+def _normalized_interval_value(interval: str) -> str:
+    value = str(interval or "").strip().lower()
+    if value.startswith("k"):
+        return value[1:]
+    return value
+
+
+async def _ave_token_detail_async(conn: "ConnectionHandler", *, addr: str, chain: str, symbol: str = "",
+                                  interval: str = "60", feed_cursor=None, feed_total=None,
+                                  request_seq: int = 0, previous_screen: str = ""):
+    try:
+        interval = str(interval or "60").strip().lower() or "60"
+        is_live_second = interval == "s1"
+        kline_limit = _kline_limit_for_interval(interval)
+
+        token_task = asyncio.to_thread(_data_get, f"/tokens/{addr}-{chain}")
+        risk_task = asyncio.to_thread(_data_get, f"/contracts/{addr}-{chain}")
+        top100_task = asyncio.to_thread(_safe_top100_summary_get, addr, chain)
+        if is_live_second:
+            token_resp, risk_resp, top100_resp = await asyncio.gather(token_task, risk_task, top100_task)
+            kline_resp = {"data": {"points": []}}
+        else:
+            kline_task = asyncio.to_thread(
+                _data_get,
+                f"/klines/token/{addr}-{chain}",
+                {"interval": interval, "limit": kline_limit},
+            )
+            token_resp, kline_resp, risk_resp, top100_resp = await asyncio.gather(
+                token_task,
+                kline_task,
+                risk_task,
+                top100_task,
+            )
+
+        token_data = token_resp.get("data", token_resp)
+        token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
+        if isinstance(token, list) and token:
+            token = token[0]
+
+        kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
+        if not is_live_second and not kline_points:
+            main_pair_id = _extract_main_pair_id(token)
+            if main_pair_id:
+                try:
+                    pair_kline_resp = await asyncio.to_thread(
+                        _data_get,
+                        f"/klines/pair/{main_pair_id}-{chain}",
+                        {"interval": interval, "limit": kline_limit},
+                    )
+                    kline_points = _trim_points(
+                        pair_kline_resp.get("data", {}).get("points", []),
+                        kline_limit,
+                    )
+                except Exception:
+                    pass
+        raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
+        raw_times = [int(p.get("time", p.get("t", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
+        price_now = float(token.get("current_price_usd", token.get("price", 0)) or 0)
+        if is_live_second:
+            token_id = f"{addr}-{chain}"
+            seeded_closes = []
+            seeded_times = []
+            if hasattr(conn, "ave_wss"):
+                wss = conn.ave_wss
+                raw_owner_token_id = str(getattr(wss, "_spotlight_raw_owner_token_id", "") or "")
+                raw_owner_chain = str(getattr(wss, "_spotlight_raw_owner_chain", "") or "").strip().lower()
+                raw_owner_interval = _normalized_interval_value(
+                    getattr(wss, "_spotlight_raw_owner_interval", "")
+                )
+                owner_token_matches = (not raw_owner_token_id) or (raw_owner_token_id == token_id)
+                owner_chain_matches = (not raw_owner_chain) or (raw_owner_chain == chain)
+                owner_interval_matches = (not raw_owner_interval) or (raw_owner_interval == "s1")
+                if (
+                    getattr(wss, "_spotlight_id", "") == token_id
+                    and owner_token_matches
+                    and owner_chain_matches
+                    and owner_interval_matches
+                ):
+                    seeded_closes = list(getattr(wss, "_spotlight_raw_closes", []) or [])
+                    seeded_times = list(getattr(wss, "_spotlight_raw_times", []) or [])
+            raw_closes = [float(v) for v in seeded_closes if v is not None and float(v) > 0][-kline_limit:]
+            raw_times = [int(v) for v in seeded_times if v][-kline_limit:]
+            if not raw_closes and price_now > 0:
+                raw_closes = [price_now] * 12
+            kline_points = [
+                {"close": value, "time": raw_times[idx] if idx < len(raw_times) else 0}
+                for idx, value in enumerate(raw_closes)
+            ]
+        chart_values = _normalize_kline(kline_points)
+        if is_live_second and raw_closes and len(set(raw_closes)) == 1:
+            chart_values = [500] * len(raw_closes)
+        price_min = min(raw_closes) if raw_closes else 0
+        price_max = max(raw_closes) if raw_closes else 0
+        n_pts = len(raw_times)
+        t_start = raw_times[0] if n_pts > 0 else 0
+        t_mid = raw_times[n_pts // 2] if n_pts > 0 else 0
+
+        flags = _risk_flags(risk_resp)
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+
+        identity = _asset_identity_fields(
+            {
+                **(token if isinstance(token, dict) else {}),
+                "addr": addr,
+                "chain": chain,
+                "symbol": token.get("symbol", symbol or "???"),
+                "token_id": f"{addr}-{chain}",
+            }
+        )
+        origin_hint = _resolve_spotlight_origin_hint(state, addr, chain, previous_screen=previous_screen)
+        is_watchlisted = _is_watchlisted_for_token(conn, addr, chain)
+        spotlight_data = {
+            **identity,
+            "addr": addr,
+            "interval": str(interval or "60"),
+            "pair": f"{token.get('symbol', symbol or '???')} / USDC",
+            "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
+            "price_raw": price_now,
+            "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
+            "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
+            "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
+            "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
+            "volume_24h": _fmt_volume(
+                _coalesce_numeric_value(
+                    token.get("token_tx_volume_usd_24h"),
+                    token.get("tx_volume_u_24h"),
+                )
+            ),
+            "market_cap": _fmt_volume(
+                _coalesce_numeric_value(
+                    token.get("market_cap"),
+                    token.get("fdv"),
+                )
+            ),
+            "top100_concentration": _extract_top100_concentration(top100_resp),
+            "contract_short": _contract_short(addr),
+            "chart": chart_values,
+            "chart_min": _fmt_price(price_min),
+            "chart_max": _fmt_price(price_max),
+            "chart_min_y": _fmt_y_label(price_min),
+            "chart_mid_y": _fmt_y_label((price_min + price_max) / 2.0),
+            "chart_max_y": _fmt_y_label(price_max),
+            "chart_t_start": _fmt_chart_time(t_start),
+            "chart_t_mid": _fmt_chart_time(t_mid),
+            "chart_t_end": "now",
+            "is_honeypot": flags["is_honeypot"],
+            "is_mintable": flags["is_mintable"],
+            "is_freezable": flags["is_freezable"],
+            "risk_level": flags["risk_level"],
+            "origin_hint": origin_hint,
+            "is_watchlisted": bool(is_watchlisted),
+        }
+        if feed_cursor is not None and feed_total is not None:
+            spotlight_data["cursor"] = feed_cursor
+            spotlight_data["total"] = feed_total
+
+        await _send_display(conn, "spotlight", spotlight_data)
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+
+        if hasattr(conn, "ave_wss"):
+            wss_interval = _to_wss_kline_interval(interval)
+            conn.ave_wss.set_spotlight(
+                addr,
+                chain,
+                spotlight_data,
+                raw_closes,
+                raw_times,
+                interval=wss_interval,
+            )
+
+        sym = token.get("symbol", symbol or "???")
+        state = _ensure_ave_state(conn)
+        if not _spotlight_request_is_current(state, request_seq):
+            return
+        state["screen"] = "spotlight"
+        state["current_token"] = {
+            "addr": addr,
+            "chain": chain,
+            "symbol": sym,
+            "token_id": identity.get("token_id", f"{addr}-{chain}"),
+            "contract_tail": identity.get("contract_tail", ""),
+            "source_tag": identity.get("source_tag", ""),
+            "origin_hint": origin_hint,
+        }
+        state["spotlight_snapshot"] = {
+            "addr": addr,
+            "chain": chain,
+            "symbol": sym,
+            "pair": spotlight_data.get("pair", ""),
+            "price": spotlight_data.get("price", ""),
+            "change_24h": spotlight_data.get("change_24h", ""),
+            "market_cap": spotlight_data.get("market_cap", ""),
+            "volume_24h": spotlight_data.get("volume_24h", ""),
+            "liquidity": spotlight_data.get("liquidity", ""),
+            "holders": spotlight_data.get("holders", ""),
+            "top100_concentration": spotlight_data.get("top100_concentration", ""),
+            "risk_level": spotlight_data.get("risk_level", ""),
+            "is_watchlisted": bool(is_watchlisted),
+            "origin_hint": origin_hint,
+            "cursor": spotlight_data.get("cursor"),
+            "total": spotlight_data.get("total"),
+        }
+        state["spotlight_origin_hint"] = origin_hint
+        state["spotlight_is_watchlisted"] = bool(is_watchlisted)
+        if "nav_from" not in state:
+            state["nav_from"] = "feed"
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"ave_token_detail error: {e}")
+        try:
+            state = _ensure_ave_state(conn)
+            if _spotlight_request_is_current(state, request_seq):
+                await _send_display(conn, "notify", {
+                    "level": "error", "title": "Lookup Failed", "body": str(e)[:60],
+                })
+        except Exception:
+            pass
+
+
 def _normalize_search_session_items(items) -> list[dict]:
     normalized_items = []
     for item in items or []:
@@ -348,6 +1160,94 @@ def _clear_search_state(state: dict) -> None:
         "disambiguation_cursor",
     ):
         state.pop(key, None)
+
+
+def _next_feed_session(state: dict) -> int:
+    try:
+        current = int(state.get("feed_session", 0) or 0)
+    except (TypeError, ValueError):
+        current = 0
+    if current < 0:
+        current = 0
+    session = current + 1
+    state["feed_session"] = session
+    return session
+
+
+def _current_feed_session(state: dict) -> int:
+    try:
+        session = int(state.get("feed_session", 0) or 0)
+    except (TypeError, ValueError):
+        session = 0
+    if session <= 0:
+        session = _next_feed_session(state)
+    else:
+        state["feed_session"] = session
+    return session
+
+
+def _invalidate_live_feed_session(
+    conn: "ConnectionHandler",
+    *,
+    session: int = None,
+    chain: str = None,
+    clear_tokens: bool = True,
+) -> int:
+    state = _ensure_ave_state(conn)
+    if session is None:
+        session = _next_feed_session(state)
+    else:
+        try:
+            session = int(session)
+        except (TypeError, ValueError):
+            session = _next_feed_session(state)
+        else:
+            state["feed_session"] = session
+
+    wss = getattr(conn, "ave_wss", None)
+    if wss is not None:
+        try:
+            wss.invalidate_feed_session(
+                session=session,
+                chain=chain,
+                clear_tokens=clear_tokens,
+            )
+        except Exception:
+            pass
+    return session
+
+
+def _reset_to_standard_feed_state(state: dict) -> None:
+    state["screen"] = "feed"
+    state["feed_mode"] = "standard"
+    state.pop("nav_from", None)
+    state.pop("order_list", None)
+    _clear_search_state(state)
+
+
+def _remember_home_feed_state(state: dict, *, source: str = "trending", platform: str = "") -> None:
+    normalized_source = str(source or "trending").strip().lower() or "trending"
+    if normalized_source in {"signals", "watchlist", "orders"}:
+        normalized_source = "trending"
+    state["home_feed_source"] = normalized_source
+    state["home_feed_platform"] = str(platform or "").strip()
+
+
+def _refresh_home_feed(conn: "ConnectionHandler") -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    remembered_source = str(
+        state.get("home_feed_source") or state.get("feed_source", "trending") or "trending"
+    ).strip().lower() or "trending"
+    remembered_platform = str(
+        state.get("home_feed_platform") or state.get("feed_platform", "") or ""
+    ).strip()
+    if remembered_source in {"signals", "watchlist", "orders"}:
+        remembered_source = "trending"
+    _invalidate_live_feed_session(conn)
+    _reset_to_standard_feed_state(state)
+    if remembered_platform:
+        return ave_get_trending(conn, topic="", platform=remembered_platform)
+    return ave_get_trending(conn, topic=remembered_source)
 
 
 def _save_search_session(
@@ -485,6 +1385,340 @@ def _set_feed_navigation_state(state: dict, items, *, cursor: int = 0) -> list[d
     return feed_token_list
 
 
+def _watchlist_namespace(conn: "ConnectionHandler") -> str:
+    wallet_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+    if wallet_id:
+        return wallet_id
+    state = _ensure_ave_state(conn)
+    fallback_wallet = str(state.get("wallet_id") or "").strip()
+    return fallback_wallet or "default"
+
+
+def _watchlist_store_path() -> Path:
+    override = str(os.environ.get("AVE_WATCHLIST_STORE_PATH", "") or "").strip()
+    return Path(override) if override else _WATCHLIST_STORE_PATH
+
+
+def _trade_namespace(conn: "ConnectionHandler") -> str:
+    return _watchlist_namespace(conn)
+
+
+def _resolve_proxy_wallet_target(
+    conn: "ConnectionHandler",
+    chain: str = "",
+) -> tuple[str, str]:
+    requested_chain = _normalize_chain_name(chain)
+    state = _ensure_ave_state(conn)
+
+    cached_wallets = state.get("portfolio_wallets")
+    if isinstance(cached_wallets, list) and cached_wallets:
+        wallets = cached_wallets
+    else:
+        assets_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+        if not assets_id:
+            raise ValueError("AVE proxy wallet is not configured")
+        wallet_resp = _trade_get(
+            "/v1/thirdParty/user/getUserByAssetsId",
+            {"assetsIds": assets_id},
+        )
+        wallets = _normalize_portfolio_wallets(wallet_resp.get("data", []))
+        state["portfolio_wallets"] = wallets
+
+    for wallet in wallets:
+        for address_info in wallet.get("addresses", []):
+            chain_name = _normalize_chain_name(address_info.get("chain"))
+            address = str(address_info.get("address", "") or "").strip()
+            if not chain_name or not address:
+                continue
+            if requested_chain and chain_name == requested_chain:
+                return address, chain_name
+
+    first_wallet = wallets[0] if wallets else {}
+    first_address = (first_wallet.get("addresses") or [{}])[0]
+    fallback_address = str(first_address.get("address", "") or "").strip()
+    fallback_chain = _normalize_chain_name(first_address.get("chain"), requested_chain or "solana")
+    if not fallback_address:
+        raise ValueError("AVE proxy wallet has no usable chain address")
+    return fallback_address, fallback_chain
+
+
+def _paper_store_path() -> Path:
+    override = str(os.environ.get("AVE_PAPER_STORE_PATH", "") or "").strip()
+    return Path(override) if override else _PAPER_STORE_PATH
+
+
+def _normalize_trade_mode(mode) -> str:
+    normalized = str(mode or "").strip().lower()
+    return normalized if normalized in _VALID_TRADE_MODES else _TRADE_MODE_REAL
+
+
+def _trade_mode_label(mode: str) -> str:
+    return "Paper Trading" if _normalize_trade_mode(mode) == _TRADE_MODE_PAPER else "Real Trading"
+
+
+def _trade_mode_marker(conn: "ConnectionHandler") -> str:
+    return "PAPER" if _get_trade_mode(conn) == _TRADE_MODE_PAPER else ""
+
+
+def _get_trade_mode(conn: "ConnectionHandler", *, refresh: bool = False) -> str:
+    state = _ensure_ave_state(conn)
+    if not refresh:
+        cached = _normalize_trade_mode(state.get("trade_mode"))
+        if cached in _VALID_TRADE_MODES and state.get("trade_mode"):
+            return cached
+
+    try:
+        mode = _normalize_trade_mode(load_trade_mode(_paper_store_path(), _trade_namespace(conn)))
+    except PaperStoreError as exc:
+        logger.bind(tag=TAG).warning(f"load trade mode failed; defaulting to real: {exc}")
+        mode = _TRADE_MODE_REAL
+
+    state["trade_mode"] = mode
+    return mode
+
+
+def _set_trade_mode(conn: "ConnectionHandler", mode: str) -> str:
+    normalized = _normalize_trade_mode(mode)
+    normalized = _normalize_trade_mode(
+        persist_trade_mode(_paper_store_path(), _trade_namespace(conn), normalized)
+    )
+    _ensure_ave_state(conn)["trade_mode"] = normalized
+    return normalized
+
+
+def _build_explorer_payload(conn: "ConnectionHandler") -> dict:
+    mode = _get_trade_mode(conn)
+    return {
+        "trade_mode": mode,
+        "trade_mode_label": _trade_mode_label(mode),
+    }
+
+
+def _resolve_feed_total(state: dict) -> int | None:
+    feed_list = state.get("feed_token_list")
+    if not isinstance(feed_list, list) or not feed_list:
+        return None
+    return len(feed_list)
+
+
+def _resolve_spotlight_origin_hint(
+    state: dict,
+    addr: str,
+    chain: str,
+    *,
+    previous_screen: str = "",
+) -> str:
+    return ""
+
+
+def _is_watchlisted_for_token(conn: "ConnectionHandler", addr: str, chain: str) -> bool:
+    if not addr or not chain:
+        return False
+    try:
+        return watchlist_contains(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            addr,
+            chain,
+        )
+    except Exception as exc:
+        logger.bind(tag=TAG).warning(f"watchlist_contains failed for {addr}-{chain}: {exc}")
+        return False
+
+
+def _resolve_watchlist_target(
+    state: dict,
+    token: dict | None = None,
+    *,
+    cursor=None,
+) -> dict | None:
+    if isinstance(token, dict):
+        addr, chain = _split_token_reference(
+            token.get("addr") or token.get("token_id") or "",
+            token.get("chain") or "solana",
+        )
+        if addr and chain:
+            return {
+                "addr": addr,
+                "chain": chain,
+                "symbol": str(token.get("symbol") or "").strip(),
+            }
+
+    current = state.get("current_token")
+    if isinstance(current, dict):
+        addr, chain = _split_token_reference(
+            current.get("addr", ""),
+            current.get("chain", "solana"),
+        )
+        if addr and chain:
+            return {
+                "addr": addr,
+                "chain": chain,
+                "symbol": str(current.get("symbol") or "").strip(),
+            }
+
+    feed_rows = state.get("feed_token_list")
+    if isinstance(feed_rows, list) and feed_rows:
+        try:
+            idx = int(cursor if cursor is not None else state.get("feed_cursor", 0))
+        except (TypeError, ValueError):
+            idx = 0
+        idx = max(0, min(idx, len(feed_rows) - 1))
+        row = feed_rows[idx]
+        if isinstance(row, dict):
+            addr, chain = _split_token_reference(
+                row.get("addr", ""),
+                row.get("chain", "solana"),
+            )
+            if addr and chain:
+                return {
+                    "addr": addr,
+                    "chain": chain,
+                    "symbol": str(row.get("symbol") or "").strip(),
+                }
+    return None
+
+
+def _refresh_spotlight_for_token(conn: "ConnectionHandler", token: dict) -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    nav_from = str(state.get("nav_from") or "").strip().lower()
+    feed_total = None
+    feed_cursor = None
+    if nav_from == "feed":
+        feed_total = _resolve_feed_total(state)
+        if feed_total is not None:
+            feed_cursor = state.get("feed_cursor")
+    return ave_token_detail(
+        conn,
+        addr=token.get("addr", ""),
+        chain=token.get("chain", "solana"),
+        symbol=token.get("symbol", ""),
+        feed_cursor=feed_cursor,
+        feed_total=feed_total,
+    )
+
+
+def _build_signals_rows(items: list[dict]) -> list[dict]:
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        token_id = str(
+            item.get("token")
+            or item.get("token_id")
+            or item.get("address")
+            or ""
+        ).strip()
+        chain = _normalize_chain_name(item.get("chain"), "solana")
+        if not token_id or chain not in _SUPPORTED_FEED_CHAINS:
+            continue
+        identity = _asset_identity_fields(
+            {
+                "token_id": token_id,
+                "chain": chain,
+                "symbol": item.get("symbol"),
+                "source": "signals",
+            }
+        )
+        change_value = _parse_numeric_value(item.get("price_change_24h"))
+        (
+            signal_label,
+            signal_value,
+            signal_first,
+            signal_last,
+            signal_count,
+            signal_vol,
+            signal_summary,
+        ) = _build_signal_display(item, chain)
+        rows.append(
+            {
+                **identity,
+                "price": _fmt_volume(_coalesce_numeric_value(item.get("mc_cur"), item.get("market_cap"))),
+                "change_24h": _fmt_change(change_value if change_value is not None else 0),
+                "change_positive": True if change_value is None else change_value >= 0,
+                "signal_type": str(item.get("signal_type") or "").strip(),
+                "signal_label": signal_label,
+                "signal_value": signal_value,
+                "signal_first": signal_first,
+                "signal_last": signal_last,
+                "signal_count": signal_count,
+                "signal_vol": signal_vol,
+                "signal_summary": signal_summary,
+                "headline": str(item.get("headline") or "").strip(),
+                "signal_time": str(item.get("signal_time") or "").strip(),
+                "source": "signals",
+            }
+        )
+    return rows[:20]
+
+
+def _build_watchlist_rows(saved_rows: list[dict]) -> list[dict]:
+    rows = []
+    for row in saved_rows[:20]:
+        if not isinstance(row, dict):
+            continue
+        addr, chain = _split_token_reference(
+            row.get("addr", ""),
+            row.get("chain", "solana"),
+        )
+        chain = _normalize_chain_name(chain, "solana")
+        if not addr or chain not in _SUPPORTED_FEED_CHAINS:
+            continue
+        identity = _asset_identity_fields(
+            {
+                "token_id": addr,
+                "chain": chain,
+                "symbol": row.get("symbol"),
+                "source": "watchlist",
+            }
+        )
+        rows.append(
+            {
+                **identity,
+                "price": "--",
+                "change_24h": "--",
+                "change_positive": True,
+                "headline": "Saved token",
+                "source": "watchlist",
+            }
+        )
+    return rows
+
+
+def _empty_feed_row(symbol: str, subtitle: str) -> dict:
+    return {
+        "token_id": "",
+        "chain": "solana",
+        "symbol": symbol,
+        "price": "--",
+        "change_24h": "--",
+        "change_positive": True,
+        "headline": subtitle,
+        "source": "local",
+    }
+
+
+def _watchlist_store_error_response(
+    conn: "ConnectionHandler",
+    *,
+    user_message: str,
+    exc: Exception,
+) -> ActionResponse:
+    logger.bind(tag=TAG).error(f"watchlist store operation failed: {exc}")
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "error",
+                "title": "Watchlist unavailable",
+                "body": user_message,
+            },
+        )
+    )
+    return ActionResponse(action=Action.RESPONSE, result=str(exc), response=user_message)
+
+
 def _restore_search_session_payload(state: dict) -> dict | None:
     session = _ensure_search_session(state)
     if not session:
@@ -517,6 +1751,7 @@ def _restore_search_session_payload(state: dict) -> dict | None:
     state["search_cursor"] = cursor
     state["search_results"] = list(session.get("items", []))
     _set_feed_navigation_state(state, session.get("items", []), cursor=cursor)
+    feed_session = _next_feed_session(state)
 
     return {
         "tokens": tokens,
@@ -525,6 +1760,7 @@ def _restore_search_session_payload(state: dict) -> dict | None:
         "mode": "search",
         "search_query": state["search_query"],
         "cursor": cursor,
+        "feed_session": feed_session,
     }
 
 
@@ -542,6 +1778,9 @@ def _set_pending_trade(
     order_ids=None,
 ) -> dict:
     state = _ensure_ave_state(conn)
+    current_screen = str(state.get("screen") or "").strip().lower()
+    current_nav_from = str(state.get("nav_from") or "").strip().lower()
+    current_token = state.get("current_token") if isinstance(state.get("current_token"), dict) else {}
     pending = {
         "trade_id": trade_id,
         "trade_type": trade_type,
@@ -552,7 +1791,15 @@ def _set_pending_trade(
         "created_at": int(time.time()),
         "chain": _normalize_chain_name(chain),
         "asset_token_address": str(asset_token_address or "").strip(),
+        "return_screen": current_screen,
+        "return_nav_from": current_nav_from,
     }
+    if current_token.get("addr") and current_token.get("chain"):
+        pending["return_token"] = {
+            "addr": str(current_token.get("addr") or "").strip(),
+            "chain": _normalize_chain_name(current_token.get("chain")),
+            "symbol": str(current_token.get("symbol") or symbol or "TOKEN").strip() or "TOKEN",
+        }
     if order_ids:
         pending["order_ids"] = [str(item) for item in order_ids if item not in (None, "")]
     state["pending_trade"] = pending
@@ -561,6 +1808,32 @@ def _set_pending_trade(
     state["pending_symbol"] = pending["symbol"]
     state["screen"] = screen or "confirm"
     return pending
+
+
+def _restore_cancel_target(conn: "ConnectionHandler", pending: dict) -> ActionResponse:
+    state = _ensure_ave_state(conn)
+    return_screen = str(pending.get("return_screen") or "").strip().lower()
+    return_nav_from = str(pending.get("return_nav_from") or "").strip().lower()
+    return_token = pending.get("return_token") if isinstance(pending.get("return_token"), dict) else {}
+
+    if return_screen == "portfolio" or return_nav_from == "portfolio":
+        return ave_portfolio(conn)
+
+    if return_screen == "spotlight":
+        addr = str(return_token.get("addr") or pending.get("asset_token_address") or "").strip()
+        chain = _normalize_chain_name(return_token.get("chain") or pending.get("chain"), "solana")
+        symbol = str(return_token.get("symbol") or pending.get("symbol") or "TOKEN").strip() or "TOKEN"
+        if addr and chain:
+            if return_nav_from in {"feed", "signals", "watchlist", "portfolio"}:
+                state["nav_from"] = return_nav_from
+            return ave_token_detail(conn, addr=addr, chain=chain, symbol=symbol)
+
+    if return_nav_from == "signals":
+        return ave_list_signals(conn)
+    if return_nav_from == "watchlist":
+        return ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0))
+
+    return _refresh_home_feed(conn)
 
 
 def _get_pending_trade(conn: "ConnectionHandler") -> dict:
@@ -613,6 +1886,17 @@ def _queue_deferred_result_payload(conn: "ConnectionHandler", payload: dict) -> 
     queued_payload = dict(payload or {})
     queued_payload.setdefault("explain_state", "deferred_result")
     queue.append(queued_payload)
+    _schedule_deferred_result_flush(conn)
+
+
+def _can_present_trade_result_now(state: dict) -> bool:
+    screen = str(state.get("screen", "") or "").strip().lower()
+    return screen in {"", "feed"}
+
+
+def _is_active_trade_flow_screen(state: dict) -> bool:
+    screen = str(state.get("screen", "") or "").strip().lower()
+    return screen in {"confirm", "limit_confirm"}
 
 
 async def _flush_deferred_result_queue(conn: "ConnectionHandler") -> None:
@@ -628,7 +1912,7 @@ async def _flush_deferred_result_queue(conn: "ConnectionHandler") -> None:
             pending = state.get("pending_trade")
             if isinstance(pending, dict) and pending.get("trade_id"):
                 return
-            if state.get("screen") in {"confirm", "limit_confirm", "result"}:
+            if not _can_present_trade_result_now(state):
                 await asyncio.sleep(_DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC)
                 continue
             queue = state.get("deferred_result_queue")
@@ -733,15 +2017,24 @@ async def _present_trade_result_or_defer(
     *,
     current_trade_id: str = "",
 ) -> None:
+    state = _ensure_ave_state(conn)
     current_pending = _get_pending_trade(conn)
     active_trade_id = str(current_pending.get("trade_id", "") or "")
+    current_trade_id = str(current_trade_id or "")
     if active_trade_id and active_trade_id != str(current_trade_id or ""):
         _queue_deferred_result_payload(conn, payload)
         await _send_display(conn, "notify", _build_trade_state_notify_payload("deferred_result"))
         return
+    if active_trade_id and active_trade_id == current_trade_id and _is_active_trade_flow_screen(state):
+        await _send_display(conn, "result", payload)
+        state["screen"] = "result"
+        return
+    if not _can_present_trade_result_now(state):
+        _queue_deferred_result_payload(conn, payload)
+        return
 
     await _send_display(conn, "result", payload)
-    _ensure_ave_state(conn)["screen"] = "result"
+    state["screen"] = "result"
 
 
 async def _reconcile_submitted_trade(conn: "ConnectionHandler", submitted: dict) -> None:
@@ -872,6 +2165,43 @@ def _parse_decimal_amount(value):
         return None
 
 
+def _format_display_amount(value, *, max_decimals: int = 6) -> str:
+    amount = _parse_decimal_amount(value)
+    if amount is None:
+        return ""
+    if amount == 0:
+        return "0"
+
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    tiny_threshold = Decimal(1) / (Decimal(10) ** max_decimals)
+    if amount < tiny_threshold:
+        return f"{sign}{float(amount):.{max_decimals - 1}e}"
+
+    quant = Decimal(1) / (Decimal(10) ** max_decimals)
+    truncated = amount.quantize(quant, rounding=ROUND_DOWN)
+    text = format(truncated, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".") or "0"
+    return f"{sign}{text}"
+
+
+def _normalize_display_amount_text(text: str, *, max_decimals: int = 6) -> str:
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return ""
+
+    parts = raw_text.split(None, 1)
+    amount = _parse_decimal_amount(parts[0])
+    if amount is None:
+        return raw_text
+
+    formatted = _format_display_amount(amount, max_decimals=max_decimals)
+    if len(parts) == 1:
+        return formatted
+    return f"{formatted} {parts[1].strip()}".strip()
+
+
 def _decimal_to_string(value) -> str:
     if value is None:
         return ""
@@ -899,6 +2229,67 @@ def _scale_raw_balance_decimal(raw_balance_decimal, decimals) -> Decimal | None:
 def _normalize_chain_name(value, default: str = "") -> str:
     chain_name = str(value or "").strip().lower()
     return chain_name or default
+
+
+def _normalize_surface_chain(value, default: str, *, allow_all: bool = False) -> str:
+    chain_name = _normalize_chain_name(value, default)
+    if allow_all and chain_name == "all":
+        return "all"
+    if chain_name not in _SUPPORTED_FEED_CHAINS:
+        return default
+    return chain_name
+
+
+def _cycle_surface_chain(current, *, allow_all: bool = False) -> str:
+    order = (("all",) + _CHAIN_CYCLE_ORDER) if allow_all else _CHAIN_CYCLE_ORDER
+    normalized = _normalize_surface_chain(current, order[0], allow_all=allow_all)
+    try:
+        idx = order.index(normalized)
+    except ValueError:
+        idx = 0
+    return order[(idx + 1) % len(order)]
+
+
+def _surface_chain_label(chain: str) -> str:
+    normalized = _normalize_chain_name(chain)
+    if normalized == "solana":
+        return "SOL"
+    if normalized == "base":
+        return "BASE"
+    if normalized == "eth":
+        return "ETH"
+    if normalized == "bsc":
+        return "BSC"
+    if normalized == "all":
+        return "ALL"
+    return normalized.upper() if normalized else ""
+
+
+def _browse_source_label(base_label: str, chain: str) -> str:
+    chain_label = _surface_chain_label(chain)
+    return f"{base_label} {chain_label}".strip()
+
+
+def _normalize_signals_chain(value, default: str = "solana") -> str:
+    chain_name = _normalize_surface_chain(value, default, allow_all=False)
+    if chain_name not in _SIGNALS_SUPPORTED_CHAINS:
+        return default
+    return chain_name
+
+
+def _filter_supported_feed_items(items, fallback_chain: str = "") -> list:
+    filtered = []
+    fallback = _normalize_chain_name(fallback_chain)
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        chain_name = _normalize_chain_name(item.get("chain"), fallback)
+        if chain_name not in _SUPPORTED_FEED_CHAINS:
+            continue
+        normalized_item = dict(item)
+        normalized_item["chain"] = chain_name
+        filtered.append(normalized_item)
+    return filtered
 
 
 def _normalize_portfolio_wallets(wallets) -> list:
@@ -1035,6 +2426,1134 @@ def _collect_portfolio_holdings(wallets) -> tuple[list, dict, list]:
     return token_ids, holdings_map, sorted(holding_sources)
 
 
+def _price_map_for_token_ids(token_ids: list[str]) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    if not token_ids:
+        return prices
+
+    price_resp = _data_post("/tokens/price", _build_batch_price_payload(token_ids[:50]))
+    price_data = price_resp.get("data", {})
+    if isinstance(price_data, dict):
+        for tid_str, info in price_data.items():
+            if isinstance(info, dict):
+                prices[_normalize_batch_price_token_id(tid_str)] = float(
+                    info.get("current_price_usd", 0) or 0
+                )
+    elif isinstance(price_data, list):
+        for row in price_data:
+            if not isinstance(row, dict):
+                continue
+            tid_str = row.get("token_id", "")
+            prices[_normalize_batch_price_token_id(tid_str)] = float(
+                row.get("current_price_usd", row.get("price", 0)) or 0
+            )
+    return prices
+
+
+def _paper_positions_rows(account: dict) -> tuple[list[dict], list[str]]:
+    rows: list[dict] = []
+    token_ids: list[str] = []
+    raw_positions = account.get("positions", {})
+
+    if isinstance(raw_positions, dict):
+        iterable = raw_positions.values()
+    elif isinstance(raw_positions, list):
+        iterable = raw_positions
+    else:
+        iterable = []
+
+    for position in iterable:
+        if not isinstance(position, dict):
+            continue
+        token_id = str(position.get("token_id") or "").strip()
+        if token_id:
+            token_ids.append(token_id)
+        rows.append(position)
+    return rows, token_ids
+
+
+def _load_token_symbol(addr: str, chain: str) -> str:
+    if not addr or not chain:
+        return ""
+    try:
+        token_resp = _data_get(f"/tokens/{addr}-{chain}")
+    except Exception:
+        return ""
+
+    token_data = token_resp.get("data", token_resp) if isinstance(token_resp, dict) else token_resp
+    token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
+    if isinstance(token, list):
+        token = token[0] if token else {}
+    if not isinstance(token, dict):
+        return ""
+    return str(
+        token.get("symbol")
+        or token.get("base_symbol")
+        or token.get("token_symbol")
+        or ""
+    ).strip()
+
+
+def _repair_paper_positions(conn: "ConnectionHandler", account: dict) -> bool:
+    positions = account.get("positions", {})
+    fills = account.get("fills", [])
+    if not isinstance(positions, dict) or not isinstance(fills, list):
+        return False
+
+    changed = False
+    for _, position in positions.items():
+        if not isinstance(position, dict):
+            continue
+        addr, chain = _split_token_reference(position.get("addr", ""), position.get("chain", ""))
+        if not addr or not chain:
+            continue
+
+        if not str(position.get("token_id") or "").strip():
+            position["token_id"] = f"{addr}-{chain}"
+            changed = True
+
+        symbol = str(position.get("symbol") or "").strip()
+        if not symbol or symbol == "TOKEN":
+            resolved_symbol = ""
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+                if fill_addr != addr or fill_chain != chain:
+                    continue
+                fill_symbol = str(fill.get("symbol") or "").strip()
+                if fill_symbol and fill_symbol != "TOKEN":
+                    resolved_symbol = fill_symbol
+                    break
+            if not resolved_symbol:
+                resolved_symbol = _load_token_symbol(addr, chain)
+            if resolved_symbol:
+                position["symbol"] = resolved_symbol
+                changed = True
+
+        amount = _parse_decimal_amount(position.get("amount")) or Decimal("0")
+        avg_cost = _parse_decimal_amount(position.get("avg_cost_usd"))
+        cost_basis = _parse_decimal_amount(position.get("cost_basis_usd"))
+        if amount > 0 and (avg_cost is None or avg_cost <= 0 or cost_basis is None or cost_basis <= 0):
+            total_buy_amount = Decimal("0")
+            total_buy_usd = Decimal("0")
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+                if fill_addr != addr or fill_chain != chain:
+                    continue
+                trade_type = str(fill.get("trade_type") or "").strip().lower()
+                if trade_type not in {"market_buy", "limit_buy"}:
+                    continue
+                token_amount = _parse_decimal_amount(fill.get("token_amount"))
+                amount_usd = _parse_decimal_amount(fill.get("amount_usd"))
+                if token_amount is None or token_amount <= 0 or amount_usd is None or amount_usd <= 0:
+                    continue
+                total_buy_amount += token_amount
+                total_buy_usd += amount_usd
+
+            if total_buy_amount > 0 and total_buy_usd > 0:
+                repaired_avg_cost = total_buy_usd / total_buy_amount
+                position["avg_cost_usd"] = _decimal_to_string(repaired_avg_cost)
+                position["cost_basis_usd"] = _decimal_to_string(repaired_avg_cost * amount)
+                changed = True
+
+    return changed
+
+
+def _build_paper_portfolio_payload(conn: "ConnectionHandler", chain_filter: str = "solana") -> dict:
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    if _repair_paper_positions(conn, account):
+        def _persist_repair(stored: dict):
+            stored["positions"] = account.get("positions", {})
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _persist_repair)
+
+    token_ids = [meta["token_id"] for meta in _PAPER_NATIVE_TOKEN_META.values()]
+    paper_positions, position_token_ids = _paper_positions_rows(account)
+    token_ids.extend(position_token_ids)
+    prices = _price_map_for_token_ids(token_ids)
+
+    holdings = []
+    total_usd = 0.0
+    total_pnl_usd = _parse_numeric_value(account.get("realized_pnl_usd")) or 0.0
+    total_cost_basis_usd = 0.0
+    normalized_chain_filter = _normalize_surface_chain(chain_filter, "solana", allow_all=False)
+
+    for chain, balance in (account.get("balances") or {}).items():
+        if chain not in _PAPER_NATIVE_TOKEN_META or not isinstance(balance, dict):
+            continue
+        if chain != normalized_chain_filter:
+            continue
+        token_meta = _PAPER_NATIVE_TOKEN_META[chain]
+        symbol = str(balance.get("symbol") or token_meta["symbol"])
+        try:
+            amount = float(balance.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        price = prices.get(_normalize_batch_price_token_id(token_meta["token_id"]), 0.0)
+        value = amount * price
+        total_usd += value
+        holdings.append({
+            "symbol": symbol,
+            "addr": "",
+            "chain": chain,
+            "contract_tail": "",
+            "token_id": token_meta["token_id"],
+            "source_tag": "",
+            "balance": f"{amount:.4f}",
+            "balance_raw": "",
+            "amount_raw": "",
+            "value_usd": _fmt_volume(value),
+            "_value_raw": value,
+            "price": _fmt_price(price),
+            "avg_cost_usd": "N/A",
+            "pnl": "N/A",
+            "pnl_pct": "N/A",
+            "pnl_positive": None,
+        })
+
+    for position in paper_positions:
+        symbol = str(position.get("symbol") or "TOKEN").strip() or "TOKEN"
+        chain = _normalize_chain_name(position.get("chain"), "solana")
+        if chain != normalized_chain_filter:
+            continue
+        addr = str(position.get("addr") or "").strip()
+        token_id = str(position.get("token_id") or f"{addr}-{chain}").strip()
+        try:
+            amount = float(position.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        price = prices.get(_normalize_batch_price_token_id(token_id), 0.0)
+        value = amount * price
+        total_usd += value
+        balance_raw = str(position.get("amount_raw") or "").strip()
+        cost_basis = _parse_numeric_value(position.get("cost_basis_usd"))
+        avg_cost = _parse_numeric_value(position.get("avg_cost_usd"))
+        pnl_value = None
+        pnl_pct_value = None
+        pnl_positive = None
+        if cost_basis is not None and cost_basis > 0:
+            pnl_value = value - float(cost_basis)
+            pnl_pct_value = (pnl_value / float(cost_basis)) * 100.0
+            pnl_positive = pnl_value >= 0
+            total_pnl_usd += pnl_value
+            total_cost_basis_usd += float(cost_basis)
+        holdings.append({
+            "symbol": symbol,
+            "addr": addr,
+            "chain": chain,
+            "contract_tail": str(position.get("contract_tail") or ""),
+            "token_id": token_id,
+            "source_tag": "",
+            "balance": f"{amount:.4f}",
+            "balance_raw": balance_raw,
+            "amount_raw": balance_raw,
+            "value_usd": _fmt_volume(value),
+            "_value_raw": value,
+            "price": _fmt_price(price),
+            "avg_cost_usd": _fmt_price(avg_cost) if avg_cost is not None and avg_cost > 0 else "N/A",
+            "cost_basis_usd": _fmt_volume(cost_basis) if cost_basis is not None and cost_basis > 0 else "N/A",
+            "pnl": _fmt_portfolio_pnl(pnl_value) if pnl_value is not None else "N/A",
+            "pnl_pct": _fmt_change(pnl_pct_value) if pnl_pct_value is not None else "N/A",
+            "pnl_positive": pnl_positive,
+        })
+
+    holdings.sort(key=lambda row: row.get("_value_raw", 0), reverse=True)
+    state = _ensure_ave_state(conn)
+    cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
+    has_pnl = total_cost_basis_usd > 0
+    return {
+        "holdings": holdings,
+        "cursor": cursor,
+        "wallets": [],
+        "holding_source": "paper_store",
+        "wallet_source_label": "Paper account",
+        "mode_label": "PAPER",
+        "chain_label": _surface_chain_label(normalized_chain_filter),
+        "total_usd": _fmt_volume(total_usd),
+        "pnl": _fmt_portfolio_pnl(total_pnl_usd) if has_pnl else "N/A",
+        "pnl_pct": _fmt_change((total_pnl_usd / total_cost_basis_usd) * 100.0) if has_pnl else "N/A",
+        "pnl_reason": "" if has_pnl else "Paper account",
+    }
+
+
+def _pick_activity_value(data: dict, *keys, default=""):
+    if not isinstance(data, dict):
+        return default
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _fmt_activity_time(raw_value) -> str:
+    if raw_value in (None, "", 0, "0"):
+        return "N/A"
+
+    numeric = _parse_numeric_value(raw_value)
+    if numeric is not None and numeric > 0:
+        timestamp = int(numeric / 1000) if numeric > 1_000_000_000_000 else int(numeric)
+        return _fmt_chart_time(timestamp) or "N/A"
+
+    text = str(raw_value).strip()
+    if not text:
+        return "N/A"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%m/%d %H:%M")
+    except Exception:
+        return text[:16]
+
+
+def _fmt_activity_metric(raw_value, *, kind: str = "price", signed: bool = False) -> str:
+    if isinstance(raw_value, Decimal):
+        raw_value = float(raw_value)
+
+    if kind == "count":
+        numeric = _parse_numeric_value(raw_value)
+        if numeric is None:
+            return "0"
+        return str(int(numeric))
+
+    if signed:
+        return _fmt_signed_volume(raw_value)
+
+    if kind == "volume":
+        return _fmt_volume(raw_value)
+
+    return _fmt_price(raw_value)
+
+
+def _find_portfolio_holding_snapshot(conn: "ConnectionHandler", addr: str, chain: str) -> dict:
+    state = _ensure_ave_state(conn)
+    holdings = state.get("portfolio_holdings", [])
+    if not isinstance(holdings, list):
+        return {}
+
+    normalized_addr, normalized_chain = _split_token_reference(addr, chain)
+    for row in holdings:
+        if not isinstance(row, dict):
+            continue
+        row_addr, row_chain = _split_token_reference(row.get("addr", ""), row.get("chain", ""))
+        if row_addr == normalized_addr and row_chain == normalized_chain:
+            return row
+    return {}
+
+
+def _build_real_portfolio_activity_payload(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+) -> dict:
+    normalized_chain = _normalize_chain_name(chain, "solana")
+    state = _ensure_ave_state(conn)
+    holding = _find_portfolio_holding_snapshot(conn, addr, normalized_chain)
+    resolved_symbol = (
+        str(symbol or holding.get("symbol") or "").strip()
+        or _load_token_symbol(addr, normalized_chain)
+        or "TOKEN"
+    )
+
+    payload = {
+        "view": "detail",
+        "symbol": resolved_symbol,
+        "addr": addr,
+        "chain": normalized_chain,
+        "chain_label": _surface_chain_label(normalized_chain),
+        "mode_label": "",
+        "buy_avg": "N/A",
+        "buy_total": "N/A",
+        "sell_avg": "N/A",
+        "sell_total": "N/A",
+        "realized_pnl": "N/A",
+        "open_orders": "0",
+        "first_buy": "N/A",
+        "last_buy": "N/A",
+        "first_sell": "N/A",
+        "last_sell": "N/A",
+        "note": "",
+    }
+
+    wallet_address, wallet_chain = _resolve_proxy_wallet_target(conn, normalized_chain)
+    try:
+        pnl_resp = _data_get(
+            "/address/pnl",
+            {
+                "wallet_address": wallet_address,
+                "chain": wallet_chain,
+                "token_address": addr,
+            },
+        )
+        pnl_data = pnl_resp.get("data", pnl_resp) if isinstance(pnl_resp, dict) else {}
+
+        payload["buy_avg"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "average_purchase_price_usd", "averagePurchasePriceUsd"),
+            kind="price",
+        )
+        payload["buy_total"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "total_purchased_usd", "totalPurchasedUsd"),
+            kind="volume",
+        )
+        payload["sell_avg"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "average_sold_price_usd", "averageSoldPriceUsd"),
+            kind="price",
+        )
+        payload["sell_total"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "total_sold_usd", "totalSoldUsd"),
+            kind="volume",
+        )
+        payload["realized_pnl"] = _fmt_activity_metric(
+            _pick_activity_value(pnl_data, "profit_realized", "profitRealized"),
+            kind="volume",
+            signed=True,
+        )
+        payload["first_buy"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "first_purchase_time", "firstPurchaseTime")
+        )
+        payload["last_buy"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "last_purchase_time", "lastPurchaseTime")
+        )
+        payload["first_sell"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "first_sold_time", "firstSoldTime")
+        )
+        payload["last_sell"] = _fmt_activity_time(
+            _pick_activity_value(pnl_data, "last_sold_time", "lastSoldTime")
+        )
+    except Exception as exc:
+        payload["note"] = str(exc)[:63]
+
+    assets_id = str(os.environ.get("AVE_PROXY_WALLET_ID", "") or "").strip()
+    if assets_id:
+        try:
+            order_resp = _trade_get(
+                "/v1/thirdParty/tx/getLimitOrder",
+                {
+                    "assetsId": assets_id,
+                    "chain": wallet_chain,
+                    "pageSize": "20",
+                    "pageNo": "0",
+                    "status": "waiting",
+                    "token": addr,
+                },
+            )
+            orders = _extract_limit_order_list(order_resp)
+            payload["open_orders"] = _fmt_activity_metric(len(orders), kind="count")
+        except Exception as exc:
+            if not payload["note"]:
+                payload["note"] = str(exc)[:63]
+
+    state["current_token"] = {
+        "addr": addr,
+        "chain": normalized_chain,
+        "symbol": resolved_symbol,
+    }
+    state["portfolio_detail_token"] = dict(state["current_token"])
+    state["portfolio_view"] = "detail"
+    state["screen"] = "portfolio"
+    return payload
+
+
+def _build_paper_portfolio_activity_payload(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+) -> dict:
+    normalized_chain = _normalize_chain_name(chain, "solana")
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    fills = account.get("fills", [])
+    open_orders = account.get("open_orders", [])
+    matching_fills = []
+
+    for fill in fills if isinstance(fills, list) else []:
+        if not isinstance(fill, dict):
+            continue
+        fill_addr, fill_chain = _split_token_reference(fill.get("addr", ""), fill.get("chain", ""))
+        if fill_addr != addr or fill_chain != normalized_chain:
+            continue
+        matching_fills.append(fill)
+
+    matching_fills.sort(key=lambda item: int(_parse_numeric_value(item.get("created_at")) or 0))
+
+    total_buy_usd = Decimal("0")
+    total_buy_amount = Decimal("0")
+    total_sell_usd = Decimal("0")
+    total_sell_amount = Decimal("0")
+    realized_pnl = Decimal("0")
+    running_amount = Decimal("0")
+    running_cost = Decimal("0")
+    first_buy = None
+    last_buy = None
+    first_sell = None
+    last_sell = None
+    resolved_symbol = str(symbol or "").strip() or "TOKEN"
+
+    for fill in matching_fills:
+        fill_symbol = str(fill.get("symbol") or "").strip()
+        if fill_symbol and resolved_symbol == "TOKEN":
+            resolved_symbol = fill_symbol
+
+        trade_type = str(fill.get("trade_type") or "").strip().lower()
+        token_amount = _parse_decimal_amount(fill.get("token_amount")) or Decimal("0")
+        amount_usd = _parse_decimal_amount(fill.get("amount_usd")) or Decimal("0")
+        created_at = int(_parse_numeric_value(fill.get("created_at")) or 0)
+
+        if trade_type in {"market_buy", "limit_buy"}:
+            total_buy_usd += amount_usd
+            total_buy_amount += token_amount
+            running_amount += token_amount
+            running_cost += amount_usd
+            if created_at > 0:
+                first_buy = created_at if first_buy is None else min(first_buy, created_at)
+                last_buy = created_at if last_buy is None else max(last_buy, created_at)
+        elif trade_type == "market_sell":
+            total_sell_usd += amount_usd
+            total_sell_amount += token_amount
+            avg_cost = (running_cost / running_amount) if running_amount > 0 else Decimal("0")
+            sold_amount = token_amount if token_amount <= running_amount else running_amount
+            realized_pnl += amount_usd - (avg_cost * sold_amount)
+            running_amount -= sold_amount
+            running_cost -= avg_cost * sold_amount
+            if running_amount < 0:
+                running_amount = Decimal("0")
+            if running_cost < 0:
+                running_cost = Decimal("0")
+            if created_at > 0:
+                first_sell = created_at if first_sell is None else min(first_sell, created_at)
+                last_sell = created_at if last_sell is None else max(last_sell, created_at)
+
+    open_order_count = 0
+    for order in open_orders if isinstance(open_orders, list) else []:
+        if not isinstance(order, dict):
+            continue
+        order_addr, order_chain = _split_token_reference(order.get("addr", ""), order.get("chain", ""))
+        if order_addr == addr and order_chain == normalized_chain and str(order.get("status") or "waiting") == "waiting":
+            open_order_count += 1
+
+    state = _ensure_ave_state(conn)
+    state["current_token"] = {
+        "addr": addr,
+        "chain": normalized_chain,
+        "symbol": resolved_symbol,
+    }
+    state["portfolio_detail_token"] = dict(state["current_token"])
+    state["portfolio_view"] = "detail"
+    state["screen"] = "portfolio"
+
+    return {
+        "view": "detail",
+        "symbol": resolved_symbol,
+        "addr": addr,
+        "chain": normalized_chain,
+        "chain_label": _surface_chain_label(normalized_chain),
+        "mode_label": "PAPER",
+        "buy_avg": _fmt_activity_metric((total_buy_usd / total_buy_amount) if total_buy_amount > 0 else None, kind="price"),
+        "buy_total": _fmt_activity_metric(total_buy_usd if total_buy_usd > 0 else None, kind="volume"),
+        "sell_avg": _fmt_activity_metric((total_sell_usd / total_sell_amount) if total_sell_amount > 0 else None, kind="price"),
+        "sell_total": _fmt_activity_metric(total_sell_usd if total_sell_usd > 0 else None, kind="volume"),
+        "realized_pnl": _fmt_activity_metric(realized_pnl, kind="volume", signed=True),
+        "open_orders": _fmt_activity_metric(open_order_count, kind="count"),
+        "first_buy": _fmt_activity_time(first_buy),
+        "last_buy": _fmt_activity_time(last_buy),
+        "first_sell": _fmt_activity_time(first_sell),
+        "last_sell": _fmt_activity_time(last_sell),
+        "note": "",
+    }
+
+
+def ave_portfolio_activity_detail(
+    conn: "ConnectionHandler",
+    *,
+    addr: str,
+    chain: str,
+    symbol: str = "",
+):
+    try:
+        normalized_addr, normalized_chain = _split_token_reference(addr, chain)
+        if not normalized_addr or not normalized_chain:
+            return ActionResponse(action=Action.RESPONSE, result="missing_token", response="Missing portfolio token")
+
+        state = _ensure_ave_state(conn)
+        state["nav_from"] = "portfolio"
+        state["portfolio_selected_token"] = {"addr": normalized_addr, "chain": normalized_chain}
+
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            payload = _build_paper_portfolio_activity_payload(
+                conn,
+                addr=normalized_addr,
+                chain=normalized_chain,
+                symbol=symbol,
+            )
+        else:
+            payload = _build_real_portfolio_activity_payload(
+                conn,
+                addr=normalized_addr,
+                chain=normalized_chain,
+                symbol=symbol,
+            )
+
+        conn.loop.create_task(_send_display(conn, "portfolio", payload))
+        return ActionResponse(action=Action.NONE, result="portfolio_activity_detail", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_portfolio_activity_detail error: {exc}")
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="Open activity detail failed")
+
+
+def _paper_limit_order_rows(conn: "ConnectionHandler", chain: str) -> list[dict]:
+    rows = []
+    for order in list_paper_open_orders(_paper_store_path(), _trade_namespace(conn)):
+        if not isinstance(order, dict):
+            continue
+        row_chain = _normalize_chain_name(order.get("chain"), chain)
+        if row_chain != chain:
+            continue
+        rows.append({
+            "id": str(order.get("id") or ""),
+            "outTokenAddress": str(order.get("addr") or ""),
+            "symbol": str(order.get("symbol") or "TOKEN"),
+            "chain": row_chain,
+            "limitPrice": order.get("limit_price"),
+            "createPrice": order.get("create_price"),
+        })
+    return _build_limit_order_rows(rows, chain=chain)
+
+
+def _try_fill_paper_limit_orders(
+    conn: "ConnectionHandler",
+    *,
+    chain: str = "",
+    token_addr: str = "",
+) -> list[dict]:
+    normalized_chain = _normalize_chain_name(chain)
+    resolved_addr, _ = _split_token_reference(token_addr, normalized_chain)
+    account = get_paper_account(_paper_store_path(), _trade_namespace(conn))
+    open_orders = account.get("open_orders", [])
+    candidates = []
+    token_ids = set()
+    native_token_ids = set()
+
+    for order in open_orders:
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("status") or "waiting") != "waiting":
+            continue
+        order_chain = _normalize_chain_name(order.get("chain"), normalized_chain or "solana")
+        order_addr = str(order.get("addr") or "").strip()
+        if normalized_chain and order_chain != normalized_chain:
+            continue
+        if resolved_addr and order_addr != resolved_addr:
+            continue
+        token_id = f"{order_addr}-{order_chain}" if order_addr else ""
+        native_meta = _PAPER_NATIVE_TOKEN_META.get(order_chain)
+        if not token_id or not native_meta:
+            continue
+        candidates.append((order, token_id, native_meta))
+        token_ids.add(token_id)
+        native_token_ids.add(native_meta["token_id"])
+
+    if not candidates:
+        return []
+
+    prices = _price_map_for_token_ids(list(token_ids) + list(native_token_ids))
+    fill_plan: dict[str, dict] = {}
+
+    for order, token_id, native_meta in candidates:
+        current_price = Decimal(str(prices.get(_normalize_batch_price_token_id(token_id), 0) or 0))
+        native_price = Decimal(
+            str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0)
+        )
+        limit_price = _parse_decimal_amount(order.get("limit_price"))
+        native_amount = _parse_decimal_amount(order.get("native_amount"))
+        if current_price <= 0 or native_price <= 0 or limit_price is None or native_amount is None:
+            continue
+        if current_price > limit_price:
+            continue
+        usd_value = native_amount * native_price
+        token_amount = usd_value / current_price if current_price > 0 else Decimal("0")
+        fill_plan[str(order.get("id") or "")] = {
+            "symbol": str(order.get("symbol") or "TOKEN"),
+            "addr": str(order.get("addr") or ""),
+            "chain": _normalize_chain_name(order.get("chain"), "solana"),
+            "token_id": token_id,
+            "native_amount": native_amount,
+            "native_symbol": native_meta["symbol"],
+            "token_amount": token_amount,
+            "price_usd": current_price,
+            "amount_usd": usd_value,
+            "fill_id": f"paper-fill-{int(time.time() * 1000)}-{str(order.get('id') or '')}",
+            "order_id": str(order.get("id") or ""),
+        }
+
+    if not fill_plan:
+        return []
+
+    def _mutate(account_data: dict):
+        open_orders_data = account_data.setdefault("open_orders", [])
+        positions = account_data.setdefault("positions", {})
+        fills = account_data.setdefault("fills", [])
+        kept = []
+        applied = []
+        for order in open_orders_data:
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("id") or "")
+            fill = fill_plan.get(order_id)
+            if not fill:
+                kept.append(order)
+                continue
+
+            position_key = _paper_position_key(fill["addr"], fill["chain"])
+            existing = positions.get(position_key)
+            prev_amount = _parse_decimal_amount((existing or {}).get("amount")) or Decimal("0")
+            prev_cost = _parse_decimal_amount((existing or {}).get("cost_basis_usd")) or Decimal("0")
+            new_amount = prev_amount + fill["token_amount"]
+            new_cost = prev_cost + fill["amount_usd"]
+            avg_cost = (new_cost / new_amount) if new_amount > 0 else Decimal("0")
+            positions[position_key] = {
+                "addr": fill["addr"],
+                "chain": fill["chain"],
+                "symbol": fill["symbol"],
+                "token_id": fill["token_id"],
+                "amount": _decimal_to_string(new_amount),
+                "amount_raw": _decimal_to_string(new_amount),
+                "avg_cost_usd": _decimal_to_string(avg_cost),
+                "cost_basis_usd": _decimal_to_string(new_cost),
+                "last_price_usd": _decimal_to_string(fill["price_usd"]),
+            }
+            fills.insert(0, {
+                "id": fill["fill_id"],
+                "order_id": fill["order_id"],
+                "trade_type": "limit_buy",
+                "fill_source": "paper_limit_match",
+                "chain": fill["chain"],
+                "addr": fill["addr"],
+                "symbol": fill["symbol"],
+                "native_amount": _decimal_to_string(fill["native_amount"]),
+                "native_symbol": fill["native_symbol"],
+                "token_amount": _decimal_to_string(fill["token_amount"]),
+                "price_usd": _decimal_to_string(fill["price_usd"]),
+                "amount_usd": _decimal_to_string(fill["amount_usd"]),
+                "created_at": int(time.time()),
+            })
+            applied.append(fill)
+        account_data["open_orders"] = kept
+        return applied
+
+    _, applied_fills = mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    if applied_fills:
+        symbols = [str(item.get("symbol") or "TOKEN") for item in applied_fills[:3]]
+        body = ", ".join(symbols)
+        if len(applied_fills) > 3:
+            body = f"{body} +{len(applied_fills) - 3} more"
+        conn.loop.create_task(_send_display(conn, "notify", {
+            "level": "info",
+            "title": "Paper Order Filled",
+            "body": body,
+        }))
+    return applied_fills or []
+
+
+def _paper_position_key(addr: str, chain: str) -> str:
+    resolved_addr, resolved_chain = _split_token_reference(addr, chain)
+    return f"{resolved_addr}-{resolved_chain}" if resolved_addr and resolved_chain else ""
+
+
+def _format_paper_amount(amount: Decimal, symbol: str) -> str:
+    return f"{_format_display_amount(amount)} {symbol}".strip()
+
+
+def _paper_market_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("outTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    native_amount = _parse_decimal_amount(params.get("paper_native_amount"))
+    if native_amount is None:
+        try:
+            native_amount = Decimal(str(params.get("inAmount", "0"))) / Decimal("1000000000")
+        except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+            native_amount = None
+    if native_amount is None or native_amount <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid trade amount"}
+
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
+    prices = _price_map_for_token_ids([native_meta["token_id"], f"{token_addr}-{token_chain}"])
+    native_price = Decimal(str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0))
+    token_price = Decimal(str(prices.get(_normalize_batch_price_token_id(f"{token_addr}-{token_chain}"), 0) or 0))
+    if native_price <= 0 or token_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Paper price unavailable"}
+
+    usd_value = native_amount * native_price
+    token_amount = usd_value / token_price
+    position_key = _paper_position_key(token_addr, token_chain)
+    tx_id = f"paper-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        if balance_amount < native_amount:
+            raise PaperStoreError(f"Insufficient {native_meta['symbol']} balance")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount - native_amount)
+
+        positions = account.setdefault("positions", {})
+        existing = positions.get(position_key)
+        prev_amount = _parse_decimal_amount((existing or {}).get("amount")) or Decimal("0")
+        prev_cost = _parse_decimal_amount((existing or {}).get("cost_basis_usd")) or Decimal("0")
+        new_amount = prev_amount + token_amount
+        new_cost = prev_cost + usd_value
+        avg_cost = (new_cost / new_amount) if new_amount > 0 else Decimal("0")
+        positions[position_key] = {
+            "addr": token_addr,
+            "chain": token_chain,
+            "symbol": symbol,
+            "token_id": f"{token_addr}-{token_chain}",
+            "amount": _decimal_to_string(new_amount),
+            "amount_raw": _decimal_to_string(new_amount),
+            "avg_cost_usd": _decimal_to_string(avg_cost),
+            "cost_basis_usd": _decimal_to_string(new_cost),
+            "last_price_usd": _decimal_to_string(token_price),
+        }
+
+        fills = account.setdefault("fills", [])
+        fills.insert(0, {
+            "id": tx_id,
+            "trade_type": trade_type,
+            "chain": token_chain,
+            "addr": token_addr,
+            "symbol": symbol,
+            "native_amount": _decimal_to_string(native_amount),
+            "token_amount": _decimal_to_string(token_amount),
+            "price_usd": _decimal_to_string(token_price),
+            "amount_usd": _decimal_to_string(usd_value),
+            "created_at": int(time.time()),
+        })
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Bought!",
+        "subtitle": "Paper trade executed.",
+        "mode_label": "PAPER",
+        "data": {
+            "txId": tx_id,
+            "outAmountFormatted": _format_paper_amount(token_amount, symbol),
+            "outAmountUsd": f"${usd_value:.2f}",
+            "outTokenSymbol": symbol,
+            "outTokenAddress": token_addr,
+        },
+    }
+
+
+def _paper_market_sell(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("inTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
+    sell_ratio = _parse_decimal_amount(params.get("paper_sell_ratio")) or Decimal("1")
+    requested_amount = _parse_decimal_amount(params.get("paper_position_amount"))
+    position_key = _paper_position_key(token_addr, token_chain)
+    prices = _price_map_for_token_ids([native_meta["token_id"], f"{token_addr}-{token_chain}"])
+    native_price = Decimal(str(prices.get(_normalize_batch_price_token_id(native_meta["token_id"]), 0) or 0))
+    token_price = Decimal(str(prices.get(_normalize_batch_price_token_id(f"{token_addr}-{token_chain}"), 0) or 0))
+    if native_price <= 0 or token_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Paper price unavailable"}
+
+    tx_id = f"paper-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        positions = account.setdefault("positions", {})
+        existing = positions.get(position_key)
+        if not isinstance(existing, dict):
+            raise PaperStoreError("No paper position to sell")
+
+        held_amount = _parse_decimal_amount(existing.get("amount")) or Decimal("0")
+        if held_amount <= 0:
+            raise PaperStoreError("No paper position to sell")
+
+        amount_to_sell = requested_amount if requested_amount is not None else held_amount
+        amount_to_sell = amount_to_sell * sell_ratio
+        if amount_to_sell <= 0:
+            raise PaperStoreError("Sell amount must be positive")
+        if amount_to_sell > held_amount:
+            amount_to_sell = held_amount
+
+        avg_cost = _parse_decimal_amount(existing.get("avg_cost_usd")) or Decimal("0")
+        cost_basis = avg_cost * amount_to_sell
+        proceeds_usd = amount_to_sell * token_price
+        native_out = proceeds_usd / native_price
+        remaining = held_amount - amount_to_sell
+
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount + native_out)
+
+        if remaining <= Decimal("0.000000001"):
+            positions.pop(position_key, None)
+        else:
+            remaining_cost = (avg_cost * remaining)
+            existing["amount"] = _decimal_to_string(remaining)
+            existing["amount_raw"] = _decimal_to_string(remaining)
+            existing["cost_basis_usd"] = _decimal_to_string(remaining_cost)
+            existing["last_price_usd"] = _decimal_to_string(token_price)
+
+        realized = _parse_decimal_amount(account.get("realized_pnl_usd")) or Decimal("0")
+        account["realized_pnl_usd"] = _decimal_to_string(realized + (proceeds_usd - cost_basis))
+
+        fills = account.setdefault("fills", [])
+        fills.insert(0, {
+            "id": tx_id,
+            "trade_type": trade_type,
+            "chain": token_chain,
+            "addr": token_addr,
+            "symbol": symbol,
+            "native_amount": _decimal_to_string(native_out),
+            "token_amount": _decimal_to_string(amount_to_sell),
+            "price_usd": _decimal_to_string(token_price),
+            "amount_usd": _decimal_to_string(proceeds_usd),
+            "created_at": int(time.time()),
+        })
+        return native_out, proceeds_usd
+
+    try:
+        _, mutate_result = mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    native_out, proceeds_usd = mutate_result
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Sold!",
+        "subtitle": "Paper trade executed.",
+        "mode_label": "PAPER",
+        "data": {
+            "txId": tx_id,
+            "outAmountFormatted": _format_paper_amount(native_out, native_meta["symbol"]),
+            "outAmountUsd": f"${proceeds_usd:.2f}",
+            "inTokenSymbol": symbol,
+            "inTokenAddress": token_addr,
+        },
+    }
+
+
+def _paper_limit_buy(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    token_addr, token_chain = _split_token_reference(params.get("outTokenAddress", ""), chain)
+    if not token_addr:
+        return {"trade_type": trade_type, "status": "failed", "error": "Missing token address"}
+
+    native_meta = _PAPER_NATIVE_TOKEN_META.get(token_chain)
+    if not native_meta:
+        return {"trade_type": trade_type, "status": "failed", "error": f"Unsupported paper chain: {token_chain}"}
+
+    native_amount = _parse_decimal_amount(params.get("paper_native_amount"))
+    if native_amount is None:
+        try:
+            native_amount = Decimal(str(params.get("inAmount", "0"))) / Decimal("1000000000")
+        except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+            native_amount = None
+    limit_price = _parse_decimal_amount(params.get("limitPrice"))
+    create_price = _parse_decimal_amount(params.get("paper_current_price"))
+    if native_amount is None or native_amount <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid trade amount"}
+    if limit_price is None or limit_price <= 0:
+        return {"trade_type": trade_type, "status": "failed", "error": "Invalid limit price"}
+
+    symbol = _resolve_trade_symbol(
+        conn,
+        token_addr,
+        token_chain,
+        str(params.get("paper_symbol") or params.get("symbol") or "").strip(),
+    )
+    order_id = f"paper-order-{int(time.time() * 1000)}"
+
+    def _mutate(account: dict):
+        balances = account.setdefault("balances", {})
+        native_balance = balances.setdefault(
+            token_chain,
+            {"symbol": native_meta["symbol"], "amount": "0"},
+        )
+        balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        if balance_amount < native_amount:
+            raise PaperStoreError(f"Insufficient {native_meta['symbol']} balance")
+        native_balance["symbol"] = native_meta["symbol"]
+        native_balance["amount"] = _decimal_to_string(balance_amount - native_amount)
+
+        open_orders = account.setdefault("open_orders", [])
+        open_orders.insert(0, {
+            "id": order_id,
+            "addr": token_addr,
+            "chain": token_chain,
+            "symbol": symbol,
+            "limit_price": _decimal_to_string(limit_price),
+            "create_price": _decimal_to_string(create_price),
+            "native_amount": _decimal_to_string(native_amount),
+            "native_symbol": native_meta["symbol"],
+            "status": "waiting",
+            "created_at": int(time.time()),
+        })
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Limit Order Placed",
+        "subtitle": "Paper limit order created.",
+        "mode_label": "PAPER",
+        "data": {
+            "id": order_id,
+            "outTokenSymbol": symbol,
+            "outTokenAddress": token_addr,
+            "outAmount": "1 order",
+        },
+    }
+
+
+def _paper_cancel_order(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    chain = _normalize_chain_name(params.get("chain"), "solana")
+    resolved_ids = [str(item) for item in params.get("ids", []) if item not in (None, "")]
+    if not resolved_ids:
+        return {"trade_type": trade_type, "status": "failed", "error": "No paper order ids"}
+
+    restored = Decimal("0")
+    cancelled_ids: list[str] = []
+
+    def _mutate(account: dict):
+        nonlocal restored
+        open_orders = account.setdefault("open_orders", [])
+        kept = []
+        balances = account.setdefault("balances", {})
+        native_meta = _PAPER_NATIVE_TOKEN_META.get(chain)
+        if native_meta:
+            native_balance = balances.setdefault(
+                chain,
+                {"symbol": native_meta["symbol"], "amount": "0"},
+            )
+            balance_amount = _parse_decimal_amount(native_balance.get("amount")) or Decimal("0")
+        else:
+            native_balance = None
+            balance_amount = Decimal("0")
+
+        for order in open_orders:
+            if not isinstance(order, dict):
+                continue
+            order_id = str(order.get("id") or "")
+            if order_id in resolved_ids:
+                native_amount = _parse_decimal_amount(order.get("native_amount")) or Decimal("0")
+                restored += native_amount
+                cancelled_ids.append(order_id)
+                continue
+            kept.append(order)
+
+        if not cancelled_ids:
+            raise PaperStoreError("No waiting paper orders")
+
+        if native_balance is not None:
+            native_balance["amount"] = _decimal_to_string(balance_amount + restored)
+        account["open_orders"] = kept
+
+    try:
+        mutate_paper_account(_paper_store_path(), _trade_namespace(conn), _mutate)
+    except PaperStoreError as exc:
+        return {"trade_type": trade_type, "status": "failed", "error": str(exc)}
+
+    return {
+        "trade_type": trade_type,
+        "status": "confirmed",
+        "title": "Paper Order Cancelled",
+        "subtitle": "Paper order cancelled.",
+        "mode_label": "PAPER",
+        "data": {
+            "ids": cancelled_ids,
+        },
+    }
+
+
+def _execute_paper_trade(conn: "ConnectionHandler", trade_type: str, params: dict) -> dict:
+    if trade_type == "limit_buy":
+        return _paper_limit_buy(conn, trade_type, params)
+    if trade_type == "cancel_order":
+        return _paper_cancel_order(conn, trade_type, params)
+    if trade_type == "market_buy":
+        return _paper_market_buy(conn, trade_type, params)
+    if trade_type == "market_sell":
+        return _paper_market_sell(conn, trade_type, params)
+    return {
+        "trade_type": trade_type,
+        "status": "failed",
+        "error": "Paper mode does not support this trade yet",
+    }
+
+
+def _portfolio_holding_index(holdings: list, addr: str, chain: str) -> int:
+    target_addr, target_chain = _split_token_reference(addr, chain)
+    if not target_addr:
+        return -1
+
+    for idx, row in enumerate(holdings or []):
+        if not isinstance(row, dict):
+            continue
+        row_addr, row_chain = _split_token_reference(row.get("addr", ""), row.get("chain", ""))
+        if row_addr == target_addr and row_chain == target_chain:
+            return idx
+    return -1
+
+
+def _coerce_portfolio_cursor(value, total: int) -> int:
+    try:
+        cursor = int(value)
+    except (TypeError, ValueError):
+        cursor = 0
+    if total <= 0:
+        return 0
+    return max(0, min(cursor, total - 1))
+
+
 def _trim_result_tx_id(value) -> str:
     if not value:
         return ""
@@ -1092,7 +3611,7 @@ def _pick_result_out_amount(data: dict) -> str:
     for key in ("outAmountFormatted", "out_amount_formatted", "estimateOutFormatted"):
         value = data.get(key)
         if value not in (None, ""):
-            return str(value)
+            return _normalize_display_amount_text(str(value))
 
     for key in ("outAmount", "out_amount", "estimateOut"):
         value = data.get(key)
@@ -1128,7 +3647,7 @@ def _trade_status_copy(reason: str, trade_type: str = "") -> tuple[str, str]:
         return _submission_title(trade_type), "Waiting for chain confirmation."
 
     mapping = {
-        "confirm_timeout": ("Trade Cancelled", "Confirmation timed out. Nothing was executed."),
+        "confirm_timeout": ("Trade Cancelled", "Nothing was executed."),
         "ack_timeout": ("Still Pending", "We did not receive a final confirmation yet."),
         "deferred_result": ("Result Deferred", "Another confirmation flow is active. Result will appear next."),
     }
@@ -1214,7 +3733,8 @@ async def _push_submit_ack_transition(conn: "ConnectionHandler", result: dict, p
     _clear_pending_trade(conn, pending.get("trade_id", ""))
     state = _ensure_ave_state(conn)
     state["screen"] = "feed"
-    await _send_display(conn, "feed", {"reason": "trade_submitted"})
+    state.pop("nav_from", None)
+    await _send_display(conn, "feed", {"reason": "trade_submitted", "feed_session": _current_feed_session(state)})
     _schedule_submitted_trade_reconcile(conn, submitted)
 
 
@@ -1296,6 +3816,7 @@ def _normalize_result_data(result: dict, pending: dict = None) -> dict:
         "tx_id": _trim_result_tx_id(
             data.get("txId", data.get("tx_id", data.get("txHash", data.get("tx_hash", ""))))
         ),
+        "mode_label": _stringify_amount(result.get("mode_label", pending.get("mode_label", ""))),
         "error": error_message if not success else "",
         "subtitle": subtitle,
         "explain_state": explain_state,
@@ -1310,6 +3831,8 @@ def _build_result_payload(result: dict, pending: dict = None) -> dict:
         "action": normalized["action"],
         "symbol": normalized["symbol"],
     }
+    if normalized["mode_label"]:
+        payload["mode_label"] = normalized["mode_label"]
     if normalized["success"]:
         payload["out_amount"] = normalized["out_amount"]
         payload["amount"] = payload["out_amount"]
@@ -1329,6 +3852,43 @@ def _build_result_payload(result: dict, pending: dict = None) -> dict:
 # Risk check helper
 # ---------------------------------------------------------------------------
 
+def _normalize_ave_bool(value) -> bool:
+    """Normalize AVE risk booleans where sentinel values like -1 mean false."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return text in {"true", "1", "yes", "y"}
+    return False
+
+
+def _parse_risk_score(value):
+    """Parse contract risk score safely; return None for malformed values."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= 100 else None
+    if isinstance(value, float):
+        if value.is_integer():
+            score = int(value)
+            return score if 0 <= score <= 100 else None
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            score = int(text)
+            return score if 0 <= score <= 100 else None
+        except ValueError:
+            return None
+    return None
+
+
 def _risk_level_from_response(risk_data: dict) -> str:
     """Extract risk level from contracts API response.
 
@@ -1336,16 +3896,18 @@ def _risk_level_from_response(risk_data: dict) -> str:
     individual boolean flags like ``is_honeypot``.  We map the score to
     a human-readable level string.
     """
-    data = risk_data.get("data", risk_data)
+    root = risk_data if isinstance(risk_data, dict) else {}
+    data = root.get("data", root)
     if isinstance(data, list) and data:
         data = data[0]
+    if not isinstance(data, dict):
+        data = {}
     # Check for honeypot first — always CRITICAL
-    if data.get("is_honeypot"):
+    if _normalize_ave_bool(data.get("is_honeypot")):
         return "CRITICAL"
-    score = data.get("risk_score", data.get("ave_risk_level"))
+    score = _parse_risk_score(data.get("risk_score", data.get("ave_risk_level")))
     if score is None:
         return "UNKNOWN"
-    score = int(score)
     if score >= 80:
         return "CRITICAL"
     if score >= 50:
@@ -1357,13 +3919,16 @@ def _risk_level_from_response(risk_data: dict) -> str:
 
 def _risk_flags(risk_data: dict) -> dict:
     """Extract honeypot/mint/freeze flags."""
-    data = risk_data.get("data", risk_data)
+    root = risk_data if isinstance(risk_data, dict) else {}
+    data = root.get("data", root)
     if isinstance(data, list) and data:
         data = data[0]
+    if not isinstance(data, dict):
+        data = {}
     return {
-        "is_honeypot": bool(data.get("is_honeypot", False)),
-        "is_mintable": bool(data.get("has_mint_method", data.get("is_mintable", False))),
-        "is_freezable": bool(data.get("has_black_method", data.get("is_freezable", False))),
+        "is_honeypot": _normalize_ave_bool(data.get("is_honeypot")),
+        "is_mintable": _normalize_ave_bool(data.get("has_mint_method", data.get("is_mintable"))),
+        "is_freezable": _normalize_ave_bool(data.get("has_black_method", data.get("is_freezable"))),
         "risk_level": _risk_level_from_response(risk_data),
     }
 
@@ -1404,6 +3969,269 @@ def _normalize_kline(points: list) -> list:
         result.append(int(normalized * 1000))  # 0..1000 fits int16
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Tool: ave_list_signals / ave_open_watchlist
+# ---------------------------------------------------------------------------
+
+ave_list_signals_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_list_signals",
+        "description": "查看公开 Signals 列表并展示到 FEED。用于 Explore->Signals 或语音打开信号页。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+ave_open_watchlist_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_open_watchlist",
+        "description": "打开本地 Watchlist 并展示到 FEED。用于 Explore->Watchlist 或语音打开观察列表。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+@register_function("ave_list_signals", ave_list_signals_desc, ToolType.SYSTEM_CTL)
+def ave_list_signals(conn: "ConnectionHandler", chain: str = ""):
+    try:
+        state = _ensure_ave_state(conn)
+        selected_chain = _normalize_signals_chain(chain or state.get("signals_chain"), "solana")
+        state["signals_chain"] = selected_chain
+
+        # Cut over FEED session before REST fetch so pending/stale live pushes
+        # cannot repaint the previous feed while Signals is loading.
+        feed_session = _invalidate_live_feed_session(conn, clear_tokens=True)
+
+        resp = _data_get(
+            "/signals/public/list",
+            {"chain": selected_chain, "limit": 20, "pageSize": 20, "pageNO": 1},
+        )
+        raw = resp.get("data", {})
+        if isinstance(raw, dict):
+            raw = raw.get("list", raw.get("items", []))
+        rows = _build_signals_rows(raw if isinstance(raw, list) else [])
+
+        state["screen"] = "browse"
+        state["feed_source"] = "signals"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "signals"
+        state.pop("nav_from", None)
+        state.pop("order_list", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, rows, cursor=0)
+        state["feed_session"] = feed_session
+
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "browse",
+                {
+                    "tokens": rows or [_empty_feed_row("SIGNALS", "No signals now")],
+                    "mode": "signals",
+                    "source_label": _browse_source_label("SIGNALS", selected_chain),
+                    "cursor": state.get("feed_cursor", 0),
+                    "feed_session": feed_session,
+                },
+            )
+        )
+        return ActionResponse(action=Action.NONE, result=f"signals:{len(rows)}", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_list_signals error: {exc}")
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "notify",
+                {
+                    "level": "error",
+                    "title": "Signals unavailable",
+                    "body": str(exc)[:60],
+                },
+            )
+        )
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="Signals 暂时不可用")
+
+
+@register_function("ave_open_watchlist", ave_open_watchlist_desc, ToolType.SYSTEM_CTL)
+def ave_open_watchlist(conn: "ConnectionHandler", cursor=None, chain_filter: str = ""):
+    try:
+        state = _ensure_ave_state(conn)
+        selected_chain = _normalize_surface_chain(
+            chain_filter or state.get("watchlist_chain"),
+            "all",
+            allow_all=True,
+        )
+        state["watchlist_chain"] = selected_chain
+        if cursor is None:
+            cursor = state.get("feed_cursor", 0)
+        try:
+            cursor = int(cursor)
+        except (TypeError, ValueError):
+            cursor = 0
+
+        saved_rows = list_watchlist_entries(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+        )
+        if selected_chain != "all":
+            saved_rows = [
+                row for row in saved_rows
+                if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
+            ]
+        rows = _build_watchlist_rows(saved_rows)
+
+        state["screen"] = "browse"
+        state["feed_source"] = "watchlist"
+        state["feed_platform"] = ""
+        state["feed_mode"] = "watchlist"
+        state.pop("nav_from", None)
+        state.pop("order_list", None)
+        _clear_search_state(state)
+        _set_feed_navigation_state(state, rows, cursor=cursor)
+        feed_session = _next_feed_session(state)
+
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "browse",
+                {
+                    "tokens": rows or [_empty_feed_row("WATCHLIST", "Watchlist empty")],
+                    "mode": "watchlist",
+                    "source_label": _browse_source_label("WATCHLIST", selected_chain),
+                    "cursor": state.get("feed_cursor", 0),
+                    "feed_session": feed_session,
+                },
+            )
+        )
+        return ActionResponse(action=Action.NONE, result=f"watchlist:{len(rows)}", response=None)
+    except Exception as exc:
+        logger.bind(tag=TAG).error(f"ave_open_watchlist error: {exc}")
+        conn.loop.create_task(
+            _send_display(
+                conn,
+                "notify",
+                {
+                    "level": "error",
+                    "title": "Watchlist unavailable",
+                    "body": str(exc)[:60],
+                },
+            )
+        )
+        return ActionResponse(action=Action.RESPONSE, result=str(exc), response="观察列表暂时不可用")
+
+
+def ave_add_current_watchlist_token(conn: "ConnectionHandler", token: dict | None = None):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    state["current_token"] = {
+        "addr": target["addr"],
+        "chain": target["chain"],
+        "symbol": target["symbol"],
+        "token_id": f"{target['addr']}-{target['chain']}",
+        "contract_tail": target["addr"][-4:] if len(target["addr"]) >= 4 else target["addr"],
+        "source_tag": "",
+    }
+    try:
+        add_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            {
+                "addr": target["addr"],
+                "chain": target["chain"],
+                "symbol": target["symbol"] or "?",
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {"level": "info", "title": "Watchlist", "body": "Added to watchlist"},
+        )
+    )
+    return _refresh_spotlight_for_token(conn, target)
+
+
+def ave_remove_current_watchlist_voice(conn: "ConnectionHandler", token: dict | None = None):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    try:
+        removed = remove_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            target["addr"],
+            target["chain"],
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "info",
+                "title": "Watchlist",
+                "body": "Removed from watchlist" if removed else "Token not in watchlist",
+            },
+        )
+    )
+    return _refresh_spotlight_for_token(conn, target)
+
+
+def ave_remove_current_watchlist_token(
+    conn: "ConnectionHandler",
+    token: dict | None = None,
+    cursor=None,
+):
+    state = _ensure_ave_state(conn)
+    target = _resolve_watchlist_target(state, token, cursor=cursor)
+    if not target:
+        return ActionResponse(action=Action.RESPONSE, result="no_token", response="请先选中一个代币")
+
+    try:
+        removed = remove_watchlist_entry(
+            _watchlist_store_path(),
+            _watchlist_namespace(conn),
+            target["addr"],
+            target["chain"],
+        )
+    except Exception as exc:
+        return _watchlist_store_error_response(
+            conn,
+            user_message="观察列表暂时不可用，请稍后重试。",
+            exc=exc,
+        )
+    conn.loop.create_task(
+        _send_display(
+            conn,
+            "notify",
+            {
+                "level": "info",
+                "title": "Watchlist",
+                "body": "Removed from watchlist" if removed else "Token not in watchlist",
+            },
+        )
+    )
+    return ave_open_watchlist(conn, cursor=cursor)
 
 
 # ---------------------------------------------------------------------------
@@ -1462,8 +4290,18 @@ def _build_token_list(tokens_raw, chain_fallback):
                 "price_raw": float(price_val or 0),
                 "change_24h": _fmt_change(change_val),
                 "change_positive": float(change_val or 0) >= 0,
-                "volume_24h": _fmt_volume(vol_val),
-                "market_cap": _fmt_volume(t.get("market_cap", t.get("fdv"))),
+                "volume_24h": _fmt_volume(
+                    _coalesce_numeric_value(
+                        vol_val,
+                        t.get("tx_volume_u_24h"),
+                    )
+                ),
+                "market_cap": _fmt_volume(
+                    _coalesce_numeric_value(
+                        t.get("market_cap"),
+                        t.get("fdv"),
+                    )
+                ),
                 "source": t.get("issue_platform", t.get("platform", "trending")),
                 "risk_level": "UNKNOWN",
             }
@@ -1545,26 +4383,38 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
             lst = raw if isinstance(raw, list) else []
             tokens = _build_token_list(lst[:20], chain if chain != "all" else "???")
-            conn.loop.create_task(_send_display(conn, "feed", {"tokens": tokens, "chain": chain}))
-            logger.bind(tag=TAG).info(f"ave_get_trending: platform={platform} → {len(tokens)} tokens")
-            if hasattr(conn, "ave_wss"):
-                conn.ave_wss.set_feed_tokens(tokens, chain)
-
             state = _ensure_ave_state(conn)
             state["screen"] = "feed"
             state["feed_source"] = "trending"
             state["feed_platform"] = platform
             state["feed_mode"] = "standard"
+            _remember_home_feed_state(state, source="trending", platform=platform)
             state.pop("nav_from", None)
             _clear_search_state(state)
             _set_feed_navigation_state(state, tokens, cursor=0)
+            feed_session = _next_feed_session(state)
+
+            conn.loop.create_task(
+                _send_display(
+                    conn,
+                    "feed",
+                    {
+                        "tokens": tokens,
+                        "chain": chain,
+                        "feed_session": feed_session,
+                    },
+                )
+            )
+            logger.bind(tag=TAG).info(f"ave_get_trending: platform={platform} → {len(tokens)} tokens")
+            if hasattr(conn, "ave_wss"):
+                conn.ave_wss.set_feed_tokens(tokens, chain)
             return ActionResponse(action=Action.NONE, result=f"Showing {len(tokens)} tokens from {platform}", response="")
         except Exception as e:
             logger.bind(tag=TAG).error(f"ave_get_trending platform error: {e}")
             try:
                 conn.loop.create_task(_send_display(conn, "notify", {
                     "level": "error",
-                    "title": "获取平台热门失败",
+                    "title": "Platform Feed Failed",
                     "body": str(e)[:60],
                 }))
             except Exception:
@@ -1574,8 +4424,13 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
     # Normalize topic: empty or "trending" → use /tokens/trending endpoint
     use_ranks = topic and topic != "trending"
 
-    CHAINS     = ["solana", "eth", "bsc", "base"] if chain == "all" else [chain]
-    PER_CHAIN  = max(5, 20 // len(CHAINS))   # ≈ 5 each → 20 total
+    CHAINS = ["solana", "eth", "bsc", "base"] if chain == "all" else [chain]
+    if use_ranks:
+        # `/ranks` behaves like a global board mirrored across chain params.
+        # Pull a deeper slice per request, then dedupe globally to fill 20.
+        PER_CHAIN = 20
+    else:
+        PER_CHAIN = max(5, 20 // len(CHAINS))   # ≈ 5 each → 20 total
 
     def _fetch_chain(ch):
         try:
@@ -1589,10 +4444,10 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             if isinstance(raw, dict):
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
             lst = raw if isinstance(raw, list) else []
-            for item in lst:          # inject chain if API omits it
+            for item in lst:
                 if not item.get("chain"):
                     item["chain"] = ch
-            return ch, lst
+            return ch, _filter_supported_feed_items(lst, ch)
         except Exception as e:
             logger.bind(tag=TAG).warning(f"fetch_chain {ch}: {e}")
             return ch, []
@@ -1611,20 +4466,15 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                 if i < len(lst):
                     t   = lst[i]
                     tid = t.get("token", t.get("token_id", t.get("address", "")))
-                    if tid and tid not in seen:
-                        seen.add(tid)
+                    if use_ranks:
+                        dedupe_key = str(tid)
+                    else:
+                        dedupe_key = (str(tid), str(t.get("chain") or ch or ""))
+                    if tid and dedupe_key not in seen:
+                        seen.add(dedupe_key)
                         raw_all.append(t)
 
         tokens = _build_token_list(raw_all[:20], chain if chain != "all" else "???")
-
-        conn.loop.create_task(_send_display(conn, "feed", {
-            "tokens": tokens,
-            "chain":  chain,
-        }))
-        logger.bind(tag=TAG).info(f"ave_get_trending: sent {len(tokens)} tokens to FEED")
-
-        if hasattr(conn, "ave_wss"):
-            conn.ave_wss.set_feed_tokens(tokens, chain)
 
         # Track state so LLM can reference tokens by symbol in follow-up commands
         state = _ensure_ave_state(conn)
@@ -1632,9 +4482,21 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
         state["feed_source"] = topic or "trending"
         state["feed_platform"] = ""
         state["feed_mode"] = "standard"
+        _remember_home_feed_state(state, source=topic or "trending", platform="")
         state.pop("nav_from", None)
         _clear_search_state(state)
         _set_feed_navigation_state(state, tokens, cursor=0)
+        feed_session = _next_feed_session(state)
+
+        conn.loop.create_task(_send_display(conn, "feed", {
+            "tokens": tokens,
+            "chain": chain,
+            "feed_session": feed_session,
+        }))
+        logger.bind(tag=TAG).info(f"ave_get_trending: sent {len(tokens)} tokens to FEED")
+
+        if hasattr(conn, "ave_wss"):
+            conn.ave_wss.set_feed_tokens(tokens, chain)
 
         # Include compact token listing in result so LLM knows what's on screen
         summary = ", ".join(f"{t['symbol']}({t['chain'][:3].upper()})" for t in tokens[:8])
@@ -1646,7 +4508,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "获取热门失败",
+                "title": "Trending Feed Failed",
                 "body": str(e)[:60],
             }))
         except Exception:
@@ -1686,7 +4548,9 @@ ave_search_token_desc = {
 def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"):
     """搜索代币并推送结果到设备 FEED 屏幕"""
     try:
-        params = {"keyword": keyword, "chain": chain, "limit": 20}
+        params = {"keyword": keyword, "limit": 20}
+        if chain and chain != "all":
+            params["chain"] = chain
         resp = _data_get("/tokens", params)
         raw = resp.get("data", {})
         if isinstance(raw, dict):
@@ -1700,30 +4564,30 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
             token for token in tokens
             if normalized_keyword and str(token.get("symbol") or "").strip().upper() == normalized_keyword
         ]
-        search_items = list(disambiguation_items or tokens)
-        _save_search_session(
-            conn,
-            query=keyword,
-            chain=chain,
-            items=search_items,
-            cursor=0,
-        )
         state["feed_mode"] = "search"
         state.pop("nav_from", None)
 
         if len(disambiguation_items) > 1:
             payload = _build_disambiguation_payload(disambiguation_items)
+            visible_items = list(payload.get("items", []))
+            _save_search_session(
+                conn,
+                query=keyword,
+                chain=chain,
+                items=visible_items,
+                cursor=payload.get("cursor", 0),
+            )
             conn.loop.create_task(_send_display(conn, "disambiguation", payload))
             logger.bind(tag=TAG).info(
                 f"ave_search_token: '{keyword}' -> disambiguation ({len(disambiguation_items)} matches)"
             )
             state["screen"] = "disambiguation"
             state["nav_from"] = payload.get("nav_from", "feed")
-            state["disambiguation_items"] = list(payload.get("items", []))
+            state["disambiguation_items"] = visible_items
             state["disambiguation_cursor"] = payload.get("cursor", 0)
             _set_feed_navigation_state(
                 state,
-                payload.get("items", []),
+                visible_items,
                 cursor=payload.get("cursor", 0),
             )
             return ActionResponse(
@@ -1732,6 +4596,14 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
                 response="",
             )
 
+        _save_search_session(
+            conn,
+            query=keyword,
+            chain=chain,
+            items=tokens,
+            cursor=0,
+        )
+        feed_session = _next_feed_session(state)
         conn.loop.create_task(_send_display(conn, "feed", {
             "tokens": tokens,
             "chain": chain,
@@ -1739,6 +4611,7 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
             "mode": "search",
             "search_query": state.get("search_query", ""),
             "cursor": state.get("search_cursor", 0),
+            "feed_session": feed_session,
         }))
         logger.bind(tag=TAG).info(f"ave_search_token: '{keyword}' \u2192 {len(tokens)} results")
 
@@ -1756,7 +4629,7 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
                 "level": "error",
-                "title": "搜索失败",
+                "title": "Search Failed",
                 "body": str(e)[:60],
             }))
         except Exception:
@@ -1794,17 +4667,22 @@ def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
         state = getattr(conn, "ave_state", {})
         if not chain:
             chain = state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
-        assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
-
-        resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
-            "assetsId": assets_id,
-            "chain": chain,
-            "pageSize": "20",
-            "pageNo": "0",
-            "status": "waiting",
-        })
-        orders = _extract_limit_order_list(resp)
-        rows = _build_limit_order_rows(orders, chain=chain)
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn, chain=chain)
+            rows = _paper_limit_order_rows(conn, chain)
+            source_label = "PAPER ORDERS"
+        else:
+            assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
+            resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
+                "assetsId": assets_id,
+                "chain": chain,
+                "pageSize": "20",
+                "pageNo": "0",
+                "status": "waiting",
+            })
+            orders = _extract_limit_order_list(resp)
+            rows = _build_limit_order_rows(orders, chain=chain)
+            source_label = "ORDERS"
 
         display_rows = rows or [{
             "token_id": "",
@@ -1816,14 +4694,22 @@ def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
             "change_positive": True,
             "source": "orders",
         }]
+        state = _ensure_ave_state(conn)
+        feed_session = _next_feed_session(state)
+        _invalidate_live_feed_session(
+            conn,
+            session=feed_session,
+            chain=chain,
+            clear_tokens=True,
+        )
         conn.loop.create_task(_send_display(conn, "feed", {
             "tokens": display_rows,
             "chain": chain,
             "mode": "orders",
-            "source_label": "ORDERS",
+            "source_label": source_label,
+            "feed_session": feed_session,
         }))
 
-        state = _ensure_ave_state(conn)
         state["screen"] = "feed"
         state["feed_mode"] = "orders"
         state.pop("nav_from", None)
@@ -1890,18 +4776,27 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
         state = getattr(conn, "ave_state", {})
         chain = chain or state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
         resolved_ids = [str(order_id) for order_id in order_ids]
+        trade_mode = _get_trade_mode(conn)
 
         if resolved_ids == ["all"]:
-            assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
-            resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
-                "assetsId": assets_id,
-                "chain": chain,
-                "pageSize": "20",
-                "pageNo": "0",
-                "status": "waiting",
-            })
-            orders = _extract_limit_order_list(resp)
-            resolved_ids = [str(order.get("id", "")) for order in orders if order.get("id")]
+            if trade_mode == _TRADE_MODE_PAPER:
+                orders = list_paper_open_orders(_paper_store_path(), _trade_namespace(conn))
+                resolved_ids = [
+                    str(order.get("id", ""))
+                    for order in orders
+                    if isinstance(order, dict) and _normalize_chain_name(order.get("chain"), chain) == chain and order.get("id")
+                ]
+            else:
+                assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
+                resp = _trade_get("/v1/thirdParty/tx/getLimitOrder", {
+                    "assetsId": assets_id,
+                    "chain": chain,
+                    "pageSize": "20",
+                    "pageNo": "0",
+                    "status": "waiting",
+                })
+                orders = _extract_limit_order_list(resp)
+                resolved_ids = [str(order.get("id", "")) for order in orders if order.get("id")]
             if not resolved_ids:
                 return ActionResponse(action=Action.RESPONSE, result="no_waiting_orders", response="没有可撤销的挂单")
 
@@ -1939,6 +4834,7 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
             "sl_pct": 0,
             "slippage_pct": 0.0,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(
@@ -1968,8 +4864,8 @@ ave_token_detail_desc = {
                 "symbol": {"type": "string", "description": "代币符号，如 BONK（addr省略时按此查找）"},
                 "interval": {
                     "type": "string",
-                    "description": "K线周期，5/60/240/1440（分钟），默认60（1小时）",
-                    "enum": ["5", "60", "240", "1440"]
+                    "description": "K线周期，s1(秒级实时)/1/5/60/240/1440（分钟），默认60（1小时）",
+                    "enum": ["s1", "1", "5", "60", "240", "1440"]
                 },
             },
             "required": [],
@@ -2000,104 +4896,123 @@ def ave_token_detail(conn: "ConnectionHandler", addr: str = "", chain: str = "so
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请告诉我你想查看哪个代币的地址或名称")
 
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            f_token = pool.submit(_data_get, f"/tokens/{addr}-{chain}")
-            kline_limit = _kline_limit_for_interval(interval)
-            f_kline = pool.submit(_data_get, f"/klines/token/{addr}-{chain}",
-                                  {"interval": interval, "limit": kline_limit})
-            f_risk  = pool.submit(_data_get, f"/contracts/{addr}-{chain}")
-            token_resp = f_token.result()
-            kline_resp = f_kline.result()
-            risk_resp  = f_risk.result()
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn, chain=chain, token_addr=addr)
 
-        token_data = token_resp.get("data", token_resp)
-        token = token_data.get("token", token_data) if isinstance(token_data, dict) else token_data
-        if isinstance(token, list) and token:
-            token = token[0]
-
-        kline_points = _trim_points(kline_resp.get("data", {}).get("points", []), kline_limit)
-        chart_values = _normalize_kline(kline_points)
-
-        # Get price min/max and timestamps from raw kline data
-        raw_closes = [float(p.get("close", p.get("c", 0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
-        raw_times  = [int(p.get("time",  p.get("t",  0)) or 0) for p in kline_points if p.get("close") or p.get("c")]
-        price_min = min(raw_closes) if raw_closes else 0
-        price_max = max(raw_closes) if raw_closes else 0
-        n_pts = len(raw_times)
-        t_start = raw_times[0]          if n_pts > 0 else 0
-        t_mid   = raw_times[n_pts // 2] if n_pts > 0 else 0
-
-        flags = _risk_flags(risk_resp)
-
-        identity = _asset_identity_fields(
-            {
-                **(token if isinstance(token, dict) else {}),
-                "addr": addr,
-                "chain": chain,
-                "symbol": token.get("symbol", "???"),
-                "token_id": f"{addr}-{chain}",
-            }
-        )
-        spotlight_data = {
-            **identity,
-            "addr": addr,
-            "pair": f"{token.get('symbol', '???')} / USDC",
-            "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
-            "price_raw": float(token.get("current_price_usd", token.get("price", 0)) or 0),
-            "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
-            "change_positive": float(token.get("token_price_change_24h", token.get("price_change_24h", 0)) or 0) >= 0,
-            "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
-            "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
-            "chart": chart_values,
-            "chart_min": _fmt_price(price_min),
-            "chart_max": _fmt_price(price_max),
-            "chart_min_y": _fmt_y_label(price_min),
-            "chart_max_y": _fmt_y_label(price_max),
-            "chart_t_start": _fmt_chart_time(t_start),
-            "chart_t_mid":   _fmt_chart_time(t_mid),
-            "chart_t_end":   "now",
-            "is_honeypot": flags["is_honeypot"],
-            "is_mintable": flags["is_mintable"],
-            "is_freezable": flags["is_freezable"],
-            "risk_level": flags["risk_level"],
-        }
-        if feed_cursor is not None and feed_total is not None:
-            spotlight_data["cursor"] = feed_cursor
-            spotlight_data["total"] = feed_total
-        conn.loop.create_task(_send_display(conn, "spotlight", spotlight_data))
-
-        # Update WSS kline subscription — use addr as pair_addr (server resolves to main pair)
-        # Map REST interval (minutes) to WSS kline interval format (e.g. "60" → "k60")
-        if hasattr(conn, "ave_wss"):
-            wss_interval = f"k{interval}"
-            conn.ave_wss.set_spotlight(addr, chain, spotlight_data, raw_closes, raw_times,
-                                       interval=wss_interval)
-
-        # Track state for follow-up voice commands ("买这个", "卖出" etc.)
-        sym = token.get("symbol", "???")
         state = _ensure_ave_state(conn)
+        previous_screen = str(state.get("screen") or "")
+        if previous_screen == "portfolio":
+            state["portfolio_selected_token"] = {"addr": addr, "chain": chain}
+            state["portfolio_cursor"] = _coerce_portfolio_cursor(
+                _portfolio_holding_index(state.get("portfolio_holdings", []), addr, chain),
+                len(state.get("portfolio_holdings", [])) if isinstance(state.get("portfolio_holdings"), list) else 0,
+            )
+        interval = str(interval or "60").strip().lower() or "60"
+        resolved_symbol = _resolve_spotlight_symbol(state, addr, chain, symbol, feed_cursor)
+        is_refreshing_current_spotlight = _is_same_spotlight_token(state, addr, chain)
+        origin_hint = _resolve_spotlight_origin_hint(
+            state,
+            addr,
+            chain,
+            previous_screen=previous_screen,
+        )
+        is_watchlisted = _is_watchlisted_for_token(conn, addr, chain)
+        request_seq = int(state.get("spotlight_request_seq", 0) or 0) + 1
+        state["spotlight_request_seq"] = request_seq
+        state["spotlight_origin_hint"] = origin_hint
+        state["spotlight_is_watchlisted"] = bool(is_watchlisted)
         state["screen"] = "spotlight"
         state["current_token"] = {
             "addr": addr,
             "chain": chain,
-            "symbol": sym,
-            "token_id": identity.get("token_id", f"{addr}-{chain}"),
-            "contract_tail": identity.get("contract_tail", ""),
-            "source_tag": identity.get("source_tag", ""),
+            "symbol": resolved_symbol,
+            "token_id": f"{addr}-{chain}",
+            "contract_tail": addr[-4:] if len(addr) >= 4 else addr,
+            "source_tag": "",
+            "origin_hint": origin_hint,
         }
-        # Set default nav_from so B key returns to FEED when entering via voice
-        if "nav_from" not in state:
-            state["nav_from"] = "feed"
+        explicit_nav_from = str(state.get("nav_from") or "").strip().lower()
+        if explicit_nav_from not in {"feed", "portfolio", "signals", "watchlist"}:
+            if previous_screen == "portfolio":
+                state["nav_from"] = "portfolio"
+            elif previous_screen == "browse":
+                if state.get("feed_mode") == "signals" or state.get("feed_source") == "signals":
+                    state["nav_from"] = "signals"
+                elif state.get("feed_mode") == "watchlist" or state.get("feed_source") == "watchlist":
+                    state["nav_from"] = "watchlist"
+                else:
+                    state["nav_from"] = "feed"
+            elif previous_screen in {"feed", "disambiguation"}:
+                state["nav_from"] = "feed"
+            else:
+                state["nav_from"] = "feed"
+        loading_payload = _build_spotlight_loading_payload(
+            addr,
+            chain,
+            symbol=resolved_symbol,
+            interval=interval,
+            feed_cursor=feed_cursor,
+            feed_total=feed_total,
+            origin_hint=origin_hint,
+            is_watchlisted=is_watchlisted,
+        )
+        if is_refreshing_current_spotlight and hasattr(conn, "ave_wss"):
+            transition_payload = {
+                "addr": addr,
+                "chain": chain,
+                "token_id": f"{addr}-{chain}",
+                "symbol": resolved_symbol,
+                "interval": interval,
+            }
+            if feed_cursor is not None and feed_total is not None:
+                transition_payload["cursor"] = feed_cursor
+                transition_payload["total"] = feed_total
+            try:
+                wss_interval = _to_wss_kline_interval(interval)
+                conn.ave_wss.begin_spotlight_transition(
+                    addr,
+                    chain,
+                    transition_payload,
+                    interval=wss_interval,
+                )
+            except Exception:
+                pass
+        elif previous_screen == "spotlight" and hasattr(conn, "ave_wss"):
+            try:
+                wss_interval = _to_wss_kline_interval(interval)
+                conn.ave_wss.begin_spotlight_transition(
+                    addr,
+                    chain,
+                    loading_payload,
+                    interval=wss_interval,
+                )
+            except Exception:
+                pass
+            conn.loop.create_task(_send_display(conn, "spotlight", loading_payload))
+        else:
+            conn.loop.create_task(_send_display(conn, "spotlight", loading_payload))
+        conn.loop.create_task(
+            _ave_token_detail_async(
+                conn,
+                addr=addr,
+                chain=chain,
+                symbol=resolved_symbol,
+                interval=interval,
+                feed_cursor=feed_cursor,
+                feed_total=feed_total,
+                request_seq=request_seq,
+                previous_screen=previous_screen,
+            )
+        )
 
         return ActionResponse(action=Action.NONE,
-            result=f"已展示{sym}详情 [addr={addr}, chain={chain}]", response=None)
+            result=f"已展示{resolved_symbol}详情 [addr={addr}, chain={chain}]", response=None)
 
     except Exception as e:
         logger.bind(tag=TAG).error(f"ave_token_detail error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "查询失败", "body": str(e)[:60],
+                "level": "error", "title": "Lookup Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass
@@ -2127,22 +5042,10 @@ ave_risk_check_desc = {
 
 @register_function("ave_risk_check", ave_risk_check_desc, ToolType.SYSTEM_CTL)
 def ave_risk_check(conn: "ConnectionHandler", addr: str, chain: str = "solana"):
-    """检查合约风险，CRITICAL 时推送 NOTIFY 拦截"""
+    """检查合约风险，返回风险信息但不阻止后续交易流程。"""
     try:
         risk_resp = _data_get(f"/contracts/{addr}-{chain}")
         flags = _risk_flags(risk_resp)
-
-        if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-            conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error",
-                "title": "⚠️ 危险代币已拦截",
-                "body": "蜜罐合约，无法卖出",
-            }))
-            return ActionResponse(
-                action=Action.RESPONSE,
-                result="CRITICAL_BLOCKED",
-                response="警告：检测到蜜罐合约，已拦截交易。该代币买入后无法卖出，请勿操作。"
-            )
 
         logger.bind(tag=TAG).info(f"Risk check passed: {addr}-{chain} level={flags['risk_level']}")
         return ActionResponse(
@@ -2204,48 +5107,29 @@ def ave_buy_token(
                 return ActionResponse(action=Action.RESPONSE,
                     result="no_token", response="请先查看一个代币详情，或告诉我买哪个代币")
 
-        if not symbol:
-            symbol = "TOKEN"
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
 
-        # 1. Risk check
+        # 1. Risk check (informational only; do not block buys)
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             risk_resp = pool.submit(_data_get, f"/contracts/{addr}-{chain}").result()
         flags = _risk_flags(risk_resp)
         if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-            conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error",
-                "title": "⚠️ 危险代币已拦截",
-                "body": "蜜罐合约，交易已取消",
-            }))
-            return ActionResponse(
-                action=Action.RESPONSE,
-                result="BLOCKED",
-                response=f"该代币检测为蜜罐，已拦截买入操作。"
+            logger.bind(tag=TAG).warning(
+                f"ave_buy_token proceeding despite risk flags: {addr}-{chain} "
+                f"level={flags['risk_level']} honeypot={flags['is_honeypot']}"
             )
 
         # 2. Apply defaults
-        sol = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_SOL
+        trade_amount = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_NATIVE_AMOUNT
         tp = tp_pct if tp_pct is not None else DEFAULT_TP_PCT
         sl = sl_pct if sl_pct is not None else DEFAULT_SL_PCT
         slippage = DEFAULT_SLIPPAGE
 
         # 3. Get current price for USD estimate
-        try:
-            sol_token_id = f"{NATIVE_SOL}-solana"
-            price_resp = _data_post("/tokens/price", _build_batch_price_payload([sol_token_id]))
-            price_data = price_resp.get("data", {})
-            if isinstance(price_data, dict):
-                sol_price = float(price_data.get(sol_token_id, {}).get("current_price_usd", 0) or 0)
-            elif isinstance(price_data, list) and price_data:
-                sol_price = float(price_data[0].get("current_price_usd", 0) or 0)
-            else:
-                sol_price = 0
-        except Exception:
-            sol_price = 150.0  # fallback
-
-        usd_est = sol * sol_price
-        in_amount_lamports = int(sol * 1_000_000_000)
+        native_amount_text = _native_amount_label(chain, trade_amount)
+        usd_est = _estimate_native_usd(chain, trade_amount)
+        in_amount_lamports = _native_amount_to_base_units(chain, trade_amount)
 
         # 4. Get assetsId (fall back to SIM_MOCK so CONFIRM screen shows in simulator)
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
@@ -2254,7 +5138,7 @@ def ave_buy_token(
         trade_params = {
             "chain": chain,
             "assetsId": assets_id,
-            "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "inTokenAddress": _native_token_address(chain),
             "outTokenAddress": addr,
             "inAmount": str(in_amount_lamports),
             "swapType": "buy",
@@ -2273,6 +5157,8 @@ def ave_buy_token(
                     "type": "default",
                 },
             ],
+            "paper_native_amount": str(trade_amount),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -2289,8 +5175,8 @@ def ave_buy_token(
             trade_type="market_buy",
             action="BUY",
             symbol=symbol,
-            amount_native=f"{sol} SOL",
-            amount_usd=f"≈ ${usd_est:.2f}",
+            amount_native=native_amount_text,
+            amount_usd=f"${usd_est:.2f}",
             chain=chain,
             asset_token_address=addr,
         )
@@ -2300,12 +5186,12 @@ def ave_buy_token(
         if chain == "solana":
             try:
                 from plugins_func.functions.ave_trade_mgr import _trade_post
-                in_amount_lamports_quote = int(float(sol) * 1e9)
+                in_amount_lamports_quote = _native_amount_to_base_units(chain, trade_amount)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     quote_resp = pool.submit(_trade_post, "/v1/thirdParty/chainWallet/getAmountOut", {
                         "chain": chain,
                         "inAmount": str(in_amount_lamports_quote),
-                        "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+                        "inTokenAddress": _native_token_address(chain),
                         "outTokenAddress": addr,
                         "swapType": "buy",
                     }).result()
@@ -2322,13 +5208,15 @@ def ave_buy_token(
             **identity,
             "trade_id": tid,
             "action": "BUY",
-            "amount_native": f"{sol} SOL",
-            "amount_usd": f"≈ ${usd_est:.2f}",
+            "amount_native": native_amount_text,
+            "amount_usd": f"${usd_est:.2f}",
             "tp_pct": tp,
             "sl_pct": sl,
             "slippage_pct": slippage / 100,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
         }
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            confirm_payload["mode_label"] = "PAPER"
         if out_amount_str:
             confirm_payload["out_amount"] = out_amount_str
         conn.loop.create_task(_send_display(conn, "confirm", confirm_payload))
@@ -2342,7 +5230,7 @@ def ave_buy_token(
         logger.bind(tag=TAG).error(f"ave_buy_token error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "买入失败", "body": str(e)[:60],
+                "level": "error", "title": "Buy Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass
@@ -2389,25 +5277,21 @@ def ave_limit_order(
     """推送限价单确认屏幕"""
     try:
         addr, chain = _split_token_reference(addr, chain)
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
         try:
             risk_resp = _data_get(f"/contracts/{addr}-{chain}")
             flags = _risk_flags(risk_resp)
             if flags["risk_level"] == "CRITICAL" or flags["is_honeypot"]:
-                conn.loop.create_task(_send_display(conn, "notify", {
-                    "level": "error",
-                    "title": "⚠️ 危险代币已拦截",
-                    "body": "蜜罐合约，挂单已取消",
-                }))
-                return ActionResponse(
-                    action=Action.RESPONSE,
-                    result="BLOCKED",
-                    response="该代币检测为蜜罐，已拦截限价买入操作。"
+                logger.bind(tag=TAG).warning(
+                    f"ave_limit_order proceeding despite risk flags: {addr}-{chain} "
+                    f"level={flags['risk_level']} honeypot={flags['is_honeypot']}"
                 )
         except Exception as e:
             logger.bind(tag=TAG).warning(f"ave_limit_order risk check skipped: {e}")
 
-        sol = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_SOL
-        in_amount_lamports = int(sol * 1_000_000_000)
+        trade_amount = in_amount_sol if in_amount_sol is not None else DEFAULT_BUY_NATIVE_AMOUNT
+        native_amount_text = _native_amount_label(chain, trade_amount)
+        in_amount_lamports = _native_amount_to_base_units(chain, trade_amount)
         expire_secs = expire_hours * 3600
         # Fall back to SIM_MOCK so LIMIT_CONFIRM screen shows in simulator
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
@@ -2415,7 +5299,7 @@ def ave_limit_order(
         trade_params = {
             "chain": chain,
             "assetsId": assets_id,
-            "inTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "inTokenAddress": _native_token_address(chain),
             "outTokenAddress": addr,
             "inAmount": str(in_amount_lamports),
             "swapType": "buy",
@@ -2423,6 +5307,9 @@ def ave_limit_order(
             "useMev": True,
             "limitPrice": str(limit_price),
             "expireTime": str(expire_secs),
+            "paper_native_amount": str(trade_amount),
+            "paper_current_price": str(current_price if current_price is not None else ""),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -2436,7 +5323,7 @@ def ave_limit_order(
             trade_type="limit_buy",
             action="LIMIT BUY",
             symbol=symbol,
-            amount_native=f"{sol} SOL",
+            amount_native=native_amount_text,
             amount_usd="",
             screen="limit_confirm",
             chain=chain,
@@ -2458,9 +5345,10 @@ def ave_limit_order(
             "limit_price_raw": limit_price,
             "current_price": _fmt_price(current_price),
             "distance": dist_str,
-            "amount_native": f"{sol} SOL",
+            "amount_native": native_amount_text,
             "expire_hours": expire_hours,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(action=Action.NONE, result=f"limit_pending:{tid}", response=None)
@@ -2506,6 +5394,7 @@ def ave_sell_token(
     """市价卖出，推送 CONFIRM 屏幕"""
     try:
         addr, chain = _split_token_reference(addr, chain)
+        symbol = _resolve_trade_symbol(conn, addr, chain, symbol)
         assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "SIM_MOCK_WALLET")
 
         # Calculate in_amount from holdings
@@ -2524,12 +5413,15 @@ def ave_sell_token(
             "chain": chain,
             "assetsId": assets_id,
             "inTokenAddress": addr,
-            "outTokenAddress": _normalize_quote_token_address(chain, NATIVE_SOL),
+            "outTokenAddress": _native_token_address(chain),
             "inAmount": str(in_amount) if in_amount > 0 else "0",
             "swapType": "sell",
             "slippage": str(DEFAULT_SLIPPAGE),
             "useMev": True,
             "autoSlippage": True,
+            "paper_sell_ratio": str(sell_ratio),
+            "paper_position_amount": str(holdings_amount or ""),
+            "paper_symbol": symbol,
         }
         if chain == "solana":
             trade_params["gas"] = DEFAULT_SOLANA_GAS_LAMPORTS
@@ -2555,12 +5447,13 @@ def ave_sell_token(
             **identity,
             "trade_id": tid,
             "action": "SELL",
-            "amount_native": f"{sell_pct}% 持仓",
+            "amount_native": f"{sell_pct}% holdings",
             "amount_usd": "",
             "tp_pct": None,
             "sl_pct": None,
             "slippage_pct": DEFAULT_SLIPPAGE / 100,
             "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
+            "mode_label": _trade_mode_marker(conn),
         }))
 
         return ActionResponse(action=Action.NONE, result=f"sell_pending:{tid}", response=None)
@@ -2589,24 +5482,65 @@ ave_portfolio_desc = {
 
 
 @register_function("ave_portfolio", ave_portfolio_desc, ToolType.SYSTEM_CTL)
-def ave_portfolio(conn: "ConnectionHandler"):
+def ave_portfolio(conn: "ConnectionHandler", chain_filter: str = ""):
     """查询持仓并推送 PORTFOLIO 屏幕"""
     try:
-        assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
         state = _ensure_ave_state(conn)
+        selected_chain = _normalize_surface_chain(
+            chain_filter or state.get("portfolio_chain"),
+            "solana",
+            allow_all=False,
+        )
+        state["portfolio_chain"] = selected_chain
+
+        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
+            _try_fill_paper_limit_orders(conn)
+            selection_hint = state.pop("portfolio_selected_token", None)
+            state["screen"] = "portfolio"
+            state["portfolio_view"] = "list"
+            payload = _build_paper_portfolio_payload(conn, chain_filter=selected_chain)
+            holdings = payload.get("holdings", [])
+            cursor = payload.get("cursor", 0)
+            if isinstance(selection_hint, dict):
+                selected_idx = _portfolio_holding_index(
+                    holdings,
+                    selection_hint.get("addr", ""),
+                    selection_hint.get("chain", ""),
+                )
+                if selected_idx >= 0:
+                    cursor = selected_idx
+                    payload["cursor"] = cursor
+            conn.loop.create_task(_send_display(conn, "portfolio", payload))
+            state["portfolio_holdings"] = [
+                {
+                    "addr": row.get("addr", ""),
+                    "chain": row.get("chain", ""),
+                    "symbol": row.get("symbol", ""),
+                }
+                for row in holdings
+                if row.get("addr")
+            ]
+            state["portfolio_cursor"] = cursor
+            return ActionResponse(action=Action.NONE, result=f"paper_portfolio:{len(holdings)}tokens", response=None)
+
+        assets_id = os.environ.get("AVE_PROXY_WALLET_ID", "")
+        selection_hint = state.pop("portfolio_selected_token", None)
         state["screen"] = "portfolio"
-        state["portfolio_cursor"] = 0
+        state["portfolio_view"] = "list"
         state["portfolio_holdings"] = []
         if not assets_id:
             # No wallet configured: show empty portfolio in simulator
             explanation_fields = _portfolio_explanation_fields("N/A")
             conn.loop.create_task(_send_display(conn, "portfolio", {
                 "holdings": [],
+                "cursor": 0,
                 "total_usd": "$0",
                 "pnl": "N/A",
                 "pnl_pct": "N/A",
+                "chain_label": _surface_chain_label(selected_chain),
                 **explanation_fields,
             }))
+            state["portfolio_cursor"] = 0
             return ActionResponse(action=Action.NONE, result="no_wallet_sim", response=None)
 
         # Get wallet info (chain addresses)
@@ -2621,14 +5555,17 @@ def ave_portfolio(conn: "ConnectionHandler"):
             explanation_fields = _portfolio_explanation_fields("N/A")
             conn.loop.create_task(_send_display(conn, "portfolio", {
                 "holdings": [],
+                "cursor": 0,
                 "wallets": portfolio_wallets,
                 "holding_source": "getUserByAssetsId",
                 "total_usd": "$0",
                 "pnl": "N/A",
                 "pnl_pct": "N/A",
+                "chain_label": _surface_chain_label(selected_chain),
                 **explanation_fields,
             }))
             state["portfolio_holding_source"] = "getUserByAssetsId"
+            state["portfolio_cursor"] = 0
             return ActionResponse(action=Action.NONE, result="empty_portfolio", response=None)
 
         token_ids, holdings_map, holding_sources = _collect_portfolio_holdings(wallets)
@@ -2636,22 +5573,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
         state["portfolio_holding_source"] = holding_source
 
         # Batch price query
-        prices = {}
-        if token_ids:
-            price_resp = _data_post("/tokens/price", _build_batch_price_payload(token_ids[:50]))
-            price_data = price_resp.get("data", {})
-            if isinstance(price_data, dict):
-                for tid_str, info in price_data.items():
-                    if isinstance(info, dict):
-                        prices[_normalize_batch_price_token_id(tid_str)] = float(
-                            info.get("current_price_usd", 0) or 0
-                        )
-            elif isinstance(price_data, list):
-                for p in price_data:
-                    tid_str = p.get("token_id", "")
-                    prices[_normalize_batch_price_token_id(tid_str)] = float(
-                        p.get("current_price_usd", p.get("price", 0)) or 0
-                    )
+        prices = _price_map_for_token_ids(token_ids)
 
         # Build holdings list
         holdings = []
@@ -2678,18 +5600,36 @@ def ave_portfolio(conn: "ConnectionHandler"):
                 "value_usd": _fmt_volume(value),
                 "_value_raw": value,
                 "price": _fmt_price(price),
+                "avg_cost_usd": "N/A",
+                "pnl": "N/A",
                 "pnl_pct": "N/A",  # Would need cost basis; keep deliberate/neutral
                 "pnl_positive": None,
             })
 
         # Sort by value descending using raw float to avoid suffix parsing errors
         holdings.sort(key=lambda h: h.get("_value_raw", 0), reverse=True)
+        holdings = [
+            row for row in holdings
+            if _normalize_chain_name(row.get("chain"), "solana") == selected_chain
+        ]
+        total_usd = sum(float(row.get("_value_raw", 0) or 0) for row in holdings)
+        cursor = _coerce_portfolio_cursor(state.get("portfolio_cursor", 0), len(holdings))
+        if isinstance(selection_hint, dict):
+            selected_idx = _portfolio_holding_index(
+                holdings,
+                selection_hint.get("addr", ""),
+                selection_hint.get("chain", ""),
+            )
+            if selected_idx >= 0:
+                cursor = selected_idx
 
         explanation_fields = _portfolio_explanation_fields("N/A")
         conn.loop.create_task(_send_display(conn, "portfolio", {
             "holdings": holdings,
+            "cursor": cursor,
             "wallets": portfolio_wallets,
             "holding_source": holding_source,
+            "chain_label": _surface_chain_label(selected_chain),
             "total_usd": _fmt_volume(total_usd),
             "pnl": "N/A",
             "pnl_pct": "N/A",
@@ -2704,7 +5644,7 @@ def ave_portfolio(conn: "ConnectionHandler"):
             for row in holdings
             if row.get("addr")
         ]
-        state["portfolio_cursor"] = 0
+        state["portfolio_cursor"] = cursor
 
         return ActionResponse(action=Action.NONE, result=f"portfolio:{len(holdings)}tokens", response=None)
 
@@ -2712,11 +5652,54 @@ def ave_portfolio(conn: "ConnectionHandler"):
         logger.bind(tag=TAG).error(f"ave_portfolio error: {e}")
         try:
             conn.loop.create_task(_send_display(conn, "notify", {
-                "level": "error", "title": "查询持仓失败", "body": str(e)[:60],
+                "level": "error", "title": "Portfolio Lookup Failed", "body": str(e)[:60],
             }))
         except Exception:
             pass
         return ActionResponse(action=Action.RESPONSE, result=str(e), response="查询持仓失败，请稍后重试")
+
+
+# ---------------------------------------------------------------------------
+# Tool: ave_set_trade_mode
+# ---------------------------------------------------------------------------
+
+ave_set_trade_mode_desc = {
+    "type": "function",
+    "function": {
+        "name": "ave_set_trade_mode",
+        "description": "切换交易模式。real 为真实交易，paper 为模拟交易。切换后 Portfolio、Orders、后续交易确认都会跟随模式。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["real", "paper"],
+                    "description": "目标交易模式"
+                }
+            },
+            "required": ["mode"]
+        }
+    }
+}
+
+
+@register_function("ave_set_trade_mode", ave_set_trade_mode_desc, ToolType.SYSTEM_CTL)
+def ave_set_trade_mode(conn: "ConnectionHandler", mode: str):
+    try:
+        normalized = _set_trade_mode(conn, mode)
+        label = _trade_mode_label(normalized)
+        return ActionResponse(
+            action=Action.NONE,
+            result=f"trade_mode:{normalized}",
+            response=f"Switched to {label}."
+        )
+    except PaperStoreError as exc:
+        logger.bind(tag=TAG).error(f"ave_set_trade_mode error: {exc}")
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result=str(exc),
+            response="Failed to switch trading mode"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2750,10 +5733,12 @@ def ave_confirm_trade(conn: "ConnectionHandler"):
             await _push_submit_ack_transition(conn, result, pending=pending)
             return
         payload = _build_result_payload(result, pending=pending)
-        await _send_display(conn, "result", payload)
+        await _present_trade_result_or_defer(
+            conn,
+            payload,
+            current_trade_id=trade_id,
+        )
         _clear_pending_trade(conn, trade_id)
-        state = _ensure_ave_state(conn)
-        state["screen"] = "result"
 
     conn.loop.create_task(_do())
     return ActionResponse(action=Action.NONE,
@@ -2776,19 +5761,21 @@ ave_cancel_trade_desc = {
 
 @register_function("ave_cancel_trade", ave_cancel_trade_desc, ToolType.SYSTEM_CTL)
 def ave_cancel_trade(conn: "ConnectionHandler"):
-    """取消 pending trade，返回 FEED"""
+    """取消 pending trade，并恢复到发起交易前的页面。"""
     pending = _get_pending_trade(conn)
     trade_id = pending.get("trade_id", "")
     symbol = pending.get("symbol", "TOKEN")
     trade_type = pending.get("trade_type", "")
     if trade_id:
         trade_mgr.cancel(trade_id)
-    _clear_pending_trade(conn, trade_id)
     state = _ensure_ave_state(conn)
-    state["screen"] = "feed"
-    conn.loop.create_task(_send_display(conn, "feed", {"reason": "user_cancel"}))
+    state.pop("deferred_result_queue", None)
+    _clear_pending_trade(conn, trade_id)
+    restore_resp = _restore_cancel_target(conn, pending)
+    if isinstance(restore_resp, ActionResponse) and restore_resp.action != Action.NONE:
+        return restore_resp
     return ActionResponse(action=Action.NONE,
-        result=f"已取消{_label_trade_action(trade_type)}{symbol}，返回热门列表", response=None)
+        result=f"已取消{_label_trade_action(trade_type)}{symbol}，已恢复上一页", response=None)
 
 
 # ---------------------------------------------------------------------------
@@ -2813,6 +5800,7 @@ def ave_back_to_feed(conn: "ConnectionHandler"):
     if pending.get("trade_id") and state.get("screen") in {"confirm", "limit_confirm"}:
         return ave_cancel_trade(conn)
 
-    state["screen"] = "feed"
-    conn.loop.create_task(_send_display(conn, "feed", {"reason": "navigate_back"}))
+    refresh_resp = _refresh_home_feed(conn)
+    if isinstance(refresh_resp, ActionResponse) and refresh_resp.action != Action.NONE:
+        return refresh_resp
     return ActionResponse(action=Action.NONE, result="已返回热门列表", response=None)

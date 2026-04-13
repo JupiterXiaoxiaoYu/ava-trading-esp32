@@ -28,11 +28,12 @@ class TradeActionHandler(TextMessageHandler):
         from plugins_func.functions.ave_trade_mgr import trade_mgr, _send_display
         from plugins_func.functions.ave_tools import (
             _build_result_payload,
-            _ensure_ave_state,
             _get_pending_trade,
             _is_submit_only_ack,
             _clear_pending_trade,
+            _present_trade_result_or_defer,
             _push_submit_ack_transition,
+            ave_cancel_trade,
         )
 
         action = msg_json.get("action", "")
@@ -59,18 +60,16 @@ class TradeActionHandler(TextMessageHandler):
                 await _push_submit_ack_transition(conn, result, pending=pending)
                 return
             payload = _build_result_payload(result, pending=pending)
-            await _send_display(conn, "result", payload)
+            await _present_trade_result_or_defer(
+                conn,
+                payload,
+                current_trade_id=trade_id,
+            )
             _clear_pending_trade(conn, trade_id)
-            state = _ensure_ave_state(conn)
-            state["screen"] = "result"
 
         elif action == "cancel":
-            trade_mgr.cancel(trade_id)
             logger.bind(tag=TAG).info(f"Trade {trade_id} cancelled by user")
-            _clear_pending_trade(conn, trade_id)
-            state = _ensure_ave_state(conn)
-            state["screen"] = "feed"
-            await _send_display(conn, "feed", {"reason": "user_cancel"})
+            ave_cancel_trade(conn)
 
         else:
             logger.bind(tag=TAG).warning(f"Unknown trade action: {action}")

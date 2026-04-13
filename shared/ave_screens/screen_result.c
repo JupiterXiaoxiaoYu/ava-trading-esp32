@@ -2,15 +2,16 @@
  * @file screen_result.c
  * @brief RESULT screen — trade success/failure display (manual dismiss only).
  *
- * Layout (320x240 landscape, centered vertically):
+ * Layout (320x240 landscape, vertically stacked):
  *   Large icon: checkmark (success, green) or X (fail, red)  font=32
  *   Title: "Bought!" or "Trade Failed"  font=24
- *   Line 1: amount or error message  font=16
- *   Line 2: TP/SL (success only)  font=12, gray
- *   Line 3: TX id (success only)  font=12, gray
+ *   Line 1: amount or error message  font=14, wrap
+ *   Line 2: subtitle / TP-SL  font=12, gray, wrap
+ *   Line 3: TX id  font=12, gray, wrap
  *   y=215~240: bottom bar "press any key"
  */
 #include "ave_screen_manager.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -58,14 +59,8 @@ static int _get_str(const char *json, const char *key, char *out, int n)
     if (!p) return 0;
     p += strlen(needle);
     while (*p == ' ' || *p == ':') p++;
-    if (*p == '"') {
-        p++;
-        int i = 0;
-        while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-        out[i] = '\0';
-        return 1;
-    }
-    return 0;
+    if (*p != '"') return 0;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _get_bool(const char *json, const char *key)
@@ -102,6 +97,74 @@ static void _trim_in_place(char *s)
     }
 }
 
+static void _split_copy_two_lines(const char *src, char *line1, size_t line1_n, char *line2, size_t line2_n)
+{
+    size_t len;
+    size_t split_at;
+    const char *sentence_break;
+    size_t line1_end;
+    size_t line2_start;
+    size_t i;
+
+    if (!line1 || line1_n == 0 || !line2 || line2_n == 0) return;
+    line1[0] = '\0';
+    line2[0] = '\0';
+    if (!src || !src[0]) return;
+
+    len = strlen(src);
+    if (len < 34) {
+        snprintf(line1, line1_n, "%.*s", (int)(line1_n - 1), src);
+        return;
+    }
+
+    /* Prefer breaking at a sentence boundary so phrases like
+     * "Confirmation timed out. Nothing was executed." render as:
+     *   Confirmation timed out.
+     *   Nothing was executed.
+     */
+    sentence_break = strstr(src, ". ");
+    if (!sentence_break) sentence_break = strstr(src, "! ");
+    if (!sentence_break) sentence_break = strstr(src, "? ");
+    if (sentence_break) {
+        split_at = (size_t)(sentence_break - src + 1);
+        if (split_at >= 12 && split_at < len - 3) {
+            line1_end = split_at;
+            while (line1_end > 0 && src[line1_end - 1] == ' ') line1_end--;
+            snprintf(line1, line1_n, "%.*s", (int)line1_end, src);
+
+            line2_start = split_at;
+            while (src[line2_start] == ' ') line2_start++;
+            snprintf(line2, line2_n, "%s", src + line2_start);
+            return;
+        }
+    }
+
+    split_at = len / 2;
+    if (split_at > 28) split_at = 28;
+    for (i = split_at; i > 12; i--) {
+        if (src[i] == ' ') {
+            split_at = i;
+            break;
+        }
+    }
+    if (i <= 12) {
+        for (i = split_at; src[i] && i < len; i++) {
+            if (src[i] == ' ') {
+                split_at = i;
+                break;
+            }
+        }
+    }
+
+    line1_end = split_at;
+    while (line1_end > 0 && src[line1_end - 1] == ' ') line1_end--;
+    snprintf(line1, line1_n, "%.*s", (int)line1_end, src);
+
+    line2_start = split_at;
+    while (src[line2_start] == ' ') line2_start++;
+    snprintf(line2, line2_n, "%s", src + line2_start);
+}
+
 static void _request_back(void)
 {
     /* Frozen Task 3 policy: RESULT dismiss is fully manual-only.
@@ -120,41 +183,41 @@ static void _build_screen(void)
 
     /* Icon (checkmark or X) — use font 32 since 48 may not be available */
     s_lbl_icon = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_icon, LV_ALIGN_CENTER, 0, -70);
+    lv_obj_align(s_lbl_icon, LV_ALIGN_TOP_MID, 0, 28);
     lv_obj_set_style_text_font(s_lbl_icon, &lv_font_montserrat_32, 0);
 
     /* Title */
     s_lbl_title = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_title, LV_ALIGN_CENTER, 0, -30);
-    lv_obj_set_width(s_lbl_title, 300);
-    lv_label_set_long_mode(s_lbl_title, LV_LABEL_LONG_CLIP);
+    lv_obj_align(s_lbl_title, LV_ALIGN_TOP_MID, 0, 72);
+    lv_obj_set_width(s_lbl_title, 284);
+    lv_label_set_long_mode(s_lbl_title, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(s_lbl_title, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_title, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_align(s_lbl_title, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Line 1: amount or error */
     s_lbl_line1 = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_line1, LV_ALIGN_CENTER, 0, 5);
-    lv_obj_set_width(s_lbl_line1, 300);
-    lv_label_set_long_mode(s_lbl_line1, LV_LABEL_LONG_CLIP);
+    lv_obj_align(s_lbl_line1, LV_ALIGN_TOP_MID, 0, 112);
+    lv_obj_set_width(s_lbl_line1, 284);
+    lv_label_set_long_mode(s_lbl_line1, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(s_lbl_line1, COLOR_WHITE, 0);
-    lv_obj_set_style_text_font(s_lbl_line1, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_lbl_line1, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_align(s_lbl_line1, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Line 2: TP/SL (success only) */
     s_lbl_line2 = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_line2, LV_ALIGN_CENTER, 0, 30);
-    lv_obj_set_width(s_lbl_line2, 300);
-    lv_label_set_long_mode(s_lbl_line2, LV_LABEL_LONG_CLIP);
+    lv_obj_align(s_lbl_line2, LV_ALIGN_TOP_MID, 0, 146);
+    lv_obj_set_width(s_lbl_line2, 284);
+    lv_label_set_long_mode(s_lbl_line2, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(s_lbl_line2, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_line2, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_line2, LV_TEXT_ALIGN_CENTER, 0);
 
     /* Line 3: TX id (success only) */
     s_lbl_line3 = lv_label_create(s_screen);
-    lv_obj_align(s_lbl_line3, LV_ALIGN_CENTER, 0, 48);
-    lv_obj_set_width(s_lbl_line3, 300);
-    lv_label_set_long_mode(s_lbl_line3, LV_LABEL_LONG_CLIP);
+    lv_obj_align(s_lbl_line3, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_set_width(s_lbl_line3, 284);
+    lv_label_set_long_mode(s_lbl_line3, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(s_lbl_line3, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_line3, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(s_lbl_line3, LV_TEXT_ALIGN_CENTER, 0);
@@ -188,16 +251,28 @@ void screen_result_show(const char *json_data)
 
     char title[64] = {0};
     char subtitle[128] = {0};
+    char mode_label[16] = {0};
+    char explain_state[32] = {0};
     _get_str(json_data, "title", title, sizeof(title));
     _get_str(json_data, "subtitle", subtitle, sizeof(subtitle));
+    _get_str(json_data, "mode_label", mode_label, sizeof(mode_label));
+    _get_str(json_data, "explain_state", explain_state, sizeof(explain_state));
     _trim_in_place(title);
     _trim_in_place(subtitle);
+    _trim_in_place(mode_label);
+    _trim_in_place(explain_state);
 
     if (success) {
         lv_label_set_text(s_lbl_icon, LV_SYMBOL_OK);
         lv_obj_set_style_text_color(s_lbl_icon, COLOR_GREEN, 0);
 
-        lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Success");
+        if (_has_text(mode_label) && _has_text(title)) {
+            char title_buf[96];
+            snprintf(title_buf, sizeof(title_buf), "[%s] %s", mode_label, title);
+            lv_label_set_text(s_lbl_title, title_buf);
+        } else {
+            lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Success");
+        }
 
         /* Amount line */
         char out_amount[64] = {0}, amount[64] = {0}, amount_usd[32] = {0};
@@ -264,16 +339,36 @@ void screen_result_show(const char *json_data)
         lv_label_set_text(s_lbl_icon, LV_SYMBOL_CLOSE);
         lv_obj_set_style_text_color(s_lbl_icon, COLOR_RED, 0);
 
-        lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Failed");
+        if (_has_text(mode_label) && _has_text(title)) {
+            char title_buf[96];
+            snprintf(title_buf, sizeof(title_buf), "[%s] %s", mode_label, title);
+            lv_label_set_text(s_lbl_title, title_buf);
+        } else {
+            lv_label_set_text(s_lbl_title, _has_text(title) ? title : "Failed");
+        }
 
         /* Error line */
         char error[128] = {0};
+        char error_line1[80] = {0};
+        char error_line2[96] = {0};
         _get_str(json_data, "error", error, sizeof(error));
         _trim_in_place(error);
-        lv_label_set_text(s_lbl_line1, _has_text(error) ? error : "Unknown error");
+        if (strcmp(explain_state, "confirm_timeout") == 0) {
+            snprintf(error_line1, sizeof(error_line1), "Confirmation timed out.");
+            snprintf(error_line2, sizeof(error_line2), "Nothing was executed.");
+        } else if (_has_text(error)) {
+            _split_copy_two_lines(error, error_line1, sizeof(error_line1), error_line2, sizeof(error_line2));
+        }
+        lv_label_set_text(s_lbl_line1, _has_text(error_line1) ? error_line1 : (_has_text(error) ? error : "Unknown error"));
 
-        if (_has_text(subtitle) && strcmp(subtitle, error) != 0) {
+        if (strcmp(explain_state, "confirm_timeout") == 0) {
+            lv_label_set_text(s_lbl_line2, error_line2);
+            lv_obj_clear_flag(s_lbl_line2, LV_OBJ_FLAG_HIDDEN);
+        } else if (_has_text(subtitle) && strcmp(subtitle, error) != 0) {
             lv_label_set_text(s_lbl_line2, subtitle);
+            lv_obj_clear_flag(s_lbl_line2, LV_OBJ_FLAG_HIDDEN);
+        } else if (_has_text(error_line2)) {
+            lv_label_set_text(s_lbl_line2, error_line2);
             lv_obj_clear_flag(s_lbl_line2, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_label_set_text(s_lbl_line2, "");

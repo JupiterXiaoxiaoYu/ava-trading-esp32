@@ -46,9 +46,12 @@ class KeyActionHandler(TextMessageHandler):
         from plugins_func.functions.ave_tools import (
             ave_token_detail, ave_buy_token, ave_portfolio,
             ave_sell_token, ave_get_trending, ave_cancel_trade,
-            ave_list_orders,
+            ave_list_orders, ave_list_signals, ave_open_watchlist,
+            ave_portfolio_activity_detail,
+            ave_set_trade_mode, ave_back_to_feed,
+            ave_remove_current_watchlist_token,
             _get_pending_trade, _restore_search_session_payload,
-            _set_feed_navigation_state,
+            _set_feed_navigation_state, _build_explorer_payload,
             _send_display, _set_search_session_cursor, _split_token_reference,
         )
 
@@ -70,6 +73,16 @@ class KeyActionHandler(TextMessageHandler):
                 return None
             return normalized
 
+        def _cycle_action_chain(current_value, *, allow_all=False):
+            order = ["solana", "base", "eth", "bsc"]
+            if allow_all:
+                order = ["all"] + order
+            normalized = str(current_value or "").strip().lower()
+            if normalized not in order:
+                normalized = order[0]
+            next_idx = (order.index(normalized) + 1) % len(order)
+            return order[next_idx]
+
         action = msg_json.get("action", "")
         token_id = msg_json.get("token_id", "")
         raw_chain, token_addr, token_chain, token_has_chain = _resolve_asset_ref(
@@ -88,19 +101,36 @@ class KeyActionHandler(TextMessageHandler):
             try:
                 state = getattr(conn, "ave_state", {})
                 try:
-                    cursor = int(msg_json.get("cursor"))
+                    raw_cursor = msg_json.get("cursor")
+                    cursor = int(raw_cursor) if raw_cursor is not None else None
                 except (TypeError, ValueError):
                     cursor = None
+                feed_list = state.get("feed_token_list", [])
+                feed_total = len(feed_list) if isinstance(feed_list, list) and feed_list else None
+                if cursor is None and feed_total:
+                    try:
+                        cursor = int(state.get("feed_cursor", 0))
+                    except (TypeError, ValueError):
+                        cursor = 0
+                if cursor is not None and feed_total:
+                    cursor = max(0, min(cursor, feed_total - 1))
                 if cursor is not None:
                     state["feed_cursor"] = cursor
                     if state.get("feed_mode") == "search":
                         state["search_cursor"] = cursor
                         _set_search_session_cursor(state, cursor)
-                    conn.ave_state = state
-                feed_total = None
-                feed_list = state.get("feed_token_list", [])
-                if isinstance(feed_list, list) and feed_list:
-                    feed_total = len(feed_list)
+                origin = str(msg_json.get("origin") or "").strip().lower()
+                if origin not in {"feed", "signals", "watchlist", "portfolio"}:
+                    if state.get("screen") == "portfolio":
+                        origin = "portfolio"
+                    elif state.get("feed_mode") == "signals" or state.get("feed_source") == "signals":
+                        origin = "signals"
+                    elif state.get("feed_mode") == "watchlist" or state.get("feed_source") == "watchlist":
+                        origin = "watchlist"
+                    else:
+                        origin = "feed"
+                state["nav_from"] = origin
+                conn.ave_state = state
                 ave_token_detail(
                     conn,
                     addr=token_addr,
@@ -247,22 +277,139 @@ class KeyActionHandler(TextMessageHandler):
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action feed_platform error: {e}")
 
+        elif action == "signals":
+            logger.bind(tag=TAG).info("key_action signals")
+            try:
+                ave_list_signals(conn)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action signals error: {e}")
+
+        elif action == "watchlist":
+            logger.bind(tag=TAG).info("key_action watchlist")
+            try:
+                ave_open_watchlist(conn)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action watchlist error: {e}")
+
+        elif action == "signals_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            order = ["solana", "bsc"]
+            current_chain = str(state.get("signals_chain") or "").strip().lower()
+            if current_chain not in order:
+                current_chain = order[0]
+            next_chain = order[(order.index(current_chain) + 1) % len(order)]
+            logger.bind(tag=TAG).info(f"key_action signals_chain_cycle -> {next_chain}")
+            try:
+                ave_list_signals(conn, chain=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action signals_chain_cycle error: {e}")
+
+        elif action == "watchlist_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            next_chain = _cycle_action_chain(state.get("watchlist_chain"), allow_all=True)
+            logger.bind(tag=TAG).info(f"key_action watchlist_chain_cycle -> {next_chain}")
+            try:
+                ave_open_watchlist(conn, cursor=0, chain_filter=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action watchlist_chain_cycle error: {e}")
+
+        elif action == "portfolio_chain_cycle":
+            state = getattr(conn, "ave_state", {})
+            next_chain = _cycle_action_chain(state.get("portfolio_chain"), allow_all=False)
+            logger.bind(tag=TAG).info(f"key_action portfolio_chain_cycle -> {next_chain}")
+            try:
+                ave_portfolio(conn, chain_filter=next_chain)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action portfolio_chain_cycle error: {e}")
+
+        elif action == "explorer_sync":
+            logger.bind(tag=TAG).info("key_action explorer_sync")
+            try:
+                await _send_display(conn, "explorer", _build_explorer_payload(conn))
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action explorer_sync error: {e}")
+
+        elif action == "feed_home":
+            logger.bind(tag=TAG).info("key_action feed_home")
+            try:
+                ave_back_to_feed(conn)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action feed_home error: {e}")
+
+        elif action == "trade_mode_set":
+            requested_mode = str(msg_json.get("mode", "") or "").strip().lower()
+            logger.bind(tag=TAG).info(f"key_action trade_mode_set mode={requested_mode}")
+            try:
+                ave_set_trade_mode(conn, mode=requested_mode)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action trade_mode_set error: {e}")
+
+        elif action == "watchlist_remove":
+            state = getattr(conn, "ave_state", {})
+            feed_rows = state.get("feed_token_list", [])
+            try:
+                cursor = int(msg_json.get("cursor", state.get("feed_cursor", 0)))
+            except (TypeError, ValueError):
+                cursor = state.get("feed_cursor", 0)
+            if isinstance(feed_rows, list) and feed_rows:
+                cursor = max(0, min(cursor, len(feed_rows) - 1))
+            else:
+                cursor = 0
+            state["feed_cursor"] = cursor
+            conn.ave_state = state
+
+            selected_token = {}
+            if isinstance(feed_rows, list) and 0 <= cursor < len(feed_rows):
+                row = feed_rows[cursor]
+                if isinstance(row, dict):
+                    selected_token = {
+                        "addr": row.get("addr", ""),
+                        "chain": row.get("chain", ""),
+                        "symbol": row.get("symbol", ""),
+                    }
+            if token_addr and token_has_chain:
+                selected_token["addr"] = token_addr
+                selected_token["chain"] = token_chain
+            if (not selected_token.get("symbol")) and isinstance(feed_rows, list) and 0 <= cursor < len(feed_rows):
+                row = feed_rows[cursor]
+                if isinstance(row, dict):
+                    selected_token["symbol"] = str(row.get("symbol") or "").strip()
+
+            if not selected_token.get("addr") or not selected_token.get("chain"):
+                logger.bind(tag=TAG).warning("key_action watchlist_remove missing token context")
+                return
+
+            logger.bind(tag=TAG).info(
+                f"key_action watchlist_remove cursor={cursor} addr={selected_token['addr']} chain={selected_token['chain']}"
+            )
+            try:
+                ave_remove_current_watchlist_token(conn, token=selected_token, cursor=cursor)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action watchlist_remove error: {e}")
+
         elif action in ("feed_prev", "feed_next"):
             state = getattr(conn, "ave_state", {})
             lst = state.get("feed_token_list", [])
             if not lst:
-                return  # No list loaded yet, silent return
+                logger.bind(tag=TAG).info(f"key_action {action} ignored: feed_token_list is empty")
+                return
 
             cursor = state.get("feed_cursor", 0)
             is_next = (action == "feed_next")
 
             if is_next:
                 if cursor >= len(lst) - 1:
-                    return  # At last item — boundary, do nothing
+                    logger.bind(tag=TAG).info(
+                        f"key_action {action} ignored at boundary cursor={cursor} size={len(lst)}"
+                    )
+                    return
                 cursor += 1
             else:
                 if cursor <= 0:
-                    return  # At first item — boundary, do nothing
+                    logger.bind(tag=TAG).info(
+                        f"key_action {action} ignored at boundary cursor={cursor} size={len(lst)}"
+                    )
+                    return
                 cursor -= 1
 
             state["feed_cursor"] = cursor
@@ -315,6 +462,20 @@ class KeyActionHandler(TextMessageHandler):
                     ave_portfolio(conn)
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"key_action back→portfolio error: {e}")
+            elif nav_from == "signals":
+                logger.bind(tag=TAG).info("key_action back → signals (nav_from)")
+                try:
+                    ave_list_signals(conn)
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→signals(nav_from) error: {e}")
+            elif nav_from == "watchlist":
+                logger.bind(tag=TAG).info("key_action back → watchlist (nav_from)")
+                try:
+                    ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0))
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→watchlist(nav_from) error: {e}")
             elif state.get("feed_mode") == "search":
                 logger.bind(tag=TAG).info("key_action back → restore search feed")
                 try:
@@ -333,6 +494,20 @@ class KeyActionHandler(TextMessageHandler):
                     return
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"key_action back→search error: {e}")
+            elif state.get("feed_mode") == "signals" or state.get("feed_source") == "signals":
+                logger.bind(tag=TAG).info("key_action back → signals")
+                try:
+                    ave_list_signals(conn)
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→signals error: {e}")
+            elif state.get("feed_mode") == "watchlist" or state.get("feed_source") == "watchlist":
+                logger.bind(tag=TAG).info("key_action back → watchlist")
+                try:
+                    ave_open_watchlist(conn, cursor=state.get("feed_cursor", 0))
+                    return
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"key_action back→watchlist error: {e}")
             else:
                 # Default: return to FEED (re-fetch last source/platform)
                 source = state.get("feed_source", "trending")
@@ -363,6 +538,25 @@ class KeyActionHandler(TextMessageHandler):
                 ave_token_detail(conn, addr=token_addr, chain=token_chain)
             except Exception as e:
                 logger.bind(tag=TAG).error(f"key_action portfolio_watch error: {e}")
+
+        elif action == "portfolio_activity_detail":
+            if not token_addr:
+                logger.bind(tag=TAG).warning("key_action portfolio_activity_detail missing token_id")
+                return
+            if not token_has_chain:
+                logger.bind(tag=TAG).warning("key_action portfolio_activity_detail missing chain")
+                return
+            symbol = str(msg_json.get("symbol", "") or "").strip()
+            logger.bind(tag=TAG).info(
+                f"key_action portfolio_activity_detail {token_addr} chain={token_chain} symbol={symbol}"
+            )
+            state = getattr(conn, "ave_state", {})
+            state["nav_from"] = "portfolio"
+            conn.ave_state = state
+            try:
+                ave_portfolio_activity_detail(conn, addr=token_addr, chain=token_chain, symbol=symbol)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"key_action portfolio_activity_detail error: {e}")
 
         elif action == "portfolio_sell":
             addr = msg_json.get("addr", "")

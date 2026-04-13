@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -125,7 +126,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             amount_native="100% holdings",
         )
 
-        with patch("plugins_func.functions.ave_trade_mgr._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_trade_mgr._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await trade_mgr._timeout("timeout-1", 0)
 
         self.assertEqual(sent[0][0], "result")
@@ -135,6 +137,44 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0][1]["explain_state"], "confirm_timeout")
         self.assertNotIn("pending_trade", conn.ave_state)
         self.assertEqual(conn.ave_state.get("screen"), "result")
+
+    async def test_trade_timeout_defers_when_user_left_confirm_flow(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        trade_mgr._pending["timeout-2"] = {
+            "type": "market_sell",
+            "params": {},
+            "conn": conn,
+            "ts": 0,
+        }
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="timeout-2",
+            trade_type="market_sell",
+            action="SELL",
+            symbol="BONK",
+            amount_native="100% holdings",
+        )
+        conn.ave_state["screen"] = "portfolio"
+
+        with patch("plugins_func.functions.ave_trade_mgr._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await trade_mgr._timeout("timeout-2", 0)
+
+        self.assertEqual(sent, [])
+        self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertEqual(conn.ave_state.get("screen"), "portfolio")
+        queue = conn.ave_state.get("deferred_result_queue", [])
+        self.assertEqual(len(queue), 1)
+        self.assertFalse(queue[0]["success"])
+        self.assertEqual(queue[0]["title"], "Trade Cancelled")
+        self.assertEqual(queue[0]["explain_state"], "confirm_timeout")
+        self.assertIn("timed out", queue[0]["subtitle"].lower())
 
     async def test_wss_confirmed_sell_event_uses_result_contract(self):
         loop = asyncio.get_running_loop()
@@ -156,7 +196,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             "txHash": "deadbeefcafebabe1234",
         })
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await manager._handle_trade_event(raw)
 
         self.assertEqual(sent[0][0], "result")
@@ -168,6 +209,52 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["tx_id"], "deadbeefcafe")
         self.assertNotIn("tx_hash", payload)
         self.assertEqual(conn.ave_state.get("screen"), "result")
+
+    async def test_wss_submitted_terminal_result_defers_when_user_is_in_portfolio(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+        manager = ave_wss.AveWssManager(conn)
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        conn.ave_state["screen"] = "portfolio"
+        conn.ave_state["submitted_trades"] = [{
+            "trade_id": "sell-1",
+            "swap_order_id": "swap-order-123",
+            "trade_type": "market_sell",
+            "symbol": "BONK",
+            "chain": "solana",
+            "asset_token_address": "bonk-sol",
+        }]
+
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await manager._handle_trade_event(json.dumps({
+                "topic": "botswap",
+                "status": "confirmed",
+                "swapType": "sell",
+                "chain": "solana",
+                "swapOrderId": "swap-order-123",
+                "inTokenSymbol": "BONK",
+                "inTokenAddress": "bonk-sol",
+                "outAmount": "1.5 SOL",
+                "amountUsd": "225.00",
+                "txHash": "deadbeefcafebabe1234",
+            }))
+
+        self.assertEqual(sent, [])
+        self.assertEqual(conn.ave_state.get("screen"), "portfolio")
+        self.assertEqual(conn.ave_state.get("submitted_trades", []), [])
+        queue = conn.ave_state.get("deferred_result_queue", [])
+        self.assertEqual(len(queue), 1)
+        self.assertTrue(queue[0]["success"])
+        self.assertEqual(queue[0]["title"], "Sold!")
+        self.assertEqual(queue[0]["out_amount"], "1.5 SOL")
+        self.assertEqual(queue[0]["amount_usd"], "225.00")
+        self.assertEqual(queue[0]["tx_id"], "deadbeefcafe")
+        self.assertEqual(queue[0]["explain_state"], "deferred_result")
 
     async def test_wss_terminal_trade_events_do_not_hijack_confirm_screen_without_correlation(self):
         loop = asyncio.get_running_loop()
@@ -187,7 +274,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             amount_native="100% holdings",
         )
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await manager._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "error",
@@ -215,7 +303,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             amount_native="0.10 SOL",
         )
 
-        with patch("plugins_func.functions.ave_wss._send_display", new=AsyncMock()):
+        with patch("plugins_func.functions.ave_wss._send_display", new=AsyncMock()), \
+             patch("plugins_func.functions.ave_tools._send_display", new=AsyncMock()):
             await manager._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "confirmed",
@@ -245,7 +334,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             amount_native="100% holdings",
         )
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await manager._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "confirmed",
@@ -280,7 +370,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             amount_native="100% holdings",
         )
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await manager._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "confirmed",
@@ -378,7 +469,8 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             },
         ]
 
-        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display):
+        with patch("plugins_func.functions.ave_wss._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await manager._handle_trade_event(json.dumps({
                 "topic": "botswap",
                 "status": "confirmed",
@@ -471,6 +563,53 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("pending_trade", conn.ave_state)
         self.assertEqual(conn.ave_state.get("screen"), "feed")
 
+    async def test_ave_confirm_trade_defers_terminal_result_when_user_leaves_confirm_flow(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        async def _fake_confirm(trade_id):
+            self.assertEqual(trade_id, "sell-2")
+            conn.ave_state["screen"] = "portfolio"
+            return {
+                "trade_type": "market_sell",
+                "status": 0,
+                "data": {
+                    "outAmount": "1.5 SOL",
+                    "outAmountUsd": "225.00",
+                    "txId": "lateconfirmcafebabe",
+                },
+            }
+
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="sell-2",
+            trade_type="market_sell",
+            action="SELL",
+            symbol="BONK",
+            amount_native="100% holdings",
+        )
+
+        with patch.object(ave_tools.trade_mgr, "confirm", side_effect=_fake_confirm), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            ave_tools.ave_confirm_trade(conn)
+            await asyncio.sleep(0)
+
+        self.assertEqual(sent, [])
+        self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertEqual(conn.ave_state.get("screen"), "portfolio")
+        queue = conn.ave_state.get("deferred_result_queue", [])
+        self.assertEqual(len(queue), 1)
+        self.assertTrue(queue[0]["success"])
+        self.assertEqual(queue[0]["title"], "Sold!")
+        self.assertEqual(queue[0]["out_amount"], "1.5 SOL")
+        self.assertEqual(queue[0]["amount_usd"], "225.00")
+        self.assertEqual(queue[0]["tx_id"], "lateconfirmc")
+        self.assertEqual(queue[0]["explain_state"], "deferred_result")
+
     async def test_submit_only_swap_ack_background_reconcile_pushes_terminal_result(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
@@ -548,6 +687,58 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Submitted", sent[0][1]["title"])
         self.assertNotIn("pending_trade", conn.ave_state)
         self.assertEqual(conn.ave_state.get("screen"), "feed")
+
+    async def test_trade_action_confirm_defers_terminal_result_when_user_leaves_confirm_flow(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        handler = TradeActionHandler()
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        async def _fake_confirm(trade_id):
+            self.assertEqual(trade_id, "sell-3")
+            conn.ave_state["screen"] = "spotlight"
+            return {
+                "trade_type": "market_sell",
+                "status": 0,
+                "data": {
+                    "outAmount": "1.5 SOL",
+                    "outAmountUsd": "225.00",
+                    "txId": "latehandlercafebabe",
+                },
+            }
+
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="sell-3",
+            trade_type="market_sell",
+            action="SELL",
+            symbol="BONK",
+            amount_native="100% holdings",
+        )
+
+        with patch.object(trade_mgr, "confirm", side_effect=_fake_confirm), \
+             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display), \
+             patch("plugins_func.functions.ave_trade_mgr._send_display", side_effect=_fake_send_display):
+            await handler.handle(conn, {
+                "type": "trade_action",
+                "action": "confirm",
+                "trade_id": "sell-3",
+            })
+
+        self.assertEqual(sent, [])
+        self.assertNotIn("pending_trade", conn.ave_state)
+        self.assertEqual(conn.ave_state.get("screen"), "spotlight")
+        queue = conn.ave_state.get("deferred_result_queue", [])
+        self.assertEqual(len(queue), 1)
+        self.assertTrue(queue[0]["success"])
+        self.assertEqual(queue[0]["title"], "Sold!")
+        self.assertEqual(queue[0]["out_amount"], "1.5 SOL")
+        self.assertEqual(queue[0]["amount_usd"], "225.00")
+        self.assertEqual(queue[0]["tx_id"], "latehandlerc")
+        self.assertEqual(queue[0]["explain_state"], "deferred_result")
 
     async def test_ave_sell_token_uses_proxy_payload_shape_and_solana_gas(self):
         loop = asyncio.get_running_loop()
@@ -786,6 +977,37 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(conn.ave_state.get("deferred_result_queue", []), [])
 
+    async def test_present_trade_result_defers_when_user_is_not_on_feed(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        sent = []
+
+        async def _fake_send_display(conn, screen, payload):
+            sent.append((screen, payload))
+
+        conn.ave_state["screen"] = "portfolio"
+
+        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+            await ave_tools._present_trade_result_or_defer(
+                conn,
+                {"title": "Settled", "tx_id": "late-123"},
+                current_trade_id="buy-123",
+            )
+            await asyncio.sleep(0.1)
+            self.assertEqual(
+                conn.ave_state.get("deferred_result_queue", []),
+                [{"title": "Settled", "tx_id": "late-123", "explain_state": "deferred_result"}],
+            )
+            self.assertFalse(any(screen == "result" for screen, _ in sent))
+
+            conn.ave_state["screen"] = "feed"
+            await asyncio.sleep(0.2)
+
+        self.assertEqual(sent[-1][0], "result")
+        self.assertEqual(sent[-1][1]["title"], "Settled")
+        self.assertEqual(conn.ave_state.get("screen"), "result")
+        self.assertEqual(conn.ave_state.get("deferred_result_queue", []), [])
+
     async def test_key_action_cancel_trade_invokes_cancel_helper(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
@@ -799,11 +1021,6 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_ave_cancel_trade_clears_pending_and_returns_feed(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
-        sent = []
-
-        async def _fake_send_display(conn, screen, payload):
-            sent.append((screen, payload))
-
         ave_tools._set_pending_trade(
             conn,
             trade_id="cancel-1",
@@ -812,34 +1029,218 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             symbol="BONK",
             amount_native="0.1 SOL",
         )
+        conn.ave_state.update(
+            {
+                "feed_source": "gainer",
+                "feed_mode": "search",
+                "search_query": "BONK",
+                "search_results": [{"token_id": "token-1-solana", "chain": "solana", "symbol": "BONK"}],
+                "disambiguation_items": [{"token_id": "token-1-solana", "chain": "solana", "symbol": "BONK"}],
+                "nav_from": "portfolio",
+            }
+        )
 
         with patch.object(ave_tools.trade_mgr, "cancel") as mock_cancel, \
-             patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending, \
+             patch("plugins_func.functions.ave_tools._send_display", new=AsyncMock()) as mock_send:
             resp = ave_tools.ave_cancel_trade(conn)
             await asyncio.sleep(0)
 
         mock_cancel.assert_called_once_with("cancel-1")
+        mock_trending.assert_called_once_with(conn, topic="gainer")
+        mock_send.assert_not_awaited()
         self.assertNotIn("pending_trade", conn.ave_state)
         self.assertEqual(conn.ave_state.get("screen"), "feed")
-        self.assertEqual(sent[0], ("feed", {"reason": "user_cancel"}))
+        self.assertEqual(conn.ave_state.get("feed_mode"), "standard")
+        self.assertNotIn("search_query", conn.ave_state)
+        self.assertNotIn("search_results", conn.ave_state)
+        self.assertNotIn("disambiguation_items", conn.ave_state)
+        self.assertNotIn("nav_from", conn.ave_state)
         self.assertIn("返回热门列表", resp.result)
 
-    async def test_ave_back_to_feed_pushes_feed_navigation_event(self):
+    async def test_ave_cancel_trade_invalidates_live_feed_before_home_feed_rebuild(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
-        conn.ave_state["screen"] = "spotlight"
-        sent = []
+        conn.ave_wss = ave_wss.AveWssManager(conn)
+        conn.ave_state["feed_session"] = 5
+        conn.ave_wss.set_feed_tokens(
+            [
+                {
+                    "token_id": "token-old-solana",
+                    "chain": "solana",
+                    "symbol": "OLD",
+                    "price": "$1.0000",
+                    "price_raw": 1.0,
+                    "change_24h": "+0.00%",
+                    "change_positive": True,
+                }
+            ],
+            chain="solana",
+        )
+        conn.ave_wss._feed_dirty = True
+        conn.ave_wss._last_feed_push = time.monotonic()
+        conn.ave_wss._feed_flush_task = loop.create_task(conn.ave_wss._deferred_feed_flush(60))
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="cancel-2",
+            trade_type="market_buy",
+            action="BUY",
+            symbol="BONK",
+            amount_native="0.1 SOL",
+        )
+        observed = {}
 
-        async def _fake_send_display(conn, screen, payload):
-            sent.append((screen, payload))
+        def fake_get_trending(conn_arg, *args, **kwargs):
+            del args, kwargs
+            observed["feed_session"] = conn_arg.ave_state.get("feed_session")
+            observed["wss_feed_session"] = conn_arg.ave_wss._feed_session
+            observed["feed_dirty"] = conn_arg.ave_wss._feed_dirty
+            observed["flush_task"] = conn_arg.ave_wss._feed_flush_task
+            return ave_tools.ActionResponse(
+                action=ave_tools.Action.NONE,
+                result="ok",
+                response=None,
+            )
 
-        with patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
+        try:
+            with patch.object(ave_tools.trade_mgr, "cancel") as mock_cancel, \
+                 patch("plugins_func.functions.ave_tools.ave_get_trending", side_effect=fake_get_trending):
+                ave_tools.ave_cancel_trade(conn)
+        finally:
+            flush_task = conn.ave_wss._feed_flush_task
+            if flush_task is not None and not flush_task.done():
+                flush_task.cancel()
+                await asyncio.sleep(0)
+
+        mock_cancel.assert_called_once_with("cancel-2")
+        self.assertEqual(observed["feed_session"], 6)
+        self.assertEqual(observed["wss_feed_session"], 6)
+        self.assertFalse(observed["feed_dirty"])
+        self.assertIsNone(observed["flush_task"])
+
+    async def test_ave_cancel_trade_propagates_home_feed_rebuild_failure(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        ave_tools._set_pending_trade(
+            conn,
+            trade_id="cancel-3",
+            trade_type="market_buy",
+            action="BUY",
+            symbol="BONK",
+            amount_native="0.1 SOL",
+        )
+        failure = ave_tools.ActionResponse(
+            action=ave_tools.Action.RESPONSE,
+            result="feed_refresh_failed",
+            response="获取热门代币失败，请稍后重试",
+        )
+
+        with patch.object(ave_tools.trade_mgr, "cancel") as mock_cancel, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending", return_value=failure):
+            resp = ave_tools.ave_cancel_trade(conn)
+
+        mock_cancel.assert_called_once_with("cancel-3")
+        self.assertIs(resp, failure)
+
+    async def test_ave_back_to_feed_rebuilds_home_feed_from_remembered_platform(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state.update(
+            {
+                "screen": "spotlight",
+                "feed_platform": "pump_in_hot",
+                "feed_source": "trending",
+                "feed_mode": "orders",
+                "search_query": "PEPE",
+                "search_results": [{"token_id": "token-1-solana", "chain": "solana", "symbol": "PEPE"}],
+                "nav_from": "portfolio",
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending, \
+             patch("plugins_func.functions.ave_tools._send_display", new=AsyncMock()) as mock_send:
             resp = ave_tools.ave_back_to_feed(conn)
             await asyncio.sleep(0)
 
         self.assertEqual(resp.result, "已返回热门列表")
+        mock_trending.assert_called_once_with(conn, topic="", platform="pump_in_hot")
+        mock_send.assert_not_awaited()
         self.assertEqual(conn.ave_state["screen"], "feed")
-        self.assertEqual(sent[0], ("feed", {"reason": "navigate_back"}))
+        self.assertEqual(conn.ave_state.get("feed_mode"), "standard")
+        self.assertNotIn("search_query", conn.ave_state)
+        self.assertNotIn("search_results", conn.ave_state)
+        self.assertNotIn("nav_from", conn.ave_state)
+
+    async def test_ave_back_to_feed_propagates_home_feed_rebuild_failure(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_state["screen"] = "spotlight"
+        failure = ave_tools.ActionResponse(
+            action=ave_tools.Action.RESPONSE,
+            result="feed_refresh_failed",
+            response="获取热门代币失败，请稍后重试",
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_get_trending", return_value=failure):
+            resp = ave_tools.ave_back_to_feed(conn)
+
+        self.assertIs(resp, failure)
+
+    async def test_ave_list_orders_neutralizes_pending_live_feed_flush(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        conn.ave_wss = ave_wss.AveWssManager(conn)
+        conn.ave_state["feed_session"] = 9
+        conn.ave_wss.set_feed_tokens(
+            [
+                {
+                    "token_id": "token-old-solana",
+                    "chain": "solana",
+                    "symbol": "OLD",
+                    "price": "$1.0000",
+                    "price_raw": 1.0,
+                    "change_24h": "+0.00%",
+                    "change_positive": True,
+                }
+            ],
+            chain="solana",
+        )
+        conn.ave_wss._feed_dirty = True
+        conn.ave_wss._last_feed_push = time.monotonic()
+        conn.ave_wss._feed_flush_task = loop.create_task(conn.ave_wss._deferred_feed_flush(0))
+        sent = []
+
+        async def fake_send_display(_, screen, payload):
+            sent.append((screen, dict(payload)))
+
+        with patch("plugins_func.functions.ave_tools._trade_get", return_value={
+            "data": {
+                "list": [
+                    {
+                        "id": "order-1",
+                        "outTokenAddress": "token-order",
+                        "outTokenSymbol": "BONK",
+                        "chain": "solana",
+                        "limitPrice": "2.5",
+                        "createPrice": "2.0",
+                    }
+                ]
+            }
+        }), patch("plugins_func.functions.ave_tools._send_display", side_effect=fake_send_display), \
+             patch("plugins_func.functions.ave_wss._send_display", side_effect=fake_send_display):
+            ave_tools.ave_list_orders(conn)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        self.assertTrue(sent)
+        self.assertEqual(sent[0][0], "feed")
+        self.assertEqual(sent[0][1].get("source_label"), "ORDERS")
+        self.assertFalse(
+            any(
+                screen == "feed" and payload.get("live") and payload.get("tokens") == []
+                for screen, payload in sent
+            )
+        )
 
     def test_ave_buy_token_without_addr_or_current_token_returns_no_token(self):
         loop = asyncio.new_event_loop()
@@ -903,6 +1304,23 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
         mock_feed.assert_not_called()
         self.assertNotIn("nav_from", conn.ave_state)
 
+    async def test_key_action_portfolio_activity_detail_sets_portfolio_origin(self):
+        loop = asyncio.get_running_loop()
+        conn = _FakeConn(loop)
+        handler = KeyActionHandler()
+
+        with patch("plugins_func.functions.ave_tools.ave_portfolio_activity_detail") as mock_detail:
+            await handler.handle(conn, {
+                "type": "key_action",
+                "action": "portfolio_activity_detail",
+                "token_id": "token-1",
+                "chain": "solana",
+                "symbol": "BONK",
+            })
+
+        self.assertEqual(conn.ave_state.get("nav_from"), "portfolio")
+        mock_detail.assert_called_once_with(conn, addr="token-1", chain="solana", symbol="BONK")
+
     async def test_trade_result_back_returns_portfolio_when_nav_from_portfolio(self):
         loop = asyncio.get_running_loop()
         conn = _FakeConn(loop)
@@ -927,7 +1345,7 @@ class TradeFlowTests(unittest.IsolatedAsyncioTestCase):
             "trade_type": "market_sell",
             "status": 0,
             "data": {"outAmount": "0 SOL", "txId": "tx-portfolio-123"},
-        })), patch("plugins_func.functions.ave_trade_mgr._send_display", side_effect=_fake_send_display):
+        })), patch("plugins_func.functions.ave_tools._send_display", side_effect=_fake_send_display):
             await trade_handler.handle(conn, {
                 "type": "trade_action",
                 "action": "confirm",

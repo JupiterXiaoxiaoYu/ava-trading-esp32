@@ -4,10 +4,14 @@ cmake_minimum_required(VERSION 3.12)
 # Used by both the PC simulator and the ESP32 firmware (via soft-link)
 
 add_library(shared_ave_screens STATIC
+    ave_font_provider.c
+    ave_json_utils.c
     ave_screen_manager.c
     ave_price_fmt.c
     ave_transport.c
     screen_feed.c
+    screen_explorer.c
+    screen_browse.c
     screen_spotlight.c
     screen_confirm.c
     screen_limit_confirm.c

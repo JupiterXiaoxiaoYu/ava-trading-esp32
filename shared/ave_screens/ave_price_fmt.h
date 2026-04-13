@@ -26,6 +26,12 @@ extern "C" {
 void ave_fmt_price(char *buf, size_t n, double price);
 
 /**
+ * Compact an already formatted price string when it has too many leading zeros.
+ * Example: "$0.00007956" -> "$7.96e-5"
+ */
+void ave_fmt_price_text(char *buf, size_t n, const char *raw_price);
+
+/**
  * Format a percentage change: "+12.34%" or "-5.67%"
  */
 void ave_fmt_change(char *buf, size_t n, double pct);

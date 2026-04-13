@@ -126,6 +126,7 @@ class ConnectionHandler:
         self.client_abort = False
         self.client_is_speaking = False
         self.client_listen_mode = "auto"
+        self.pending_listen_payload = None
 
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
@@ -200,6 +201,8 @@ class ConnectionHandler:
                 int(self.config.get("close_connection_no_voice_time", 315360000)) + 60
         )  # 在原来第一道关闭的基础上加60秒，进行二道关闭
         self.timeout_task = None
+        self.websocket_heartbeat_interval = max(5, int(self.config.get("websocket_heartbeat_interval", 30)))
+        self.websocket_heartbeat_task = None
 
         # {"mcp":true} 表示启用MCP功能
         self.features = None
@@ -246,6 +249,10 @@ class ConnectionHandler:
 
             # 启动超时检查任务
             self.timeout_task = asyncio.create_task(self._check_timeout())
+            if self.config.get("enable_websocket_ping", True):
+                self.websocket_heartbeat_task = asyncio.create_task(
+                    self._send_websocket_heartbeat()
+                )
 
             self.welcome_msg = self.config["xiaozhi"]
             self.welcome_msg["session_id"] = self.session_id
@@ -1443,6 +1450,14 @@ class ConnectionHandler:
                     pass
                 self.timeout_task = None
 
+            if self.websocket_heartbeat_task and not self.websocket_heartbeat_task.done():
+                self.websocket_heartbeat_task.cancel()
+                try:
+                    await self.websocket_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                self.websocket_heartbeat_task = None
+
             # 清理工具处理器资源
             if hasattr(self, "func_handler") and self.func_handler:
                 try:
@@ -1573,6 +1588,38 @@ class ConnectionHandler:
             self.close_after_chat = True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Chat and close error: {str(e)}")
+
+    async def _send_websocket_heartbeat(self):
+        """定期向设备发送轻量 ping，刷新固件侧的入站超时计时器。"""
+        try:
+            while not self.stop_event.is_set():
+                await asyncio.sleep(self.websocket_heartbeat_interval)
+                if self.stop_event.is_set():
+                    break
+                if self.websocket is None:
+                    continue
+
+                heartbeat = {
+                    "type": "ping",
+                    "timestamp": int(time.time() * 1000),
+                    "source": "server",
+                }
+                try:
+                    await self.websocket.send(json.dumps(heartbeat))
+                except websockets.exceptions.ConnectionClosed:
+                    self.logger.bind(tag=TAG).info("WebSocket心跳发送时发现连接已关闭")
+                    break
+                except Exception as heartbeat_error:
+                    self.logger.bind(tag=TAG).warning(
+                        f"WebSocket心跳发送失败: {heartbeat_error}"
+                    )
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"WebSocket心跳任务出错: {e}")
+        finally:
+            self.logger.bind(tag=TAG).info("WebSocket心跳任务已退出")
 
     async def _check_timeout(self):
         """检查连接超时"""

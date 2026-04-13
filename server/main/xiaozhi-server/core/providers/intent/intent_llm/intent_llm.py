@@ -5,6 +5,7 @@ if TYPE_CHECKING:
 from ..base import IntentProviderBase
 from plugins_func.functions.play_music import initialize_music_handler
 from config.logger import setup_logging
+from core.utils.ave_cloud_skill_prompt import append_ave_cloud_skill_corpus
 from core.utils.util import get_system_error_response
 import re
 import json
@@ -118,7 +119,7 @@ class IntentProvider(IntentProviderBase):
             "- 示例：{'function_calls': [{name:'light_on'}, {name:'volume_up'}]}\n\n"
             "【最终警告】绝对禁止输出任何自然语言、表情符号或解释文字！只能输出有效JSON格式！违反此规则将导致系统错误！"
         )
-        return prompt
+        return append_ave_cloud_skill_corpus(prompt)
 
     def replyResult(
         self,

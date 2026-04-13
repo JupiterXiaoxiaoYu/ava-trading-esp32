@@ -9,7 +9,49 @@
 #include <esp_mn_speech_commands.h>
 #include <cJSON.h>
 
+#include <algorithm>
+#include <cctype>
+
 #define TAG "CustomWakeWord"
+
+namespace {
+std::string NormalizeCommand(const std::string& value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    bool last_space = true;
+    for (unsigned char ch : value) {
+        if (std::isspace(ch)) {
+            if (!last_space && !normalized.empty()) {
+                normalized.push_back(' ');
+            }
+            last_space = true;
+            continue;
+        }
+        normalized.push_back(static_cast<char>(std::tolower(ch)));
+        last_space = false;
+    }
+    if (!normalized.empty() && normalized.back() == ' ') {
+        normalized.pop_back();
+    }
+    return normalized;
+}
+
+std::string TitleCaseCommand(const std::string& value) {
+    std::string titled = NormalizeCommand(value);
+    bool capitalize = true;
+    for (char& ch : titled) {
+        if (ch == ' ') {
+            capitalize = true;
+            continue;
+        }
+        if (capitalize && ch >= 'a' && ch <= 'z') {
+            ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        capitalize = false;
+    }
+    return titled;
+}
+}  // namespace
 
 CustomWakeWord::CustomWakeWord()
     : wake_word_pcm_(), wake_word_opus_() {
@@ -61,7 +103,10 @@ void CustomWakeWord::ParseWakenetModelConfig() {
             duration_ = duration->valueint;
         }
         if (cJSON_IsNumber(threshold)) {
-            threshold_ = threshold->valuedouble;
+            threshold_ = static_cast<float>(threshold->valuedouble);
+            if (threshold_ > 1.0f) {
+                threshold_ /= 100.0f;
+            }
         }
         if (cJSON_IsArray(commands)) {
             for (int i = 0; i < cJSON_GetArraySize(commands); i++) {
@@ -71,7 +116,7 @@ void CustomWakeWord::ParseWakenetModelConfig() {
                     cJSON* text = cJSON_GetObjectItem(command, "text");
                     cJSON* action = cJSON_GetObjectItem(command, "action");
                     if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
-                        commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
+                        AddCommand(command_name->valuestring, text->valuestring, action->valuestring);
                         ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
                     }
                 }
@@ -79,6 +124,62 @@ void CustomWakeWord::ParseWakenetModelConfig() {
         }
     }
     cJSON_Delete(root);
+    ExpandWakeCommandAliases();
+}
+
+void CustomWakeWord::AddCommand(const std::string& command, const std::string& text, const std::string& action) {
+    std::string normalized = NormalizeCommand(command);
+    if (normalized.empty() || action.empty()) {
+        return;
+    }
+
+    auto it = std::find_if(commands_.begin(), commands_.end(), [&](const Command& existing) {
+        return existing.action == action && NormalizeCommand(existing.command) == normalized;
+    });
+    if (it != commands_.end()) {
+        return;
+    }
+
+    commands_.push_back({normalized, text.empty() ? TitleCaseCommand(normalized) : text, action});
+}
+
+void CustomWakeWord::ExpandWakeCommandAliases() {
+    std::vector<Command> snapshot(commands_.begin(), commands_.end());
+    static const char* prefixes[] = {"hey ", "hi ", "hello ", "ni hao ", "nihao "};
+
+    for (const auto& command : snapshot) {
+        if (command.action != "wake") {
+            continue;
+        }
+
+        std::string normalized = NormalizeCommand(command.command);
+        std::string wake_name = normalized;
+        for (const char* prefix : prefixes) {
+            std::string prefix_str(prefix);
+            if (normalized.rfind(prefix_str, 0) == 0 && normalized.size() > prefix_str.size()) {
+                wake_name = normalized.substr(prefix_str.size());
+                break;
+            }
+        }
+
+        if (wake_name.empty()) {
+            continue;
+        }
+
+        std::vector<std::string> wake_variants = {wake_name};
+        if (wake_name == "ava") {
+            wake_variants.push_back("eva");
+            wake_variants.push_back("ai wa");
+        }
+
+        for (const auto& variant : wake_variants) {
+            AddCommand(variant, TitleCaseCommand(variant), "wake");
+            for (const char* prefix : prefixes) {
+                std::string prefix_str(prefix);
+                AddCommand(prefix_str + variant, TitleCaseCommand(prefix_str + variant), "wake");
+            }
+        }
+    }
 }
 
 
@@ -86,17 +187,28 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     codec_ = codec;
     commands_.clear();
 
+#ifdef CONFIG_CUSTOM_WAKE_WORD
+    const float configured_threshold = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
+#else
+    const float configured_threshold = threshold_;
+#endif
+
     if (models_list == nullptr) {
         language_ = "cn";
         models_ = esp_srmodel_init("model");
-#ifdef CONFIG_CUSTOM_WAKE_WORD
-        threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
-#endif
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
     }
+
+#ifdef CONFIG_CUSTOM_WAKE_WORD
+    // Keep the board-level wake word working even if the generated assets were built without the latest index.json.
+    threshold_ = (threshold_ > configured_threshold) ? configured_threshold : threshold_;
+    AddCommand(CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake");
+    ExpandWakeCommandAliases();
+#endif
+
+    ESP_LOGI(TAG, "Custom wake config: language=%s, threshold=%.2f, commands=%u", language_.c_str(), threshold_, (unsigned)commands_.size());
 
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");

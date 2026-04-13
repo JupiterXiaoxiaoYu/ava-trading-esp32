@@ -19,6 +19,7 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/lvgl_display.cc"
             "display/emote_display.cc"
             "display/lvgl_display/emoji_collection.cc"
+            "display/lvgl_display/ava_wifi_image.c"
             "display/lvgl_display/lvgl_theme.cc"
             "display/lvgl_display/lvgl_font.cc"
             "display/lvgl_display/lvgl_image.cc"
@@ -44,6 +45,8 @@ set(SOURCES "audio/audio_codec.cc"
             "${PROJECT_DIR}/../shared/ave_screens/screen_confirm.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_disambiguation.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_feed.c"
+            "${PROJECT_DIR}/../shared/ave_screens/screen_explorer.c"
+            "${PROJECT_DIR}/../shared/ave_screens/screen_browse.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_limit_confirm.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_notify.c"
             "${PROJECT_DIR}/../shared/ave_screens/screen_portfolio.c"
@@ -784,9 +787,9 @@ elseif(CONFIG_BOARD_TYPE_Freenove_ESP32S3_DISPLAY_2_8_LCD)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
 elseif(CONFIG_BOARD_TYPE_SCRATCH_ARCADE)
     set(BOARD_TYPE "scratch-arcade")
-    set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)
 endif()
 
 if(MANUFACTURER)

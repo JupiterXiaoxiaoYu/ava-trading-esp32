@@ -1,4 +1,6 @@
 #include "ave_screen_manager.h"
+#include "ave_font_provider.h"
+#include "ave_json_utils.h"
 #include "ave_transport.h"
 #if __has_include("lvgl.h")
 #include "lvgl.h"
@@ -54,7 +56,6 @@ static int _json_str(const char *obj, const char *key, char *out, int n)
 {
     char needle[64];
     const char *p;
-    int i = 0;
 
     snprintf(needle, sizeof(needle), "\"%s\"", key);
     p = strstr(obj, needle);
@@ -62,10 +63,7 @@ static int _json_str(const char *obj, const char *key, char *out, int n)
     p += (int)strlen(needle);
     while (*p == ' ' || *p == ':') p++;
     if (*p != '"') return 0;
-    p++;
-    while (*p && *p != '"' && i < n - 1) out[i++] = *p++;
-    out[i] = '\0';
-    return 1;
+    return ave_json_decode_quoted(p, out, (size_t)n, NULL);
 }
 
 static int _json_int(const char *obj, const char *key, int def)
@@ -182,9 +180,11 @@ void screen_disambiguation_cancel_timers(void)
 
 int screen_disambiguation_get_selected_context_json(char *out, size_t out_n)
 {
+    int n;
+
     if (!out || out_n == 0) return 0;
-    /* Disambiguation is not yet an authoritative token selection. */
-    return 0;
+    n = snprintf(out, out_n, "{\"screen\":\"disambiguation\",\"cursor\":%d}", s_cursor);
+    return (n > 0 && (size_t)n < out_n) ? 1 : 0;
 }
 
 static void _send_selected_item(void)
@@ -267,7 +267,7 @@ static void _build(void)
         s_row_main[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_main[i], 8, 3);
         lv_obj_set_style_text_color(s_row_main[i], COLOR_WHITE, 0);
-        lv_obj_set_style_text_font(s_row_main[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(s_row_main[i], ave_font_cjk_14(), 0);
 
         s_row_meta[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_meta[i], 8, 15);

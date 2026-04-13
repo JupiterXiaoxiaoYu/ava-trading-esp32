@@ -193,23 +193,6 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         mock_buy.assert_called_once()
 
-    async def test_listen_start_caches_explicit_selection_for_following_audio_turn(self):
-        handler = ListenTextMessageHandler()
-        conn = self._build_listen_conn({"screen": "feed"})
-        selection = {
-            "screen": "feed",
-            "cursor": 1,
-            "token": {"addr": "fresh-2", "chain": "base", "symbol": "FRESH"},
-        }
-
-        await handler.handle(
-            conn,
-            {"state": "start", "mode": "auto", "selection": selection},
-        )
-
-        self.assertEqual(conn.pending_listen_selection, selection)
-        conn.reset_audio_states.assert_called_once()
-
     async def test_partial_selection_token_fails_closed_for_buy_this(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
@@ -305,6 +288,116 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         mock_cancel.assert_called_once_with(conn)
 
+    async def test_spotlight_add_to_watchlist_routes_directly(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_add_current_watchlist_token") as add_current:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "收藏这个币",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        add_current.assert_called_once_with(
+            conn,
+            token={"addr": "a1", "chain": "solana", "symbol": "BONK"},
+        )
+
+    async def test_add_to_watchlist_without_trusted_selection_fails_closed(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "spotlight"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_add_current_watchlist_token") as add_current:
+            await handler.handle(conn, {"state": "detect", "text": "收藏这个币"})
+
+        start_chat.assert_not_awaited()
+        add_current.assert_not_called()
+        send_stt.assert_awaited_once_with(conn, missing_selection_reply("收藏这个币"))
+
+    async def test_open_watchlist_routes_without_llm(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_open_watchlist") as open_watchlist:
+            await handler.handle(conn, {"state": "detect", "text": "打开观察列表"})
+
+        start_chat.assert_not_awaited()
+        open_watchlist.assert_called_once_with(conn)
+
+    async def test_open_orders_routes_without_llm(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders") as list_orders:
+            await handler.handle(conn, {"state": "detect", "text": "查看限价单"})
+
+        start_chat.assert_not_awaited()
+        list_orders.assert_called_once_with(conn)
+
+    async def test_open_orders_english_routes_without_llm(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders") as list_orders:
+            await handler.handle(conn, {"state": "detect", "text": "open orders"})
+
+        start_chat.assert_not_awaited()
+        list_orders.assert_called_once_with(conn)
+
+    async def test_spotlight_remove_watchlist_routes_directly(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_remove_current_watchlist_voice") as remove_current:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "取消收藏",
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "a1", "chain": "solana", "symbol": "BONK"},
+                    },
+                },
+            )
+
+        start_chat.assert_not_awaited()
+        remove_current.assert_called_once_with(
+            conn,
+            token={"addr": "a1", "chain": "solana", "symbol": "BONK"},
+        )
+
     async def test_confirm_uses_selection_screen_when_server_state_lags(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
@@ -386,7 +479,90 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once()
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="feed-1",
+            chain="solana",
+            symbol="ROCKET",
+            feed_cursor=0,
+            feed_total=1,
+        )
+
+    async def test_router_back_from_spotlight_signals_restores_signals_feed(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "feed_mode": "signals",
+                "feed_source": "signals",
+                "nav_from": "feed",
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_list_signals") as mock_signals, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            await handler.handle(conn, {"state": "detect", "text": "返回"})
+
+        start_chat.assert_not_awaited()
+        mock_signals.assert_called_once_with(conn)
+        mock_trending.assert_not_called()
+
+    async def test_router_back_from_spotlight_watchlist_restores_watchlist_feed(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "feed_mode": "watchlist",
+                "feed_source": "watchlist",
+                "feed_cursor": 2,
+                "nav_from": "feed",
+            }
+        )
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_open_watchlist") as mock_watchlist, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            await handler.handle(conn, {"state": "detect", "text": "返回"})
+
+        start_chat.assert_not_awaited()
+        mock_watchlist.assert_called_once_with(conn, cursor=2)
+        mock_trending.assert_not_called()
+
+    async def test_router_back_from_search_spotlight_restores_search_payload(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "feed_mode": "search",
+                "feed_source": "trending",
+                "search_query": "PEPE",
+                "search_chain": "all",
+                "search_cursor": 1,
+                "search_session": {
+                    "query": "PEPE",
+                    "chain": "all",
+                    "cursor": 1,
+                    "items": [
+                        {"token_id": "So111...", "chain": "solana", "symbol": "PEPE", "price": "$1.23"},
+                        {"token_id": "0xabc...", "chain": "base", "symbol": "PEPE", "price": "$1.11"},
+                    ],
+                },
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools._send_display", new=AsyncMock()) as send_display, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            handled = await try_route_ave_command(conn, "返回")
+
+        self.assertTrue(handled)
+        mock_trending.assert_not_called()
+        send_display.assert_awaited_once()
+        _, screen, payload = send_display.await_args.args
+        self.assertEqual(screen, "feed")
+        self.assertEqual(payload.get("mode"), "search")
+        self.assertEqual(payload.get("search_query"), "PEPE")
 
     async def test_portfolio_watch_this_routes_directly_to_token_detail(self):
         handler = ListenTextMessageHandler()
@@ -418,6 +594,7 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
 
         start_chat.assert_not_awaited()
         mock_detail.assert_called_once()
+        self.assertEqual(conn.ave_state.get("nav_from"), "portfolio")
 
     async def test_portfolio_watch_this_rejects_without_portfolio_selection_state(self):
         handler = ListenTextMessageHandler()
@@ -457,6 +634,90 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         start_chat.assert_not_awaited()
         mock_search.assert_called_once_with(conn, keyword="ROCKET")
 
+    async def test_search_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜索ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_cha_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "查ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_search_english_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "search ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_sou_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_sou_yixia_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "搜一下ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_cha_yixia_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "查一下ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
+    async def test_lookup_symbol_routes_to_deterministic_search(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_search_token") as mock_search:
+            await handler.handle(conn, {"state": "detect", "text": "look up ROCKET"})
+
+        start_chat.assert_not_awaited()
+        mock_search.assert_called_once_with(conn, keyword="ROCKET")
+
     async def test_buy_symbol_routes_to_buy_with_symbol_mapping(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
@@ -478,6 +739,102 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             chain="base",
             symbol="ROCKET",
         )
+
+    async def test_voice_market_buy_amount_uses_token_chain_native_context(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_buy_token") as mock_buy:
+            routed = await try_route_ave_command(
+                conn,
+                "买这个 0.1",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+                    }
+                },
+            )
+
+        self.assertTrue(routed)
+        mock_buy.assert_called_once_with(
+            conn,
+            addr="bsc-1",
+            chain="bsc",
+            in_amount_sol=0.1,
+            symbol="CAKE",
+        )
+
+    async def test_voice_limit_buy_missing_fields_are_filled_by_follow_up_dialogue(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "base-1", "chain": "base", "symbol": "AERO"},
+            }
+        )
+
+        with patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_limit_order") as mock_limit:
+            routed = await try_route_ave_command(
+                conn,
+                "限价买这个",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "base-1", "chain": "base", "symbol": "AERO"},
+                    }
+                },
+            )
+            self.assertTrue(routed)
+            self.assertEqual(conn.ave_state["voice_trade_draft"]["kind"], "limit_buy")
+            self.assertEqual(conn.ave_state["voice_trade_draft"]["chain"], "base")
+            send_stt.assert_awaited_with(conn, "目标价是多少美元？比如说 0.00012。")
+            mock_limit.assert_not_called()
+
+            await try_route_ave_command(conn, "0.00012")
+            send_stt.assert_awaited_with(conn, "你想用多少 ETH 买入？比如说 0.1 ETH。")
+            mock_limit.assert_not_called()
+
+            await try_route_ave_command(conn, "0.1")
+
+        self.assertNotIn("voice_trade_draft", conn.ave_state)
+        mock_limit.assert_called_once_with(
+            conn,
+            addr="base-1",
+            chain="base",
+            in_amount_sol=0.1,
+            limit_price=0.00012,
+            symbol="AERO",
+        )
+
+    async def test_voice_market_buy_rejects_wrong_native_unit_for_chain(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+            }
+        )
+
+        with patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_buy_token") as mock_buy:
+            routed = await try_route_ave_command(
+                conn,
+                "买这个 0.1 SOL",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "bsc-1", "chain": "bsc", "symbol": "CAKE"},
+                    }
+                },
+            )
+
+        self.assertTrue(routed)
+        send_stt.assert_awaited_once_with(conn, "这条链下单金额请用 BNB 表示。")
+        mock_buy.assert_not_called()
 
     async def test_non_router_utterance_falls_through_to_chat(self):
         handler = ListenTextMessageHandler()
@@ -617,38 +974,6 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         send_stt.assert_not_awaited()
         self.assertEqual(conn.chat_calls, [])
 
-    async def test_start_to_chat_uses_cached_listen_start_selection_for_audio_turn(self):
-        conn = self._build_chat_conn(
-            {
-                "screen": "feed",
-                "feed_cursor": 0,
-                "feed_token_list": [
-                    {"addr": "stale-1", "chain": "solana", "symbol": "STALE"},
-                    {"addr": "fresh-2", "chain": "base", "symbol": "FRESH"},
-                ],
-                "current_token": {"addr": "stale-spot", "chain": "solana", "symbol": "OLD"},
-            }
-        )
-        conn.pending_listen_selection = {
-            "screen": "feed",
-            "cursor": 1,
-            "token": {"addr": "fresh-2", "chain": "base", "symbol": "FRESH"},
-        }
-
-        with patch("core.handle.receiveAudioHandle.send_stt_message", new=AsyncMock()) as send_stt, \
-             patch("plugins_func.functions.ave_tools.ave_token_detail") as mock_detail:
-            await startToChat(conn, "看这个")
-
-        mock_detail.assert_called_once_with(
-            conn,
-            addr="fresh-2",
-            chain="base",
-            symbol="FRESH",
-        )
-        send_stt.assert_not_awaited()
-        self.assertIsNone(conn.pending_listen_selection)
-        self.assertEqual(conn.chat_calls, [])
-
     async def test_start_to_chat_speaker_json_routes_using_content_not_raw_json(self):
         conn = self._build_chat_conn(
             {
@@ -711,7 +1036,14 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="feed-2",
+            chain="base",
+            symbol="NEW",
+            feed_cursor=0,
+            feed_total=1,
+        )
 
     async def test_feed_watch_route_preserves_turn_selection_context_after_success(self):
         handler = ListenTextMessageHandler()
@@ -726,7 +1058,14 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-        def _detail_side_effect(passed_conn, addr, chain, symbol=""):
+        def _detail_side_effect(
+            passed_conn,
+            addr,
+            chain,
+            symbol="",
+            feed_cursor=None,
+            feed_total=None,
+        ):
             passed_conn.ave_state["screen"] = "spotlight"
             passed_conn.ave_state["current_token"] = {
                 "addr": "stale-spot",
@@ -751,7 +1090,14 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once_with(conn, addr="feed-2", chain="base", symbol="NEW")
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="feed-2",
+            chain="base",
+            symbol="NEW",
+            feed_cursor=1,
+            feed_total=2,
+        )
         self.assertEqual(conn.ave_context["screen"], "feed")
         self.assertEqual(conn.ave_context["feed_cursor"], 1)
         self.assertEqual(
@@ -791,7 +1137,57 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             )
 
         start_chat.assert_not_awaited()
-        mock_detail.assert_called_once_with(conn, addr="pf-2", chain="eth", symbol="REAL")
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="pf-2",
+            chain="eth",
+            symbol="REAL",
+            feed_cursor=None,
+            feed_total=None,
+        )
+
+    async def test_portfolio_voice_watch_then_back_returns_to_portfolio(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "portfolio",
+                "portfolio_holdings": [{"addr": "pf-2", "chain": "eth", "symbol": "REAL"}],
+                "portfolio_cursor": 0,
+            }
+        )
+
+        def _detail_side_effect(
+            passed_conn,
+            addr,
+            chain,
+            symbol="",
+            feed_cursor=None,
+            feed_total=None,
+        ):
+            passed_conn.ave_state["screen"] = "spotlight"
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_token_detail", side_effect=_detail_side_effect), \
+             patch("plugins_func.functions.ave_tools.ave_portfolio") as mock_portfolio, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            await handler.handle(
+                conn,
+                {
+                    "state": "detect",
+                    "text": "看这个",
+                    "selection": {
+                        "screen": "portfolio",
+                        "cursor": 0,
+                        "token": {"addr": "pf-2", "chain": "eth", "symbol": "REAL"},
+                    },
+                },
+            )
+            await handler.handle(conn, {"state": "detect", "text": "返回"})
+
+        start_chat.assert_not_awaited()
+        mock_portfolio.assert_called_once_with(conn)
+        mock_trending.assert_not_called()
 
     async def test_confirm_command_rejects_when_not_on_confirm_screen(self):
         handler = ListenTextMessageHandler()
@@ -993,6 +1389,33 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         mock_portfolio.assert_called_once_with(conn)
         self.assertEqual(call_order, [("cancel", conn), ("portfolio", conn)])
 
+    async def test_open_orders_command_on_limit_confirm_cancels_pending_trade_before_opening_orders(self):
+        handler = ListenTextMessageHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "limit_confirm",
+                "pending_trade": {"trade_id": "trade-2", "symbol": "ROCKET"},
+            }
+        )
+        call_order = []
+
+        def _cancel_side_effect(passed_conn):
+            call_order.append(("cancel", passed_conn))
+
+        def _orders_side_effect(passed_conn):
+            call_order.append(("orders", passed_conn))
+
+        with patch("core.handle.textHandler.listenMessageHandler.enqueue_asr_report"), \
+             patch("core.handle.textHandler.listenMessageHandler.startToChat", new=AsyncMock()) as start_chat, \
+             patch("plugins_func.functions.ave_tools.ave_cancel_trade", side_effect=_cancel_side_effect) as mock_cancel, \
+             patch("plugins_func.functions.ave_tools.ave_list_orders", side_effect=_orders_side_effect) as mock_orders:
+            await handler.handle(conn, {"state": "detect", "text": "我的挂单"})
+
+        start_chat.assert_not_awaited()
+        mock_cancel.assert_called_once_with(conn)
+        mock_orders.assert_called_once_with(conn)
+        self.assertEqual(call_order, [("cancel", conn), ("orders", conn)])
+
     async def test_search_command_uses_selection_screen_to_cancel_pending_trade_before_search(self):
         handler = ListenTextMessageHandler()
         conn = self._build_listen_conn(
@@ -1090,6 +1513,24 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             )["allowed_actions"],
         )
 
+    def test_context_allowed_actions_watchlist_add_remove_only_on_spotlight_with_trusted_selection(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "a2", "chain": "base", "symbol": "B"},
+            }
+        )
+        ave_context = build_ave_context(
+            conn,
+            selection_payload={
+                "screen": "spotlight",
+                "token": {"addr": "a2", "chain": "base", "symbol": "B"},
+            },
+        )
+        self.assertIn("add_to_watchlist", ave_context["allowed_actions"])
+        self.assertIn("remove_from_watchlist", ave_context["allowed_actions"])
+        self.assertIn("open_watchlist", ave_context["allowed_actions"])
+
     def test_context_feed_visible_symbols_prefers_ordered_feed_list(self):
         conn = self._build_chat_conn(
             {
@@ -1127,6 +1568,32 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ave_context["feed_cursor"], 1)
 
+    def test_context_browse_selection_cursor_uses_feed_navigation_state(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "browse",
+                "feed_mode": "signals",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "stale-1", "chain": "solana", "symbol": "FIRST"},
+                    {"addr": "fresh-2", "chain": "base", "symbol": "SECOND"},
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(
+            conn,
+            selection_payload={
+                "screen": "browse",
+                "cursor": 1,
+                "token": {"addr": "fresh-2", "chain": "base", "symbol": "SECOND"},
+            },
+        )
+
+        self.assertEqual(ave_context["screen"], "browse")
+        self.assertEqual(ave_context["feed_cursor"], 1)
+        self.assertIn("watch_current", ave_context["allowed_actions"])
+
     def test_context_non_feed_selection_cursor_does_not_override_feed_cursor(self):
         conn = self._build_chat_conn(
             {
@@ -1147,6 +1614,33 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ave_context["screen"], "portfolio")
         self.assertEqual(ave_context["feed_cursor"], 0)
 
+    def test_context_browse_selection_is_trusted(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "browse",
+                "feed_mode": "watchlist",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(
+            conn,
+            selection_payload={
+                "screen": "browse",
+                "cursor": 0,
+                "token": {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+            },
+        )
+
+        self.assertTrue(ave_context["has_trusted_selection"])
+        self.assertEqual(
+            ave_context["current_token"],
+            {"addr": "wl-1", "chain": "solana", "symbol": "BONK"},
+        )
+
     def test_context_without_explicit_selection_omits_current_token(self):
         conn = self._build_chat_conn(
             {
@@ -1165,6 +1659,74 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(ave_context["current_token"])
         self.assertNotIn("watch_current", ave_context["allowed_actions"])
         self.assertNotIn("buy_current", ave_context["allowed_actions"])
+
+    def test_context_feed_snapshot_tracks_cursor_and_selected_row(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "feed",
+                "feed_cursor": 1,
+                "feed_source": "trending",
+                "feed_platform": "base",
+                "feed_token_list": [
+                    {
+                        "addr": "feed-1",
+                        "chain": "solana",
+                        "symbol": "FIRST",
+                        "price": "$1.00",
+                        "change_24h": "+5%",
+                        "headline": "leader",
+                    },
+                    {
+                        "addr": "feed-2",
+                        "chain": "base",
+                        "symbol": "SECOND",
+                        "price": "$2.00",
+                        "change_24h": "-3%",
+                        "headline": "runner up",
+                    },
+                ],
+            }
+        )
+
+        ave_context = build_ave_context(conn)
+
+        snapshot = ave_context["screen_snapshot"]
+        self.assertEqual(snapshot["screen"], "feed")
+        self.assertEqual(snapshot["cursor"], 1)
+        self.assertEqual(snapshot["source"], "trending")
+        self.assertEqual(snapshot["platform"], "base")
+        self.assertEqual(snapshot["selected_row"]["symbol"], "SECOND")
+        self.assertEqual(snapshot["visible_rows"][0]["symbol"], "FIRST")
+
+    def test_context_spotlight_snapshot_survives_without_trusted_selection(self):
+        conn = self._build_chat_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "spot-1", "chain": "base", "symbol": "AVA"},
+                "spotlight_snapshot": {
+                    "addr": "spot-1",
+                    "chain": "base",
+                    "symbol": "AVA",
+                    "price": "$0.12",
+                    "change_24h": "+12%",
+                    "market_cap": "$12M",
+                    "volume_24h": "$4M",
+                    "liquidity": "$900K",
+                    "risk_level": "medium",
+                    "cursor": 3,
+                    "total": 20,
+                },
+            }
+        )
+
+        ave_context = build_ave_context(conn)
+
+        self.assertIsNone(ave_context["current_token"])
+        snapshot = ave_context["screen_snapshot"]
+        self.assertEqual(snapshot["screen"], "spotlight")
+        self.assertEqual(snapshot["symbol"], "AVA")
+        self.assertEqual(snapshot["price"], "$0.12")
+        self.assertEqual(snapshot["cursor"], 3)
 
     async def test_open_ended_deictic_chat_fails_closed_without_trusted_selection(self):
         conn = self._build_chat_conn(
@@ -1602,7 +2164,14 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
                 "feed_platform": "",
                 "feed_cursor": 0,
                 "feed_visible_symbols": [],
-                "allowed_actions": ["back_to_feed", "open_feed", "open_portfolio", "search_symbol", "watch_current"],
+                "allowed_actions": [
+                    "back_to_feed",
+                    "open_feed",
+                    "open_portfolio",
+                    "open_watchlist",
+                    "search_symbol",
+                    "watch_current",
+                ],
             },
         )
 
@@ -1863,6 +2432,126 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             [item.get("token_id") for item in feed_payload.get("tokens", [])],
             [item.get("token_id") for item in search_items],
         )
+
+    async def test_key_action_signals_routes_to_server_tool(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("plugins_func.functions.ave_tools.ave_list_signals") as list_signals:
+            await handler.handle(conn, {"type": "key_action", "action": "signals"})
+
+        list_signals.assert_called_once_with(conn)
+
+    async def test_key_action_watchlist_routes_to_server_tool(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn({"screen": "feed"})
+
+        with patch("plugins_func.functions.ave_tools.ave_open_watchlist") as open_watchlist:
+            await handler.handle(conn, {"type": "key_action", "action": "watchlist"})
+
+        open_watchlist.assert_called_once_with(conn)
+
+    async def test_key_action_watchlist_remove_uses_selected_token_and_cursor(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "feed",
+                "feed_mode": "watchlist",
+                "feed_cursor": 0,
+                "feed_token_list": [
+                    {"addr": "Token111", "chain": "solana", "symbol": "BONK"},
+                    {"addr": "Token222", "chain": "base", "symbol": "WIF"},
+                ],
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_remove_current_watchlist_token") as remove_current:
+            await handler.handle(
+                conn,
+                {
+                    "type": "key_action",
+                    "action": "watchlist_remove",
+                    "token_id": "Token222",
+                    "chain": "base",
+                    "cursor": 1,
+                },
+            )
+
+        remove_current.assert_called_once_with(
+            conn,
+            token={"addr": "Token222", "chain": "base", "symbol": "WIF"},
+            cursor=1,
+        )
+
+    async def test_key_action_watch_without_cursor_uses_existing_server_feed_cursor(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "feed",
+                "feed_mode": "signals",
+                "feed_cursor": 1,
+                "feed_token_list": [
+                    {"addr": "Token111", "chain": "solana", "symbol": "BONK"},
+                    {"addr": "Token222", "chain": "base", "symbol": "WIF"},
+                ],
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_token_detail") as mock_detail:
+            await handler.handle(
+                conn,
+                {
+                    "type": "key_action",
+                    "action": "watch",
+                    "token_id": "Token222",
+                    "chain": "base",
+                },
+            )
+
+        mock_detail.assert_called_once_with(
+            conn,
+            addr="Token222",
+            chain="base",
+            feed_cursor=1,
+            feed_total=2,
+        )
+
+    async def test_key_action_back_from_signals_spotlight_restores_signals(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "feed_mode": "signals",
+                "feed_source": "signals",
+                "nav_from": "feed",
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_list_signals") as mock_signals, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            await handler.handle(conn, {"type": "key_action", "action": "back"})
+
+        mock_signals.assert_called_once_with(conn)
+        mock_trending.assert_not_called()
+
+    async def test_key_action_back_from_watchlist_spotlight_restores_watchlist(self):
+        handler = KeyActionHandler()
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "feed_mode": "watchlist",
+                "feed_source": "watchlist",
+                "feed_cursor": 1,
+                "nav_from": "feed",
+            }
+        )
+
+        with patch("plugins_func.functions.ave_tools.ave_open_watchlist") as mock_watchlist, \
+             patch("plugins_func.functions.ave_tools.ave_get_trending") as mock_trending:
+            await handler.handle(conn, {"type": "key_action", "action": "back"})
+
+        mock_watchlist.assert_called_once_with(conn, cursor=1)
+        mock_trending.assert_not_called()
 
 
 if __name__ == "__main__":

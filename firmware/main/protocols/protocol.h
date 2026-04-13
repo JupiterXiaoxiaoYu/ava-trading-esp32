@@ -62,6 +62,7 @@ public:
     void OnNetworkError(std::function<void(const std::string& message)> callback);
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);
+    void SetSuppressNetworkError(bool suppress) { suppress_network_error_ = suppress; }
 
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
@@ -87,6 +88,7 @@ protected:
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
+    bool suppress_network_error_ = false;
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 

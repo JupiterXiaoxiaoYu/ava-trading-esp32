@@ -5,7 +5,7 @@
  * Parses {"type":"display","screen":"<id>","data":{...}} JSON from server
  * and routes to the correct LVGL screen.
  *
- * Screen IDs: feed | spotlight | confirm | limit_confirm | result | portfolio | notify | disambiguation
+ * Screen IDs: feed | explorer | browse | spotlight | confirm | limit_confirm | result | portfolio | notify | disambiguation
  *
  * Scratch Arcade 创客版 button mapping:
  *   GPIO6/8 analog joystick = AVE_KEY_LEFT/RIGHT/UP/DOWN
@@ -47,6 +47,8 @@ extern "C" {
 /* ─── Screen IDs ─────────────────────────────────────────────────────────── */
 typedef enum {
     AVE_SCREEN_FEED = 0,
+    AVE_SCREEN_EXPLORER,
+    AVE_SCREEN_BROWSE,
     AVE_SCREEN_SPOTLIGHT,
     AVE_SCREEN_CONFIRM,
     AVE_SCREEN_LIMIT_CONFIRM,
@@ -77,6 +79,11 @@ void ave_sm_init(lv_display_t *disp);
 void ave_sm_handle_json(const char *json_str);
 
 /**
+ * Return the current primary screen id.
+ */
+ave_screen_id_t ave_sm_get_current_screen_id(void);
+
+/**
  * Notify the screen manager of a physical key press.
  * key: any AVE_KEY_* constant (0-7)
  */
@@ -86,6 +93,22 @@ void ave_sm_key_press(int key);
  * Go back to FEED screen (used on timeout / cancel).
  */
 void ave_sm_go_to_feed(void);
+
+/**
+ * Reopen the existing FEED screen without clearing its cached list state.
+ */
+void ave_sm_open_feed_cached(void);
+
+/**
+ * Open the local Explorer page.
+ */
+void ave_sm_open_explorer(void);
+
+/**
+ * Open the dedicated Signals/Watchlist browse page with a local loading state.
+ * mode: "signals" or "watchlist"
+ */
+void ave_sm_open_browse(const char *mode);
 
 /**
  * Back-timeout fallback used by screens that first ask server-side navigation.
