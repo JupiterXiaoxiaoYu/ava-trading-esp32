@@ -255,6 +255,8 @@ static int _is_empty_payload(const char *json)
     return (!json || strcmp(json, "{}") == 0);
 }
 
+static void _layout_top_bar_labels(void);
+
 static void _apply_source_label(const char *label, int remember_as_feed_source)
 {
     const char *effective = label;
@@ -273,7 +275,33 @@ static void _apply_source_label(const char *label, int remember_as_feed_source)
     snprintf(s_active_source_label, sizeof(s_active_source_label), "%s", effective);
     s_has_special_source_label = !_label_is_standard_source(s_active_source_label);
 
-    if (s_lbl_source) lv_label_set_text(s_lbl_source, s_active_source_label);
+    if (s_lbl_source) {
+        lv_label_set_text(s_lbl_source, s_active_source_label);
+        _layout_top_bar_labels();
+    }
+}
+
+static void _layout_top_bar_labels(void)
+{
+    lv_coord_t count_w;
+    lv_coord_t source_w;
+    lv_coord_t hint_x;
+    lv_coord_t hint_w;
+
+    if (!s_top_bar || !s_lbl_source || !s_lbl_count || !s_lbl_src_hint) return;
+
+    lv_obj_align(s_lbl_count, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_set_pos(s_lbl_source, 8, 4);
+    lv_obj_update_layout(s_top_bar);
+
+    count_w = lv_obj_get_width(s_lbl_count);
+    source_w = lv_obj_get_width(s_lbl_source);
+    hint_x = 8 + source_w + 6;
+    hint_w = 320 - 8 - count_w - 8 - hint_x;
+    if (hint_w < 0) hint_w = 0;
+
+    lv_obj_set_pos(s_lbl_src_hint, hint_x, 6);
+    lv_obj_set_width(s_lbl_src_hint, hint_w);
 }
 
 static feed_mode_t _feed_mode_from_mode_string(const char *mode_str)
@@ -356,7 +384,7 @@ static const feed_surface_model_t *_current_surface_model(void)
         static const feed_surface_model_t orders_model = {
             FEED_SURFACE_STANDARD,
             "^ v MOVE",
-            " | VIEW ONLY",
+            "",
             "B Back | Y Port",
             0,
         };
@@ -395,6 +423,7 @@ static void _update_mode_hint(const feed_surface_model_t *surface_model)
     lv_label_set_text(s_lbl_nav_hint, surface_model->nav_hint);
     lv_label_set_text(s_lbl_src_hint, surface_model->top_hint);
     lv_label_set_text(s_lbl_action_hint, surface_model->action_hint);
+    _layout_top_bar_labels();
 }
 
 static int _feed_overlay_active(void)
@@ -843,6 +872,7 @@ static void _refresh_count_hint(void)
     } else {
         lv_label_set_text(s_lbl_count, "");
     }
+    _layout_top_bar_labels();
 }
 
 static int _visible_row_count(void)
