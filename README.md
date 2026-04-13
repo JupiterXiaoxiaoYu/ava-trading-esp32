@@ -8,6 +8,8 @@ Ava Box is a voice-driven trading assistant built on top of XiaoZhi-derived ESP3
 
 Parts of the Ava Box backend and device-runtime stack are based on [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32). The same architecture is designed to scale beyond the current Scratch Arcade target and can be extended to many ESP32 form factors, including watches, touch displays, robots, and other voice-enabled devices.
 
+For the cloud-side capability layer and Skills integration, also see [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill).
+
 ## What lives here
 
 - `firmware/` - ESP32 firmware runtime, board ports, audio pipeline, OTA, protocols, and the Ava Box device integration layer
@@ -81,5 +83,6 @@ This monorepo is Ava Box-first, but several major directories are derived from u
 - `firmware/` derives from `78/xiaozhi-esp32`
 - `server/` derives from `xinnan-tech/xiaozhi-esp32-server`
 - `simulator/` derives from `lvgl/lv_port_pc_vscode`
+- cloud capability layer references [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill)
 
 The READMEs in this repo describe those folders in terms of how Ava Box uses and customizes them today.

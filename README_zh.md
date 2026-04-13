@@ -8,6 +8,8 @@ Ava Box 是一个语音驱动的交易助手，建立在 XiaoZhi 系固件、Pyt
 
 Ava Box 的后端与设备运行时栈中有一部分代码基于 [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32)。这套架构不仅服务于当前的 Scratch Arcade 目标板，也可以继续扩展到各种 ESP32 形态的硬件设备上，例如手表、触摸显示屏、机器人以及其他带语音能力的终端。
 
+如果要看云端能力层与 Skills 扩展仓库，也请参考 [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill)。
+
 ## 仓库内容
 
 - `firmware/` - ESP32 固件运行时、板级适配、音频链路、OTA、协议实现和 Ava Box 设备集成层
@@ -81,5 +83,6 @@ speech + input
 - `firmware/` 源自 `78/xiaozhi-esp32`
 - `server/` 源自 `xinnan-tech/xiaozhi-esp32-server`
 - `simulator/` 源自 `lvgl/lv_port_pc_vscode`
+- 云端能力层可参考 [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill)
 
 本仓库里的 README 统一从 Ava Box 当前如何使用和改造这些目录的角度进行说明。
