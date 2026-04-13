@@ -3675,6 +3675,18 @@ def _looks_raw_numeric_amount(value) -> bool:
     return text.replace(".", "", 1).isdigit()
 
 
+def _looks_order_ticket_amount(value) -> bool:
+    if value in (None, "", 0, "0"):
+        return False
+    text = str(value).strip().lower()
+    if not text:
+        return False
+    if text in {"order", "orders"}:
+        return True
+    parts = text.split()
+    return len(parts) == 2 and parts[0].isdigit() and parts[1] in {"order", "orders"}
+
+
 def _pick_result_out_amount(data: dict) -> str:
     for key in ("outAmountFormatted", "out_amount_formatted", "estimateOutFormatted"):
         value = data.get(key)
@@ -3848,6 +3860,9 @@ def _normalize_result_data(result: dict, pending: dict = None) -> dict:
             cancelled = data_list if isinstance(data_list, list) else []
         if isinstance(cancelled, list):
             out_amount = f"{len(cancelled)} orders"
+
+    if success and trade_type == "limit_buy" and _looks_order_ticket_amount(out_amount):
+        out_amount = pending.get("amount_native", "")
 
     if success and not out_amount:
         out_amount = pending.get("amount_native", "")

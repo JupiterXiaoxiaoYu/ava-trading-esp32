@@ -165,6 +165,41 @@ static void _split_copy_two_lines(const char *src, char *line1, size_t line1_n, 
     snprintf(line2, line2_n, "%s", src + line2_start);
 }
 
+static int _label_has_visible_text(lv_obj_t *obj)
+{
+    const char *text;
+    if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) return 0;
+    text = lv_label_get_text(obj);
+    return _has_text(text);
+}
+
+static void _layout_content(void)
+{
+    int next_y;
+
+    if (!s_screen) return;
+
+    lv_obj_align(s_lbl_title, LV_ALIGN_TOP_MID, 0, 72);
+    lv_obj_update_layout(s_screen);
+
+    next_y = 72 + (int)lv_obj_get_height(s_lbl_title) + 10;
+
+    lv_obj_align(s_lbl_line1, LV_ALIGN_TOP_MID, 0, next_y);
+    lv_obj_update_layout(s_screen);
+    if (_label_has_visible_text(s_lbl_line1)) {
+        next_y += (int)lv_obj_get_height(s_lbl_line1) + 8;
+    }
+
+    lv_obj_align(s_lbl_line2, LV_ALIGN_TOP_MID, 0, next_y);
+    lv_obj_update_layout(s_screen);
+    if (_label_has_visible_text(s_lbl_line2)) {
+        next_y += (int)lv_obj_get_height(s_lbl_line2) + 8;
+    }
+
+    lv_obj_align(s_lbl_line3, LV_ALIGN_TOP_MID, 0, next_y);
+    lv_obj_update_layout(s_screen);
+}
+
 static void _request_back(void)
 {
     /* Frozen Task 3 policy: RESULT dismiss is fully manual-only.
@@ -378,6 +413,7 @@ void screen_result_show(const char *json_data)
         lv_obj_add_flag(s_lbl_line3, LV_OBJ_FLAG_HIDDEN);
     }
 
+    _layout_content();
     lv_screen_load(s_screen);
 }
 

@@ -644,6 +644,7 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
             payload = ave_tools._build_result_payload(result, pending=pending)
             self.assertTrue(payload["success"])
             self.assertEqual(payload["title"], "Paper Limit Order Placed")
+            self.assertEqual(payload["out_amount"], "0.5 SOL")
 
             list_result = ave_tools.ave_list_orders(conn, chain="solana")
             await asyncio.sleep(0)
