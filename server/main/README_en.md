@@ -2,6 +2,17 @@
 
 **Table of Contents:**
 
+This document describes the backend module layout inside `server/main/` as it is used in the AVE monorepo.
+
+Quick navigation:
+
+- [`../../README.md`](../../README.md) - monorepo entry point
+- [`../README_en.md`](../README_en.md) - backend deployment overview
+- `xiaozhi-server/` - active Python runtime where AVE routing, websocket, tool, and market logic live
+- `manager-api/` - Java management backend
+- `manager-web/` - browser console
+- `manager-mobile/` - mobile console
+
 1.  [Introduction](#1-introduction)
 2.  [Overall Architecture](#2-overall-architecture)
 3.  [Component Deep Dive](#3-component-deep-dive)

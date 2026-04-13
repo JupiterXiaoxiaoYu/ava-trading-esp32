@@ -43,6 +43,19 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 
 ---
 
+## AVE Monorepo Note
+
+Within this monorepo, `server/` is the backend foundation used by AVE.
+
+Use these entry points when working on the AVE product rather than the upstream generic server alone:
+
+- [`../README.md`](../README.md) - monorepo entry point
+- [`main/README_en.md`](main/README_en.md) - backend module map for `xiaozhi-server`, `manager-api`, `manager-web`, and `manager-mobile`
+- [`../docs/README.md`](../docs/README.md) - AVE architecture, audits, and deployment notes
+- `main/xiaozhi-server/` - the active Python backend runtime where AVE routing, websocket, tool, and trading logic live
+
+This directory still contains the upstream XiaoZhi server stack, but the surrounding repo documentation describes how AVE uses and customizes it today.
+
 ## Target Users 👥
 
 This project requires ESP32 hardware devices to work. If you have purchased ESP32-related hardware, successfully connected to Brother Xia's deployed backend service, and want to build your own `xiaozhi-esp32` backend service independently, then this project is perfect for you.
