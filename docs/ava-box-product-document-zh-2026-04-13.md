@@ -15,7 +15,7 @@
 这个产品要解决的核心问题是：大多数 crypto 工具把监控、发现、分析和执行拆散在太多网页标签、太多路径和太多心智负担里。Ava Box 希望把这些流程压缩进一个专用的掌机体验中。
 
 `Ava` 是我们专门为 `Ava Box` 打造的产品 IP，而不只是一个助手名字。它代表的是这台设备的交互人格、语音形象和产品记忆点：一个以语音为入口、但以屏幕为真相源的链上交易助手。  
-对用户来说，Ava 让 Ava Box 不再只是“一个交易终端”，而是一个可以被唤醒、可以对话、可以陪伴用户完成发现、分析和执行流程的设备角色。  
+Ava 让 Ava Box 不再只是“一个交易终端”，而是一个可以被唤醒、可以对话、可以陪伴用户完成发现、分析和执行流程的设备角色。  
 在这层产品 IP 之下，背后的平台层是 `AVE Claw`，负责给这台设备提供能力栈和 Skills。
 
 同时，因为我们的底层运行时建立在 `ESP32` 之上，这个项目本质上也可以理解为一个面向 `AVE Skills` 的智能硬件框架。也就是说，AVE 的交易系统并不只适用于当前这一台掌机，任何基于 ESP32 芯片的设备，包括手表、机器人、触摸显示屏以及其他嵌入式终端，都可以进一步接入到同一套 AVE 交易能力中。
@@ -36,6 +36,7 @@
 - portfolio 跟踪
 - AI 辅助的搜索与交易入口
 - 带确认环节的 market / limit 执行路径
+- 作为低门槛训练与策略演练模式的模拟交易
 - 基于后端 Skills 的钱包分析能力
 
 简单说：
@@ -43,12 +44,13 @@
 - `Ava Box` 是产品
 - `AVE Claw` 是支撑它的能力平台
 - `AVE Skills` 是驱动这个产品、也可以继续复用给开发者应用的能力模块
+- `paper trading` 是这个产品最重要的增长抓手之一，因为它让用户可以先学会整套交互闭环，再承担真实链上风险
 
 ## 3. 硬件形态
 
-当前 Ava Box 使用的产品硬件画像是：
+Ava Box 采用的硬件配置如下：
 
-| 项目 | 当前配置 |
+| 项目 | 配置 |
 |---|---|
 | 芯片 | ESP32-S3 |
 | 存储 | 8MB Flash，8MB PSRAM |
@@ -71,9 +73,9 @@
 
 ## 4. 控制模型
 
-当前按键映射定义在 `shared/ave_screens/ave_screen_manager.h` 中：
+整台设备的控制布局如下：
 
-| 物理控制 | 逻辑键 | 当前含义 |
+| 物理控制 | 逻辑键 | 含义 |
 |---|---|---|
 | 摇杆左 | `AVE_KEY_LEFT` | 返回、刷新、或切到前一个 token，取决于当前页面 |
 | 摇杆右 | `AVE_KEY_RIGHT` | 进入、打开详情、或切到下一个 token，取决于当前页面 |
@@ -85,9 +87,9 @@
 | B | `AVE_KEY_B` | 返回 / 取消 |
 | FN | 系统 / 语音唤醒 / PTT | 语音唤醒、按住说话、系统语音入口 |
 
-## 5. 当前产品页面结构
+## 5. 页面结构
 
-当前代码里的页面路由包括：
+Ava Box 由这些核心页面和界面层组成：
 
 - `feed`
 - `explorer`
@@ -100,40 +102,33 @@
 - `notify`
 - `disambiguation`
 
-几个重要的实现事实：
-
-- `Orders` 不是独立路由页面，而是 `Feed` 内的一个模式
-- `Signals` 和 `Watchlist` 不是独立 screen 文件，而是 `Browse` 的两种模式
-- `Portfolio detail` 不是独立页面，而是 `Portfolio` 内部的 detail 子视图
-- `Notify` 是 overlay，不会替换当前主页面
-
 ## 6. 页面 / 功能 / 按钮总表
 
-下面这张表是按当前代码整理出来的产品真相表。
+下面这张表把每个页面的用途、功能和按键行为放在一起。
 
 | 页面 / 模式 | 页面用途 | 用户可见功能 | 按钮 |
 |---|---|---|---|
 | `Feed` - 标准首页 | 主市场发现页面 | 浏览 token 列表；进入 token 详情；刷新当前 source；切换标准 source；跳转到 Explorer | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开当前 token 的 `Spotlight`<br>`LEFT`：刷新当前 source<br>`X`：在 `TRENDING / GAINER / LOSER / NEW / MEME / AI / DEPIN / GAMEFI` 间切换 source<br>`B`：打开 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Feed` - search / special source | 搜索结果页或特殊 source 列表 | 浏览结果；进入 token 详情；回到标准 feed source | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开 `Spotlight`<br>`LEFT`：当前代码里禁用，会弹 notify<br>`X`：当前代码里禁用，会弹 notify<br>`B`：恢复到记忆中的标准 feed source<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Feed` - orders mode | 在 Feed 内显示 limit orders | 只浏览挂单；退出回标准 feed | `UP/DOWN`：移动选择<br>`RIGHT`、`A`、`LEFT`、`X`：当前代码里禁用<br>`B`：发送 back 并退出 orders mode<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Feed` - search / special source | 搜索结果页或特殊 source 列表 | 浏览结果；进入 token 详情；回到标准 feed source | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开 `Spotlight`<br>`LEFT`：当前视图不使用，会弹 notify<br>`X`：当前视图不使用，会弹 notify<br>`B`：恢复到记忆中的标准 feed source<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Feed` - orders mode | 在 Feed 内显示 limit orders | 只浏览挂单；退出回标准 feed | `UP/DOWN`：移动选择<br>`RIGHT`、`A`、`LEFT`、`X`：当前模式不使用<br>`B`：发送 back 并退出 orders mode<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Explorer` - menu | 顶层导航中心 | 进入 Search guide、Orders、Trading Mode、Sources、Signals、Watchlist | `UP/DOWN`：移动菜单选择<br>`RIGHT` 或 `A`：激活选中项<br>`LEFT` 或 `B`：回到缓存的 `Feed`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Explorer` - search guide | 语音搜索引导页 | 告诉用户直接说 token 名；设备上没有键盘式搜索输入 | `LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT，用于搜索 token |
 | `Explorer` - sources | Source / platform 选择页 | 加载 topic feed 和 platform feed | `UP/DOWN`：移动 source 选择<br>`RIGHT` 或 `A`：把该 source 加载到 `Feed`<br>`LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Explorer` - trading mode | 执行模式切换页 | 在 `real` 和 `paper` 之间切换 | `UP/DOWN`：选择模式<br>`RIGHT` 或 `A`：应用 `real` 或 `paper`<br>`LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Browse` - signals | 公开 signal 浏览页 | 浏览 signal 列表；进入 token 详情；切换 signal 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 signal 链，当前服务端实现是 `solana <-> bsc`<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Browse` - watchlist | 自选列表浏览页 | 浏览 watchlist；进入 token 详情；切换 watchlist 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 watchlist 链，当前服务端实现是 `all / solana / base / eth / bsc`<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Browse` - signals | 公开 signal 浏览页 | 浏览 signal 列表；进入 token 详情；切换 signal 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 signal 链，可在 `solana / bsc` 间切换<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Browse` - watchlist | 自选列表浏览页 | 浏览 watchlist；进入 token 详情；切换 watchlist 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 watchlist 链，可在 `all / solana / base / eth / bsc` 间切换<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Disambiguation` | 搜索歧义选择页 | 当多个 token 匹配时，选择正确资产 | `UP/DOWN`：移动光标<br>`RIGHT` 或 `A`：选择当前候选项并进入 token 详情<br>`LEFT` 或 `B`：返回<br>`X`：锁定，不可操作，会弹 notify<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Spotlight` | Token 详情和操作页 | 显示 token 详情、K 线、价格、合约信息；切换周期；买入；卖出；切换前后 token | `LEFT`：切到当前 feed 上下文中的前一个 token<br>`RIGHT`：切到后一个 token<br>`UP`：切到下一个 K 线周期<br>`DOWN`：切到上一个 K 线周期<br>`A`：发起 market buy，进入 `Confirm`<br>`X`：发起 quick sell，进入 `Confirm`<br>`B`：返回，并带服务端恢复 + 本地 fallback timer<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Confirm` | Market trade 确认页 | 查看已起草的 market trade，并显式确认或取消 | `A`：确认交易并等待服务端 ack<br>`B`：取消交易<br>`Y`：全局逻辑会先取消交易，再进入 `Portfolio`，但若 ack 已在等待中则忽略<br>`LEFT/RIGHT/UP/DOWN/X`：当前代码无页面动作<br>`FN`：语音唤醒 / PTT |
-| `Limit Confirm` | Limit order 确认页 | 查看已起草的 limit order，并显式确认或取消 | `A`：确认 limit order<br>`B`：取消 limit order<br>`Y`：全局逻辑会先取消交易，再进入 `Portfolio`，但若 ack 已在等待中则忽略<br>`LEFT/RIGHT/UP/DOWN/X`：当前代码无页面动作<br>`FN`：语音唤醒 / PTT |
-| `Result` | 交易结果页 | 展示 success、failure、timeout、cancellation 或 deferred / reconciled result | `任意键`：立即请求 back<br>`Y`：如果先被全局逻辑截获则仍按全局快捷键规则处理，否则 Result 页面本身按任意键退出<br>`FN`：语音唤醒 / PTT |
-| `Portfolio` - holdings list | 持仓总览页 | 查看 holdings；切链；进入 Spotlight；进入 token activity detail；卖出持仓 | `UP/DOWN`：移动持仓选择<br>`RIGHT`：打开所选 token 的 `Spotlight`<br>`A`：打开 token activity detail 子视图<br>`X`：卖出当前 holding<br>`B`：返回，并带服务端恢复 + 本地 fallback timer<br>`Y`：切换 portfolio 链，当前服务端实现是 `solana / base / eth / bsc`<br>`FN`：语音唤醒 / PTT |
-| `Portfolio` - activity detail | 单个 token 的交易聚合详情 | 展示 Buy Avg、Buy Tot、Sell Avg、Sell Tot、P&L、Open、First Buy、Last Buy、First Sell、Last Sell | `RIGHT`：从 detail 视图跳到该 token 的 `Spotlight`<br>`B`：通过服务端恢复 + 本地 fallback timer 返回 portfolio 列表<br>`Y`：当前 detail 视图无单独本地动作；仍在 portfolio 页面体系内<br>`FN`：语音唤醒 / PTT |
+| `Spotlight` | Token 详情和操作页 | 显示 token 详情、K 线、价格、合约信息；切换周期；买入；卖出；切换前后 token | `LEFT`：切到当前 feed 上下文中的前一个 token<br>`RIGHT`：切到后一个 token<br>`UP`：切到下一个 K 线周期<br>`DOWN`：切到上一个 K 线周期<br>`A`：发起 market buy，进入 `Confirm`<br>`X`：发起 quick sell，进入 `Confirm`<br>`B`：返回上一个列表上下文<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Confirm` | Market trade 确认页 | 查看已起草的 market trade，并显式确认或取消 | `A`：确认交易并等待服务端 ack<br>`B`：取消交易<br>`Y`：先取消当前草稿交易，再进入 `Portfolio`；若确认回执已在等待中，则保持当前流程<br>`LEFT/RIGHT/UP/DOWN/X`：本页无单独动作<br>`FN`：语音唤醒 / PTT |
+| `Limit Confirm` | Limit order 确认页 | 查看已起草的 limit order，并显式确认或取消 | `A`：确认 limit order<br>`B`：取消 limit order<br>`Y`：先取消当前草稿交易，再进入 `Portfolio`；若确认回执已在等待中，则保持当前流程<br>`LEFT/RIGHT/UP/DOWN/X`：本页无单独动作<br>`FN`：语音唤醒 / PTT |
+| `Result` | 交易结果页 | 展示 success、failure、timeout、cancellation 或 deferred / reconciled result | `任意键`：立即请求 back<br>`Y`：若先触发全局快捷逻辑则进入 `Portfolio`，否则和其他按键一样退出 Result<br>`FN`：语音唤醒 / PTT |
+| `Portfolio` - holdings list | 持仓总览页 | 查看 holdings；切链；进入 Spotlight；进入 token activity detail；卖出持仓 | `UP/DOWN`：移动持仓选择<br>`RIGHT`：打开所选 token 的 `Spotlight`<br>`A`：打开 token activity detail 子视图<br>`X`：卖出当前 holding<br>`B`：返回上一个列表上下文<br>`Y`：切换 portfolio 链，可在 `solana / base / eth / bsc` 间切换<br>`FN`：语音唤醒 / PTT |
+| `Portfolio` - activity detail | 单个 token 的交易聚合详情 | 展示 Buy Avg、Buy Tot、Sell Avg、Sell Tot、P&L、Open、First Buy、Last Buy、First Sell、Last Sell | `RIGHT`：从 detail 视图跳到该 token 的 `Spotlight`<br>`B`：返回 portfolio 列表<br>`Y`：当前 detail 视图无单独本地动作；仍在 portfolio 页面体系内<br>`FN`：语音唤醒 / PTT |
 | `Notify` overlay | 非阻塞消息层 | 展示 info / warning / error / 交易状态消息，不替换当前页面 | `任意键`：先关闭 overlay；同一次按键不会继续透传到底下页面 |
 
-## 7. 当前用户可见功能
+## 7. 用户可见功能
 
-按当前代码，Ava Box 已经具备以下产品能力。
+Ava Box 已经具备以下产品能力。
 
 ### 7.1 发现与浏览
 
@@ -165,6 +160,8 @@
 - cancel order
 - 执行前确认的 guarded confirm flow
 
+模拟交易是 Ava Box 一个非常关键的产品卖点。它让用户可以先完整演练这台设备的交互闭环：用语音发起交易、检查确认页、观察持仓变化、理解 portfolio 反馈，再决定是否切换到真实交易。对于一台 AI 交易硬件来说，这会明显降低上手门槛、试错成本和信任成本。
+
 ### 7.4 Portfolio 与钱包理解
 
 - holdings list
@@ -191,9 +188,9 @@ AI 模型本身不是 UI 控制器。Ava Box 当前使用的是混合模式：
 
 这点很重要，因为它让产品既快又安全。
 
-### 8.1 当前唤醒词
+### 8.1 唤醒词
 
-`server/main/xiaozhi-server/config.yaml` 中配置的唤醒词包括：
+唤醒词包括：
 
 - `Hey Ava`
 - `Hi Ava`
@@ -203,9 +200,9 @@ AI 模型本身不是 UI 控制器。Ava Box 当前使用的是混合模式：
 - `Eva`、`Ai Wa` 等发音近似变体
 - 中文近似，如 `你好Ava`、`嗨Ava`、`嘿Ava`、`艾娃`
 
-### 8.2 当前语音已经能做什么
+### 8.2 语音能力
 
-从当前 router 和 config 来看，语音已经支持：
+语音已经支持：
 
 - 打开 trending feed
 - 打开 portfolio
@@ -248,7 +245,7 @@ AI 模型本身不是 UI 控制器。Ava Box 当前使用的是混合模式：
 
 ## 9. AVE Claw 和 AVE Skills 在产品里是怎么被用到的
 
-在这份文档里，`Ava Box` 是产品主体。`AVE Claw` 和 `AVE Skills` 是它所调用的能力后端。
+在 Ava Box 里，`AVE Claw` 和 `AVE Skills` 提供的是产品背后的能力层。
 
 ### 9.1 AVE Claw 作为产品后端
 
@@ -264,7 +261,7 @@ AI 模型本身不是 UI 控制器。Ava Box 当前使用的是混合模式：
 
 ### 9.2 AVE Skills 在助手层中的使用
 
-当前服务端暴露出来的 AVE 相关 callable tools 包括：
+助手层已经接入的 AVE callable tools 包括：
 
 - `ave_get_trending`
 - `ave_token_detail`
@@ -284,21 +281,21 @@ AI 模型本身不是 UI 控制器。Ava Box 当前使用的是混合模式：
 - `ave_wallet_history`
 - `ave_wallet_pnl`
 
-实际意义就是：
+放到产品里看，这意味着：
 
 - Ava Box 用 AVE Skills 作为动作层和智能层
 - 掌机界面是产品表面
 - Skill 层未来可以继续复用到其他应用和开发者场景里
 
-## 10. 当前架构，用一句话说清楚
+## 10. 系统架构
 
-当前代码库把 Ava Box 实现成：
+Ava Box 通过五层协同来交付完整体验：
 
-- `shared/ave_screens/` 中的共享 screen system
-- `server/main/xiaozhi-server/core/handle/textHandler/` 中的服务端路由和动作层
-- `server/main/xiaozhi-server/plugins_func/functions/` 中的 AVE 市场 / 交易 / 钱包 tools
-- `simulator/` 中的桌面模拟器
-- `firmware/` 中的 ESP32 固件目标
+- 共享的 screen system
+- 服务端的路由与动作层
+- AVE 的市场、交易与钱包能力工具层
+- 用于迭代和演示的桌面 simulator
+- 面向真实设备的 ESP32 firmware target
 
 这也是为什么它不只是一个 demo mockup：
 
@@ -329,9 +326,13 @@ Ava Box 是围绕掌机控制回路设计的，所以它的交互节奏和 web t
 
 这点对 DeFi 和链上产品尤其重要。
 
+### 11.4 模拟交易本身就是信任层
+
+Ava Box 不要求用户一上来就用真实资金。模拟交易让用户可以先在接近真实的路径里体验 token 发现、Spotlight 分析、语音下单、确认逻辑、portfolio 变化和订单管理，再切到 real mode。这让产品更容易学习、更容易展示，也更容易建立信任。
+
 ## 12. 总结
 
-`Ava Box` 应该是这次黑客松提交里最先被看到的产品主体。
+`Ava Box` 是这个项目里最清晰、最完整的产品表面。
 
 它已经是一个真实、完整的链上掌机产品，具备：
 
@@ -349,7 +350,8 @@ Ava Box 是围绕掌机控制回路设计的，所以它的交互节奏和 web t
 - voice routing
 - guarded confirmation
 
+在这些能力里，模拟交易应该被当作标题级卖点，而不是附属功能。它是新用户建立信任的桥梁，是团队安全演示完整流程的抓手，也是策略在真实执行前进行演练的入口。
+
 `AVE Claw` 和 `AVE Skills` 让这个产品具备可扩展性。  
-但对评委来说，最清晰的结论应该是：
 
 `Ava Box` 是一台面向链上世界的 AI 掌上交易终端，而且它已经是设备原生产品，不是概念原型。

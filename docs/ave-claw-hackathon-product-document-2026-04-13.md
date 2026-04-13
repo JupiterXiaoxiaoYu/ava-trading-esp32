@@ -15,7 +15,7 @@
 The product is designed to solve a specific problem: most crypto tools split monitoring, discovery, analysis, and execution across too many browser tabs and too much cognitive overhead. Ava Box compresses those flows into a dedicated handheld experience.
 
 `Ava` is the product IP we created specifically for `Ava Box`, not just the name of an assistant. It defines the device's interaction personality, voice identity, and product memory: a voice-first on-chain trading assistant whose final source of truth is still the screen.  
-For users, this means Ava Box is not just "a trading terminal." It becomes a character-driven device that can be awakened, spoken to, and relied on across discovery, analysis, and execution flows.  
+Ava makes Ava Box more than "a trading terminal." It becomes a character-driven device that can be awakened, spoken to, and relied on across discovery, analysis, and execution flows.  
 Under that IP layer, the platform behind the product is `AVE Claw`, which provides the capability stack and Skills used by the box.
 
 Because the runtime foundation is built on `ESP32`, this project is also effectively an intelligent hardware framework for `AVE Skills`. In practice, that means the AVE trading system is not limited to one handheld form factor: any ESP32-class device, including watches, robots, touch displays, and other embedded terminals, can be adapted into the same AVE-powered trading experience.
@@ -36,19 +36,21 @@ The hackathon describes `AVE Claw` as an AI-powered capability platform for the 
 - portfolio tracking,
 - AI-assisted search and trade entry,
 - guarded market and limit execution,
+- paper trading as a low-friction training and strategy rehearsal mode,
 - wallet analytics through backend Skills.
 
 In short:
 
 - `Ava Box` is the product,
 - `AVE Claw` is the capability platform behind it,
-- `AVE Skills` are the reusable abilities that power the box and can later power developer-built apps.
+- `AVE Skills` are the reusable abilities that power the box and can later power developer-built apps,
+- `paper trading` is one of the product's strongest adoption levers because it lets users learn the full interaction loop before taking real on-chain risk.
 
 ## 3. Hardware Profile
 
-The current product profile used for Ava Box is:
+Ava Box is built around this hardware profile:
 
-| Item | Current profile |
+| Item | Configuration |
 |---|---|
 | Chip | ESP32-S3 |
 | Memory | 8MB Flash, 8MB PSRAM |
@@ -71,9 +73,9 @@ This makes Ava Box feel more like a dedicated on-chain companion than a miniatur
 
 ## 4. Control Model
 
-Current button mapping in `shared/ave_screens/ave_screen_manager.h`:
+The control layout is:
 
-| Physical control | Logical key | Current meaning |
+| Physical control | Logical key | Meaning |
 |---|---|---|
 | Left on joystick | `AVE_KEY_LEFT` | Back, refresh, or previous token depending on page |
 | Right on joystick | `AVE_KEY_RIGHT` | Enter, open detail, or next token depending on page |
@@ -85,9 +87,9 @@ Current button mapping in `shared/ave_screens/ave_screen_manager.h`:
 | B | `AVE_KEY_B` | Back / cancel |
 | FN | system / voice wake / PTT | Voice wake, push-to-talk, or system voice entry |
 
-## 5. Current Product Surface
+## 5. Product Surfaces
 
-The current routed surfaces in code are:
+Ava Box is organized around these screens and interface layers:
 
 - `feed`
 - `explorer`
@@ -100,42 +102,35 @@ The current routed surfaces in code are:
 - `notify`
 - `disambiguation`
 
-Important implementation truths:
-
-- `Orders` is not a separate routed screen; it is a mode inside `Feed`.
-- `Signals` and `Watchlist` are not separate screen files; they are modes inside `Browse`.
-- `Portfolio detail` is not a separate screen id; it is a detail subview inside `Portfolio`.
-- `Notify` is an overlay, not a full-screen replacement.
-
 ## 6. Master Page / Feature / Button Table
 
-The table below is the current code-aligned product map.
+The table below maps each screen to its purpose, visible functions, and button behavior.
 
 | Page / mode | What it is for | Main user-visible functions | Buttons |
 |---|---|---|---|
 | `Feed` - standard home | Main market discovery surface | Browse token list; open token detail; refresh current source; cycle standard sources; jump to Explorer | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open `Spotlight` for selected token<br>`LEFT`: refresh current source<br>`X`: cycle source across `TRENDING / GAINER / LOSER / NEW / MEME / AI / DEPIN / GAMEFI`<br>`B`: open `Explorer`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Feed` - search / special source | Search-result feed or non-standard source list | Browse results; open token detail; return to standard feed source | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open `Spotlight`<br>`LEFT`: disabled, shows notify<br>`X`: disabled, shows notify<br>`B`: restore remembered standard feed source<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Feed` - orders mode | Open limit-order list rendered inside Feed | View pending orders only; exit back to standard feed | `UP/DOWN`: move selection<br>`RIGHT`, `A`, `LEFT`, `X`: disabled in code<br>`B`: send back and exit orders mode<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
+| `Feed` - search / special source | Search-result feed or non-standard source list | Browse results; open token detail; return to standard feed source | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open `Spotlight`<br>`LEFT`: not used in this view; shows notify<br>`X`: not used in this view; shows notify<br>`B`: restore remembered standard feed source<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
+| `Feed` - orders mode | Open limit-order list rendered inside Feed | View pending orders only; exit back to standard feed | `UP/DOWN`: move selection<br>`RIGHT`, `A`, `LEFT`, `X`: not used in this mode<br>`B`: send back and exit orders mode<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
 | `Explorer` - menu | Top-level navigation hub | Access Search guide, Orders, Trading Mode, Sources, Signals, Watchlist | `UP/DOWN`: move menu selection<br>`RIGHT` or `A`: activate selected item<br>`LEFT` or `B`: return to cached `Feed`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
 | `Explorer` - search guide | Voice-first search helper | Shows the user to say a token name; no direct search keyboard entry on device | `LEFT` or `B`: back to Explorer menu<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT for token search |
 | `Explorer` - sources | Source and platform picker | Load topic feeds and platform feeds | `UP/DOWN`: move source selection<br>`RIGHT` or `A`: load source into `Feed`<br>`LEFT` or `B`: back to Explorer menu<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
 | `Explorer` - trading mode | Execution mode switcher | Switch between `real` and `paper` trading | `UP/DOWN`: choose mode<br>`RIGHT` or `A`: apply `real` or `paper`<br>`LEFT` or `B`: back to Explorer menu<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Browse` - signals | Public signal browser | Browse signal list; open token detail; cycle signal chain | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open selected token in `Spotlight`<br>`X`: cycle signal chain, currently `solana <-> bsc` in server handler<br>`LEFT` or `B`: return to `Explorer`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Browse` - watchlist | Saved-token browser | Browse watchlist; open token detail; cycle watchlist chain | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open selected token in `Spotlight`<br>`X`: cycle watchlist chain through `all / solana / base / eth / bsc` in server handler<br>`LEFT` or `B`: return to `Explorer`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
+| `Browse` - signals | Public signal browser | Browse signal list; open token detail; cycle signal chain | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open selected token in `Spotlight`<br>`X`: cycle signal chain across `solana / bsc`<br>`LEFT` or `B`: return to `Explorer`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
+| `Browse` - watchlist | Saved-token browser | Browse watchlist; open token detail; cycle watchlist chain | `UP/DOWN`: move selection<br>`RIGHT` or `A`: open selected token in `Spotlight`<br>`X`: cycle watchlist chain across `all / solana / base / eth / bsc`<br>`LEFT` or `B`: return to `Explorer`<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
 | `Disambiguation` | Ambiguous search-result resolver | Choose the exact token when search returns multiple matches | `UP/DOWN`: move cursor<br>`RIGHT` or `A`: select current candidate and open token detail<br>`LEFT` or `B`: back<br>`X`: locked, shows notify<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Spotlight` | Token detail and action page | Show token detail, chart, price context, contract, interval switch, buy, sell, previous/next token | `LEFT`: previous token in current feed context<br>`RIGHT`: next token in current feed context<br>`UP`: next chart interval<br>`DOWN`: previous chart interval<br>`A`: stage market buy and open `Confirm`<br>`X`: stage quick sell and open `Confirm`<br>`B`: back with server-driven restore plus local fallback timer<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
-| `Confirm` | Market trade confirmation gate | Review staged market trade; explicitly confirm or cancel | `A`: confirm staged trade, then wait for server ack<br>`B`: cancel staged trade<br>`Y`: global handler cancels staged trade then opens `Portfolio` unless ack is already pending<br>`LEFT/RIGHT/UP/DOWN/X`: no page action in current code<br>`FN`: voice wake / PTT |
-| `Limit Confirm` | Limit-order confirmation gate | Review staged limit order; explicitly confirm or cancel | `A`: confirm staged limit order<br>`B`: cancel staged limit order<br>`Y`: global handler cancels staged trade then opens `Portfolio` unless ack is already pending<br>`LEFT/RIGHT/UP/DOWN/X`: no page action in current code<br>`FN`: voice wake / PTT |
-| `Result` | Trade outcome page | Show success, failure, timeout, cancellation, or deferred/reconciled result | `Any key`: request back immediately<br>`Y`: same global shortcut rules still apply if intercepted before page dispatch, otherwise result page exits on key<br>`FN`: voice wake / PTT |
-| `Portfolio` - holdings list | Holdings overview | View positions, switch chain, open Spotlight, open token activity detail, sell holding | `UP/DOWN`: move holding selection<br>`RIGHT`: open selected token in `Spotlight`<br>`A`: open token activity detail subview<br>`X`: sell selected holding<br>`B`: back with server-driven restore plus local fallback timer<br>`Y`: cycle portfolio chain through `solana / base / eth / bsc` in server handler<br>`FN`: voice wake / PTT |
-| `Portfolio` - activity detail | Per-token trade aggregation | Show Buy Avg, Buy Tot, Sell Avg, Sell Tot, P&L, Open, First Buy, Last Buy, First Sell, Last Sell | `RIGHT`: jump from detail view to `Spotlight` for this token<br>`B`: back to portfolio list via server-driven restore plus local fallback timer<br>`Y`: no local detail action; portfolio remains current screen<br>`FN`: voice wake / PTT |
+| `Spotlight` | Token detail and action page | Show token detail, chart, price context, contract, interval switch, buy, sell, previous/next token | `LEFT`: previous token in current feed context<br>`RIGHT`: next token in current feed context<br>`UP`: next chart interval<br>`DOWN`: previous chart interval<br>`A`: stage market buy and open `Confirm`<br>`X`: stage quick sell and open `Confirm`<br>`B`: return to the previous list context<br>`Y`: open `Portfolio` globally<br>`FN`: voice wake / PTT |
+| `Confirm` | Market trade confirmation gate | Review staged market trade; explicitly confirm or cancel | `A`: confirm staged trade, then wait for server ack<br>`B`: cancel staged trade<br>`Y`: cancel the staged trade and open `Portfolio` unless acknowledgement is already pending<br>`LEFT/RIGHT/UP/DOWN/X`: no dedicated action on this page<br>`FN`: voice wake / PTT |
+| `Limit Confirm` | Limit-order confirmation gate | Review staged limit order; explicitly confirm or cancel | `A`: confirm staged limit order<br>`B`: cancel staged limit order<br>`Y`: cancel the staged trade and open `Portfolio` unless acknowledgement is already pending<br>`LEFT/RIGHT/UP/DOWN/X`: no dedicated action on this page<br>`FN`: voice wake / PTT |
+| `Result` | Trade outcome page | Show success, failure, timeout, cancellation, or deferred/reconciled result | `Any key`: request back immediately<br>`Y`: opens `Portfolio` if the global shortcut is captured first; otherwise Result exits on key like any other input<br>`FN`: voice wake / PTT |
+| `Portfolio` - holdings list | Holdings overview | View positions, switch chain, open Spotlight, open token activity detail, sell holding | `UP/DOWN`: move holding selection<br>`RIGHT`: open selected token in `Spotlight`<br>`A`: open token activity detail subview<br>`X`: sell selected holding<br>`B`: return to the previous list context<br>`Y`: cycle portfolio chain across `solana / base / eth / bsc`<br>`FN`: voice wake / PTT |
+| `Portfolio` - activity detail | Per-token trade aggregation | Show Buy Avg, Buy Tot, Sell Avg, Sell Tot, P&L, Open, First Buy, Last Buy, First Sell, Last Sell | `RIGHT`: jump from detail view to `Spotlight` for this token<br>`B`: return to the portfolio list<br>`Y`: no local detail action; portfolio remains current screen<br>`FN`: voice wake / PTT |
 | `Notify` overlay | Non-blocking message layer | Show info / warning / error / trade state notices without replacing current screen | `Any key`: dismiss overlay first; key does not continue into underlying screen on the same press |
 
-## 7. Current User-Facing Features
+## 7. User-Facing Features
 
-From the current code, Ava Box already includes these product-level features.
+Ava Box already includes these product-level capabilities.
 
-### 8.1 Discovery and browsing
+### 7.1 Discovery and browsing
 
 - trending feed
 - topic feeds: `trending`, `gainer`, `loser`, `new`, `meme`, `ai`, `depin`, `gamefi`
@@ -145,7 +140,7 @@ From the current code, Ava Box already includes these product-level features.
 - signals browsing
 - watchlist browsing
 
-### 8.2 Analysis
+### 7.2 Analysis
 
 - token detail in `Spotlight`
 - kline interval switching
@@ -153,7 +148,7 @@ From the current code, Ava Box already includes these product-level features.
 - previous / next token navigation inside the current list context
 - risk-check path in backend tools
 
-### 8.3 Trading
+### 7.3 Trading
 
 - paper trading mode
 - real trading mode
@@ -165,7 +160,9 @@ From the current code, Ava Box already includes these product-level features.
 - cancel order
 - guarded confirm flow before execution
 
-### 8.4 Portfolio and wallet understanding
+Paper trading is especially important as a product advantage. It allows users to rehearse the full Ava Box interaction loop, test voice-driven trade entry, review confirmation flows, and understand portfolio effects before taking real on-chain risk. For a handheld AI trading device, that dramatically lowers the barrier to trust and onboarding.
+
+### 7.4 Portfolio and wallet understanding
 
 - holdings list
 - chain-specific portfolio view
@@ -175,7 +172,7 @@ From the current code, Ava Box already includes these product-level features.
 - backend wallet history
 - backend wallet PnL
 
-### 8.5 Realtime behavior
+### 7.5 Realtime behavior
 
 - live feed price updates
 - live spotlight price updates
@@ -191,9 +188,9 @@ The AI model is not the UI controller by itself. Ava Box uses a hybrid model:
 
 This is important because it keeps the product fast and safe.
 
-### 9.1 Current wake words
+### 8.1 Wake words
 
-Configured wake words in `server/main/xiaozhi-server/config.yaml` include:
+Wake words include:
 
 - `Hey Ava`
 - `Hi Ava`
@@ -203,9 +200,9 @@ Configured wake words in `server/main/xiaozhi-server/config.yaml` include:
 - phonetic variants such as `Eva` and `Ai Wa`
 - Chinese variants such as `你好Ava`, `嗨Ava`, `嘿Ava`, `艾娃`
 
-### 9.2 What voice already does
+### 8.2 Voice capabilities
 
-From current router and config, voice already supports:
+Voice already supports:
 
 - open trending feed
 - open portfolio
@@ -220,7 +217,7 @@ From current router and config, voice already supports:
 - follow-up prompts when trade parameters are missing
 - confirm / cancel / back flows
 
-### 9.3 Why this matters
+### 8.3 Why this matters
 
 This means Ava Box is not just "voice on top of a screen." It is a screen-native device where voice is integrated into the product logic:
 
@@ -248,9 +245,9 @@ So in the product narrative:
 
 ## 9. How AVE Claw and AVE Skills Are Used
 
-For this document, `Ava Box` is the product. `AVE Claw` and `AVE Skills` are the capability backend that the product uses.
+In Ava Box, `AVE Claw` and `AVE Skills` supply the capability layer behind the product experience.
 
-### 10.1 AVE Claw as the product backend
+### 9.1 AVE Claw as the product backend
 
 The box uses AVE backend capabilities for:
 
@@ -262,9 +259,9 @@ The box uses AVE backend capabilities for:
 - order and trade execution,
 - portfolio and wallet information.
 
-### 10.2 AVE Skills inside the assistant layer
+### 9.2 AVE Skills inside the assistant layer
 
-The server currently exposes AVE-related callable tools such as:
+The assistant layer already uses AVE callable tools such as:
 
 - `ave_get_trending`
 - `ave_token_detail`
@@ -284,15 +281,21 @@ The server currently exposes AVE-related callable tools such as:
 - `ave_wallet_history`
 - `ave_wallet_pnl`
 
-In practice, this means:
+In product terms:
 
 - Ava Box uses AVE Skills as its action and intelligence layer,
 - the handheld UI is the product surface,
 - the Skill layer can later be reused for other apps and developers.
 
-## 10. Current Architecture in One Paragraph
+## 10. System Architecture
 
-The current codebase implements Ava Box as a shared screen system in `shared/ave_screens/`, a server-side routing and action layer in `server/main/xiaozhi-server/core/handle/textHandler/`, a set of AVE market/trade/wallet tools in `server/main/xiaozhi-server/plugins_func/functions/`, a desktop simulator in `simulator/`, and an ESP32 firmware target in `firmware/`.
+Ava Box is delivered through five connected layers:
+
+- a shared screen system,
+- a server-side routing and action layer,
+- AVE market, trading, and wallet tools,
+- a desktop simulator for iteration and demos,
+- an ESP32 firmware target for the physical device.
 
 That is why the project is stronger than a demo-only mockup:
 
@@ -309,23 +312,27 @@ At a platform level, this also means Ava Box is the first product form of a broa
 
 Three things make the product stand out.
 
-### 12.1 Dedicated device, not browser dependency
+### 11.1 Dedicated device, not browser dependency
 
 Ava Box is built around a handheld control loop. That gives it a different interaction rhythm from web trading tools.
 
-### 12.2 AI is embedded into product logic
+### 11.2 AI is embedded into product logic
 
 The assistant is not decorative. It can search, route, ask follow-up questions, and prepare trade actions.
 
-### 12.3 Guarded execution
+### 11.3 Guarded execution
 
 The product never relies on "the model understood me, so execute immediately." It uses selection-aware routing plus explicit confirm surfaces.
 
 That combination is especially important for DeFi and on-chain products.
 
+### 11.4 Paper trading as an onboarding and trust layer
+
+Ava Box does not force users to begin with real capital. Paper trading lets them explore token discovery, Spotlight analysis, voice-driven order drafting, confirmation behavior, portfolio changes, and order management in a realistic loop before switching to real mode. That makes the product easier to learn, easier to demo, and easier to trust.
+
 ## 12. Bottom Line
 
-`Ava Box` is the product that this hackathon entry should lead with.
+`Ava Box` is the clearest product surface in this project.
 
 It is already a real, coherent on-chain handheld:
 
@@ -343,7 +350,8 @@ It is already a real, coherent on-chain handheld:
 - voice routing,
 - guarded confirmation.
 
+Among those capabilities, paper trading deserves to be read as a headline advantage, not a side feature. It is the bridge that lets new users trust the device, lets teams demo the full flow safely, and lets strategies be rehearsed before real execution.
+
 `AVE Claw` and `AVE Skills` are what make that product extensible.  
-But for judges, the clearest story is this:
 
 `Ava Box` is a handheld AI trading terminal for the on-chain world, already implemented as a device-native product rather than a concept.
