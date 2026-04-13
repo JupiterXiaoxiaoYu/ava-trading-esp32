@@ -10,6 +10,16 @@ Ava Box 的后端与设备运行时栈中有一部分代码基于 [`nulllaborg/x
 
 如果要看云端能力层与 Skills 扩展仓库，也请参考 [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill)。
 
+## 设备预览
+
+![Ava Box 硬件预览](docs/assets/readme/ava-box-device-preview.png)
+
+## Ava IP
+
+Ava 不只是设备里的助手名字，它也是 Ava Box 的产品 IP 和设备操作者人格：以语音作为入口、以屏幕作为真相源，目标是形成一个始终在线的加密交易终端体验。
+
+![Ava IP 角色设定图](docs/assets/readme/ava-ip-character-sheet.png)
+
 ## 仓库内容
 
 - `firmware/` - ESP32 固件运行时、板级适配、音频链路、OTA、协议实现和 Ava Box 设备集成层

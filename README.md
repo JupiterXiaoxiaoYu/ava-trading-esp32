@@ -10,6 +10,16 @@ Parts of the Ava Box backend and device-runtime stack are based on [`nulllaborg/
 
 For the cloud-side capability layer and Skills integration, also see [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill).
 
+## Device preview
+
+![Ava Box hardware preview](docs/assets/readme/ava-box-device-preview.png)
+
+## Ava IP
+
+Ava is not only the assistant name inside the product. Ava is the product IP and on-device operator persona for Ava Box: voice-first, screen-grounded, and designed for an always-available crypto terminal experience.
+
+![Ava IP character sheet](docs/assets/readme/ava-ip-character-sheet.png)
+
 ## What lives here
 
 - `firmware/` - ESP32 firmware runtime, board ports, audio pipeline, OTA, protocols, and the Ava Box device integration layer
