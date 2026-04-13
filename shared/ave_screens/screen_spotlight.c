@@ -600,10 +600,14 @@ static void _build(void) {
     lv_obj_set_width(s_lbl_watch_star, FOOTER_ROW4_STAR_W);
     lv_label_set_long_mode(s_lbl_watch_star, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(s_lbl_watch_star, LV_TEXT_ALIGN_RIGHT, 0);
-    /* Use Font Awesome on both simulator and firmware so the watch star stays stable
-     * even when simulator fallback fonts don't include U+2605/U+2606. */
+#if defined(LV_SIMULATOR)
+    /* Simulator fallback fonts may miss Unicode star glyphs, so use ASCII. */
+    lv_obj_set_style_text_font(s_lbl_watch_star, &lv_font_montserrat_14, 0);
+    lv_label_set_text(s_lbl_watch_star, "*");
+#else
     lv_obj_set_style_text_font(s_lbl_watch_star, &font_awesome_16_4, 0);
     lv_label_set_text(s_lbl_watch_star, AVE_WATCH_STAR_ICON);
+#endif
     lv_obj_set_style_text_color(s_lbl_watch_star, COLOR_GRAY, 0);
 
     /* ── Divider ─────────────────────────────────────────────────────── */
@@ -883,8 +887,13 @@ void screen_spotlight_show(const char *json_data)
         "CA:%s",
         ca_compact
     );
+#if defined(LV_SIMULATOR)
+    lv_label_set_text(s_lbl_watch_star, "*");
+    lv_obj_set_style_text_color(s_lbl_watch_star, is_watchlisted ? COLOR_ORANGE : COLOR_GRAY, 0);
+#else
     lv_label_set_text(s_lbl_watch_star, AVE_WATCH_STAR_ICON);
     lv_obj_set_style_text_color(s_lbl_watch_star, is_watchlisted ? COLOR_ORANGE : COLOR_GRAY, 0);
+#endif
 
     /* Feed position indicator (present only when navigating feed list) */
     s_feed_cursor = cursor;
