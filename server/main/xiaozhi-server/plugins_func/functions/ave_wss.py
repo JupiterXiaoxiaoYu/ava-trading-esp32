@@ -35,6 +35,7 @@ In ave_tools.py ave_token_detail():
 """
 
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -747,11 +748,11 @@ class AveWssManager:
                         # Cancel dangling futures so their exceptions are
                         # retrieved here and don't produce "never retrieved" warnings.
                         for t in (recv_task, resub_task):
+                            if t is None:
+                                continue
                             t.cancel()
-                            try:
+                            with contextlib.suppress(BaseException):
                                 await t
-                            except Exception:
-                                pass
 
             except asyncio.CancelledError:
                 return

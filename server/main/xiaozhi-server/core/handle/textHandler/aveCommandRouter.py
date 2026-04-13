@@ -104,6 +104,17 @@ _AMOUNT_PATTERNS = (
 )
 _LIMIT_INTENT_MARKERS = ("限价", "挂单", "limit")
 _BUY_INTENT_MARKERS = ("买", "买入", "购买", "buy", "purchase")
+_LIMIT_ORDER_CREATE_MARKERS = (
+    "限价单",
+    "下单",
+    "下个单",
+    "挂个单",
+    "挂一个单",
+    "设一个单",
+    "设置限价",
+    "place order",
+    "set order",
+)
 _PRICE_MARKERS = ("价格", "价位", "price", "跌到", "到价", "低于", "小于", "below")
 _CHAIN_NATIVE_SYMBOLS = {
     "solana": "SOL",
@@ -647,7 +658,8 @@ async def _try_route_voice_trade_intent(
     lowered = str(utterance or "").lower()
     has_limit_intent = any(marker in lowered for marker in _LIMIT_INTENT_MARKERS)
     has_buy_intent = any(marker in lowered for marker in _BUY_INTENT_MARKERS)
-    if not has_buy_intent:
+    has_limit_create_intent = any(marker in lowered for marker in _LIMIT_ORDER_CREATE_MARKERS)
+    if not has_buy_intent and not (has_limit_intent and has_limit_create_intent):
         return False
 
     symbol_hint = _extract_symbol_hint(utterance, state)

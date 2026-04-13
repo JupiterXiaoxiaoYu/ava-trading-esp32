@@ -955,6 +955,33 @@ class AveRouterTests(unittest.IsolatedAsyncioTestCase):
             symbol="AERO",
         )
 
+    async def test_voice_limit_order_creation_phrase_without_buy_still_routes(self):
+        conn = self._build_listen_conn(
+            {
+                "screen": "spotlight",
+                "current_token": {"addr": "eth-1", "chain": "eth", "symbol": "ZAMA"},
+            }
+        )
+
+        with patch("core.handle.textHandler.aveCommandRouter.send_stt_message", new=AsyncMock()) as send_stt, \
+             patch("plugins_func.functions.ave_tools.ave_limit_order") as mock_limit:
+            routed = await try_route_ave_command(
+                conn,
+                "帮我下一个限价单",
+                {
+                    "selection": {
+                        "screen": "spotlight",
+                        "token": {"addr": "eth-1", "chain": "eth", "symbol": "ZAMA"},
+                    }
+                },
+            )
+
+        self.assertTrue(routed)
+        self.assertEqual(conn.ave_state["voice_trade_draft"]["kind"], "limit_buy")
+        self.assertEqual(conn.ave_state["voice_trade_draft"]["chain"], "eth")
+        send_stt.assert_awaited_once_with(conn, "目标价是多少美元？比如说 0.00012。")
+        mock_limit.assert_not_called()
+
     async def test_voice_market_buy_rejects_wrong_native_unit_for_chain(self):
         conn = self._build_listen_conn(
             {
