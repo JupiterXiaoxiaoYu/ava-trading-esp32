@@ -94,8 +94,8 @@ _LIMIT_SYMBOL_FUZZY_PATTERN = re.compile(
 )
 _NUMBER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)")
 _PRICE_PATTERNS = (
-    re.compile(r"(?:价格|价位|price)\s*(?:到|是|为|=)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
-    re.compile(r"(?:跌到|到价|到|低于|小于|below)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"(?:目标价(?:格)?|价格|价位|price)\s*(?:到|是|为|=)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"(?:挂在|挂到|跌到|到价|到|低于|小于|below)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
 )
 _AMOUNT_PATTERNS = (
     re.compile(r"(?:用|拿|花|投入|买入金额|金额)\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
