@@ -20,7 +20,7 @@ The clean framework must not import parent-repo legacy modules such as `core.*`,
 
 ## App Logic Boundary
 
-`ChainAdapter` stays limited to basic chain data: feed, search, and token detail. Trading drafts, watchlists, portfolio composition, and skill routing live in the reference app layer (`apps/ava_box.py` and `apps/ava_box_skills.py`). This keeps future chain/helper adapters replaceable without turning the framework into an Ava Box trading server.
+`ChainAdapter` stays limited to basic chain data: feed, search, and token detail. Trading drafts, watchlists, portfolio composition, and skill routing live in the reference app layer (`apps/ava_box.py` plus `apps/ava_box_skills/`). This keeps future chain/helper adapters replaceable without turning the framework into an Ava Box trading server.
 
 ## Minimal Flow
 
