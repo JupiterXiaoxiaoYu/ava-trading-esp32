@@ -48,6 +48,8 @@ class AvaBoxApp:
 
     def handle(self, message: DeviceMessage | dict[str, Any]) -> ScreenPayload | ActionResult | ActionDraft:
         msg = message if isinstance(message, DeviceMessage) else DeviceMessage.from_dict(message)
+        if msg.context:
+            self._ingest_context(msg.context.to_dict())
         if msg.type == "heartbeat":
             return builders.notify("Ava Box", "online", level="info", context=self.context)
         if msg.type == "screen_context":
@@ -141,6 +143,7 @@ class AvaBoxApp:
 
     def _ingest_context(self, payload: dict[str, Any]) -> None:
         selected_data = payload.get("selected") if isinstance(payload.get("selected"), dict) else {}
+        incoming_state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
         selected = None
         if selected_data:
             selected = Selection(
@@ -158,7 +161,11 @@ class AvaBoxApp:
             cursor=_optional_int(payload.get("cursor")),
             selected=selected or self.context.selected,
             visible_rows=payload.get("visible_rows") if isinstance(payload.get("visible_rows"), list) else self.context.visible_rows,
-            state={**self.context.state, **{k: v for k, v in payload.items() if k not in {"selected", "visible_rows"}}},
+            state={
+                **self.context.state,
+                **incoming_state,
+                **{k: v for k, v in payload.items() if k not in {"selected", "visible_rows", "state"}},
+            },
         )
 
     def _remember_screen(self, screen: ScreenPayload) -> ScreenPayload:

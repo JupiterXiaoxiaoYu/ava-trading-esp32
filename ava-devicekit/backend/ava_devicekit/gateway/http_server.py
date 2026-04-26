@@ -4,10 +4,11 @@ import argparse
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
-from ava_devicekit.adapters.mock_solana import MockSolanaAdapter
-from ava_devicekit.apps.ava_box import AvaBoxApp
+from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
 
 SessionFactory = Callable[[], DeviceSession]
@@ -20,19 +21,27 @@ def make_handler(session_factory: SessionFactory):
         server_version = "AvaDeviceKitHTTP/0.1"
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path == "/health":
+            path = urlparse(self.path).path
+            if path == "/health":
                 self._send_json({"ok": True, "service": "ava-devicekit"})
                 return
-            if self.path == "/manifest":
+            if path == "/manifest":
                 self._send_json(session.app.manifest.to_dict())
+                return
+            if path == "/device/state":
+                self._send_json(session.snapshot())
+                return
+            if path == "/device/outbox":
+                self._send_json({"items": session.outbox, "count": len(session.outbox)})
                 return
             self._send_json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-            if self.path == "/device/boot":
+            path = urlparse(self.path).path
+            if path == "/device/boot":
                 self._send_json(session.boot())
                 return
-            if self.path == "/device/message":
+            if path == "/device/message":
                 try:
                     body = self._read_json()
                     self._send_json(session.handle(body))
@@ -65,12 +74,20 @@ def run_http_gateway(
     host: str = "127.0.0.1",
     port: int = 8788,
     session_factory: SessionFactory | None = None,
+    app_id: str = "ava_box",
+    manifest_path: str | Path | None = None,
+    adapter: str = "auto",
     mock: bool = False,
+    skill_store_path: str | None = None,
 ) -> None:
     factory = session_factory or (
-        lambda: DeviceSession(AvaBoxApp.create(chain_adapter=MockSolanaAdapter()))
-        if mock
-        else lambda: DeviceSession(AvaBoxApp.create())
+        lambda: create_device_session(
+            app_id=app_id,
+            manifest_path=manifest_path,
+            adapter=adapter,
+            mock=mock,
+            skill_store_path=skill_store_path,
+        )
     )
     server = ThreadingHTTPServer((host, port), make_handler(factory))
     print(f"Ava DeviceKit HTTP gateway listening on http://{host}:{port}")
@@ -81,9 +98,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Ava DeviceKit development HTTP gateway.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8788)
+    parser.add_argument("--app-id", default="ava_box")
+    parser.add_argument("--manifest", default=None, help="Path to a hardware app manifest JSON.")
+    parser.add_argument("--adapter", default="auto", help="Chain adapter name, or 'auto' to use the manifest.")
+    parser.add_argument("--skill-store", default=None, help="Path for app-layer persistent skill state.")
     parser.add_argument("--mock", action="store_true", help="Use offline mock Solana data for local demos.")
     args = parser.parse_args()
-    run_http_gateway(args.host, args.port, mock=args.mock)
+    run_http_gateway(
+        args.host,
+        args.port,
+        app_id=args.app_id,
+        manifest_path=args.manifest,
+        adapter=args.adapter,
+        mock=args.mock,
+        skill_store_path=args.skill_store,
+    )
 
 
 if __name__ == "__main__":

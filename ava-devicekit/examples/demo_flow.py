@@ -1,19 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from ava_devicekit.adapters.mock_solana import MockSolanaAdapter
-from ava_devicekit.apps.ava_box import AvaBoxApp
-from ava_devicekit.core.manifest import HardwareAppManifest
-from ava_devicekit.gateway.session import DeviceSession
-
-ROOT = Path(__file__).resolve().parents[1]
+from ava_devicekit.gateway.factory import create_device_session
 
 
 def main() -> None:
-    manifest = HardwareAppManifest.load(ROOT / "apps" / "ava_box" / "manifest.json")
-    session = DeviceSession(AvaBoxApp(manifest=manifest, chain_adapter=MockSolanaAdapter()))
+    session = create_device_session(mock=True)
     flow = [
         session.boot(),
         session.handle({"type": "key_action", "action": "watch"}),

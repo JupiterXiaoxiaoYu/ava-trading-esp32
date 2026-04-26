@@ -24,8 +24,7 @@ def test_demo_flow_contracts():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    manifest = module.HardwareAppManifest.load(ROOT / "apps" / "ava_box" / "manifest.json")
-    session = module.DeviceSession(module.AvaBoxApp(manifest=manifest, chain_adapter=module.MockSolanaAdapter()))
+    session = module.create_device_session(mock=True)
     feed = session.boot()
     assert feed["screen"] == "feed"
     detail = session.handle({"type": "key_action", "action": "watch"})
@@ -54,3 +53,36 @@ def test_clean_framework_has_no_legacy_imports():
 def test_json_files_parse():
     for path in list((ROOT / "schemas").glob("*.json")) + [ROOT / "apps" / "ava_box" / "manifest.json"]:
         json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_device_message_preserves_selection_context():
+    from ava_devicekit.core.types import DeviceMessage
+
+    msg = DeviceMessage.from_dict(
+        {
+            "type": "listen_detect",
+            "text": "buy",
+            "context": {
+                "screen": "spotlight",
+                "selected": {
+                    "token_id": "So11111111111111111111111111111111111111112-solana",
+                    "addr": "So11111111111111111111111111111111111111112",
+                    "chain": "solana",
+                    "symbol": "SOL",
+                    "cursor": 2,
+                },
+            },
+        }
+    )
+    assert msg.context is not None
+    assert msg.context.selected is not None
+    assert msg.context.screen == "spotlight"
+    assert msg.context.selected.symbol == "SOL"
+    assert "context" not in msg.payload
+
+
+def test_device_message_flattens_payload_object():
+    from ava_devicekit.core.types import DeviceMessage
+
+    msg = DeviceMessage.from_dict({"type": "key_action", "action": "buy", "payload": {"amount_sol": "0.1"}})
+    assert msg.payload == {"amount_sol": "0.1"}
