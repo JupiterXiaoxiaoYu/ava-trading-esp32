@@ -22,3 +22,21 @@ def test_shared_ui_c_contract_compiles_and_runs(tmp_path):
     ]
     subprocess.run(cmd, check=True)
     subprocess.run([str(binary)], check=True)
+
+
+def test_firmware_runtime_contract_compiles_and_runs(tmp_path):
+    binary = tmp_path / "ava_devicekit_runtime_test"
+    cmd = [
+        "gcc",
+        "-std=c11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        f"-I{ROOT / 'firmware' / 'include'}",
+        str(ROOT / "firmware" / "src" / "ava_devicekit_runtime.c"),
+        str(ROOT / "firmware" / "tests" / "test_ava_devicekit_runtime.c"),
+        "-o",
+        str(binary),
+    ]
+    subprocess.run(cmd, check=True)
+    subprocess.run([str(binary)], check=True)

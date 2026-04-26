@@ -114,6 +114,18 @@ Before implementation beyond the clean skeleton, confirm these decisions:
 | Paper trading | Keep as default safe execution mode | Real trade first, or no trade execution |
 | DePIN sensor support | Later as example app | Include in v1 demo |
 
+## Implemented Adapted Copies
+
+These capabilities have been copied as behavior/protocol contracts and rewritten behind DeviceKit-owned modules. They must not grow imports back to the legacy xiaozhi code.
+
+| Capability | DeviceKit module | Adapted behavior |
+|---|---|---|
+| xiaozhi-compatible hello/listen/key_action WebSocket flow | `backend/ava_devicekit/gateway/xiaozhi_compat.py` | Existing firmware can speak the old frame shape while actions route through `DeviceSession` |
+| OTA config response | `backend/ava_devicekit/ota/xiaozhi.py` | Emits `server_time`, `websocket`, and `firmware` sections expected by current firmware |
+| Firmware version scanning | `backend/ava_devicekit/ota/version.py` | Supports `{model}_{version}.bin` discovery and semver-like update selection |
+| Runtime deployment config | `backend/ava_devicekit/runtime/settings.py` | Replaces legacy YAML/config loader for HTTP/WebSocket/OTA settings |
+| Firmware app/network/listen state boundary | `firmware/include/ava_devicekit_runtime.h`, `firmware/src/ava_devicekit_runtime.c` | Keeps Wi-Fi/network state, hello, listen, stop, and wake-detect semantics without ESP-IDF/xiaozhi includes |
+
 ## Current Confirmed Defaults
 
 These are the defaults used by the current `ava-devicekit/` skeleton until changed:

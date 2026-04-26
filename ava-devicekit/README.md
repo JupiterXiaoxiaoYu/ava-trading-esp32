@@ -34,6 +34,8 @@ Ava Box can run through DeviceKit without importing the legacy xiaozhi backend. 
 | Session factory | `gateway/factory.py` creates a runnable `DeviceSession` from CLI or code |
 | HTTP gateway | `gateway/http_server.py` exposes boot/message/state/outbox endpoints |
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
+| xiaozhi compatibility shim | `gateway/xiaozhi_compat.py` accepts existing firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
+| OTA/settings runtime | `runtime/settings.py` and `ota/` emit the existing firmware OTA contract without importing legacy server code |
 
 ## Minimal Flow
 
@@ -57,6 +59,33 @@ ESP32 input / voice
 | `GET` | `/device/outbox` | Payloads emitted by the session |
 | `POST` | `/device/boot` | Start the hardware app and render the first screen |
 | `POST` | `/device/message` | Send a `DeviceMessage` such as `key_action`, `listen_detect`, `confirm`, or `cancel` |
+| `GET` | `/xiaozhi/ota/` | Compatibility health response for existing firmware OTA checks |
+| `POST` | `/xiaozhi/ota/` | Compatibility OTA response containing `websocket`, `server_time`, and optional firmware update |
+| `GET` | `/xiaozhi/ota/download/{filename}` | Safe firmware binary download from the configured bin directory |
+
+## Existing Firmware Compatibility
+
+The current production firmware can be moved over incrementally by pointing its OTA URL at the DeviceKit HTTP gateway and its WebSocket URL at the compatibility gateway:
+
+```bash
+cd ava-devicekit
+PYTHONPATH=backend python3 -m ava_devicekit.gateway.dev_server --host 0.0.0.0 --port 8788 --mock --config runtime.local.json
+PYTHONPATH=backend python3 -m ava_devicekit.gateway.xiaozhi_compat --host 0.0.0.0 --port 8787 --mock --config runtime.local.json
+```
+
+Example runtime config:
+
+```json
+{
+  "public_base_url": "https://ava.example.com",
+  "websocket_url": "wss://ava.example.com/xiaozhi/v1/",
+  "firmware_bin_dir": "data/bin",
+  "websocket_ping_interval": 30,
+  "websocket_ping_timeout": 10
+}
+```
+
+This preserves the legacy firmware wire protocol while keeping the implementation inside DeviceKit-owned modules.
 
 
 ## Legacy Capability Review
