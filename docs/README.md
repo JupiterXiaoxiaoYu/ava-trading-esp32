@@ -10,6 +10,7 @@ This directory holds current Ava DeviceKit and Ava Box reference documents.
 | [`../ava-devicekit/README.md`](../ava-devicekit/README.md) | Clean framework implementation boundary |
 | [`../ava-devicekit/apps/ava_box/manifest.json`](../ava-devicekit/apps/ava_box/manifest.json) | Ava Box reference app manifest |
 | [`architecture/xiaozhi-extraction.md`](architecture/xiaozhi-extraction.md) | Plan for reducing the legacy runtime into the smaller DeviceKit boundary |
+| [`../ava-devicekit/docs/xiaozhi-capability-inventory.md`](../ava-devicekit/docs/xiaozhi-capability-inventory.md) | Decision matrix for which legacy capabilities to keep, replace, drop, or defer |
 | [`ave-claw-hackathon-product-document-2026-04-13.md`](ave-claw-hackathon-product-document-2026-04-13.md) | English product/reference write-up |
 | [`ava-box-product-document-zh-2026-04-13.md`](ava-box-product-document-zh-2026-04-13.md) | 中文产品 / 参考文档 |
 

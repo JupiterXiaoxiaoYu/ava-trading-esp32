@@ -69,6 +69,7 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 | Preview pages on desktop | [`simulator/README.md`](simulator/README.md), [`shared/ave_screens/README.md`](shared/ave_screens/README.md) |
 | Understand shared UI contracts | [`shared/README.md`](shared/README.md) |
 | Read architecture notes | [`docs/README.md`](docs/README.md), [`docs/architecture/xiaozhi-extraction.md`](docs/architecture/xiaozhi-extraction.md) |
+| Confirm legacy capability decisions | [`ava-devicekit/docs/xiaozhi-capability-inventory.md`](ava-devicekit/docs/xiaozhi-capability-inventory.md) |
 
 ## Architecture At A Glance
 

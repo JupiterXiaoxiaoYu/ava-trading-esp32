@@ -30,6 +30,11 @@ ESP32 input / voice
   -> ActionResult
 ```
 
+
+## Legacy Capability Review
+
+Before migrating more code from the parent repo, review `docs/xiaozhi-capability-inventory.md`. Every legacy capability must be explicitly marked `keep`, `replace`, `drop`, or `later` before implementation. This prevents accidental dependency on the old assistant framework while still preserving useful runtime capabilities such as Wi-Fi provisioning, OTA, audio, model providers, and live market streams.
+
 ## Run Local Checks
 
 ```bash
