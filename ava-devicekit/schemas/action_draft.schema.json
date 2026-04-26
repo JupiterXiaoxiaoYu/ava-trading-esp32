@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/action_draft.schema.json",
+  "title": "Ava DeviceKit Action Draft",
+  "type": "object",
+  "required": ["action", "chain", "summary", "risk", "requires_confirmation", "screen"],
+  "properties": {
+    "action": { "type": "string" },
+    "chain": { "type": "string" },
+    "summary": { "type": "object" },
+    "risk": { "type": "object" },
+    "requires_confirmation": { "type": "boolean" },
+    "request_id": { "type": "string" },
+    "screen": { "type": "object" }
+  },
+  "additionalProperties": true
+}

@@ -1,41 +1,38 @@
-# Xiaozhi Runtime Extraction Plan
+# Legacy Runtime Extraction Plan
 
-Ava DeviceKit currently reuses parts of the xiaozhi ecosystem because it already solves practical ESP32 assistant problems: audio input/output, wake/PTT behavior, WebSocket sessions, OTA, and board bring-up.
+Ava DeviceKit is moving Ava Box capabilities into our own framework. The clean implementation now starts in `ava-devicekit/`; the old server/firmware/shared trees are references until the required behavior is replaced.
 
-The framework direction is to keep only the runtime pieces Ava hardware apps need and move product behavior into smaller DeviceKit modules.
+## Target Boundary
 
-## Keep As Runtime Infrastructure
-
-| Area | Why it stays |
+| Capability | New owner |
 |---|---|
-| Audio pipeline | Microphone, speaker, ASR/TTS streaming, wake/PTT lifecycle |
-| Connectivity | Wi-Fi setup, WebSocket protocol, reconnect behavior |
-| OTA and settings | Required for real hardware iteration |
-| Board ports | Existing ESP32 board bring-up and display/audio drivers |
-| Session lifecycle | Device online state, connection state, assistant turn handling |
+| Hardware app manifest | `ava-devicekit/apps/ava_box/manifest.json` |
+| App/session types | `ava-devicekit/backend/ava_devicekit/core/` |
+| Chain/helper adapter interface | `ava-devicekit/backend/ava_devicekit/adapters/base.py` |
+| Solana implementation | `ava-devicekit/backend/ava_devicekit/adapters/solana.py` |
+| Reference app routing | `ava-devicekit/backend/ava_devicekit/apps/ava_box.py` |
+| Device session gateway | `ava-devicekit/backend/ava_devicekit/gateway/` |
+| Screen/action schemas | `ava-devicekit/schemas/` |
 
-## Extract Into Ava DeviceKit
+## Extraction Rule
 
-| Area | Target |
+Do not import legacy runtime modules from `ava-devicekit/`. In particular, the clean framework must not depend on legacy connection classes, tool registration, or provider lifecycle code.
+
+| Legacy concept | Replacement |
 |---|---|
-| App manifest | Device/app capabilities, model policy, screen list, action list, safety policy |
-| Screen contracts | Stable payload contracts shared by firmware and simulator |
-| Action gateway | Deterministic Solana actions and confirmation payload construction |
-| Context router | Current screen, cursor, selected token, portfolio/watchlist state |
-| Reference apps | Ava Box first, then payment terminal, alert device, sensor demo |
+| `ConnectionHandler` | `DeviceSession` + `AppContext` |
+| tool registration callbacks | `AvaBoxApp.handle(DeviceMessage)` |
+| monolithic tool file | `ChainAdapter` + app routing + screen builders |
+| direct screen push tasks | `ScreenPayload` returned by app/session |
+| provider-specific model config | `ModelRouter` and deployment-injected providers |
 
-## Simplification Rule
+## Migration Order
 
-The backend should not expose the full xiaozhi application model as the public framework. Public DeviceKit APIs should be narrow:
-
-| Public DeviceKit concept | Not exposed as public API |
+| Step | Outcome |
 |---|---|
-| Hardware app manifest | Internal xiaozhi config shape |
-| Action payload | Provider-specific tool call internals |
-| Screen payload | Assistant implementation details |
-| Physical confirmation | Raw conversation state machine |
-| Model routing policy | Provider-specific adapter wiring |
-
-## First Code Boundary
-
-`server/main/xiaozhi-server/plugins_func/functions/ava_devicekit.py` is the first lightweight backend boundary. Existing Ava Box tools can call this helper while the larger server still runs on the current xiaozhi-derived runtime.
+| 1 | Keep clean backend package compiling independently |
+| 2 | Port Solana feed/search/detail/watchlist/draft behavior into `SolanaAdapter` |
+| 3 | Route simulator/mock device through `DeviceSession` |
+| 4 | Move LVGL screen code behind clean `ScreenPayload` contracts |
+| 5 | Replace firmware transport glue with DeviceKit `DeviceMessage` protocol |
+| 6 | Retire legacy server paths once online service is running on the clean gateway |

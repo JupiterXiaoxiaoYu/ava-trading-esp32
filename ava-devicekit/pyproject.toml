@@ -1,0 +1,14 @@
+[project]
+name = "ava-devicekit"
+version = "0.1.0"
+description = "Full-stack ESP32 framework for Solana AI hardware apps."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+websocket = ["websockets>=12"]
+dev = ["jsonschema>=4", "pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["tests"]

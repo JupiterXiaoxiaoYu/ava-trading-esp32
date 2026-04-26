@@ -2,11 +2,11 @@
 
 (English | [中文](README_zh.md))
 
-Ava DeviceKit is a full-stack ESP32 framework for building Solana AI hardware apps. It provides device UI, physical input, voice interaction, backend Solana action APIs, model routing, and confirmation flows so developers can bring Solana actions into real-world devices.
+Ava DeviceKit is a full-stack ESP32 framework for building Solana AI hardware apps. The clean framework implementation now lives in `ava-devicekit/`: app/session types, adapter interfaces, Solana adapter, gateway/session runtime, schemas, and the Ava Box reference app.
 
 Ava Box is the first reference app built with the kit: a handheld Solana AI terminal for token discovery, watchlists, portfolio views, and trade drafts on an ESP32-S3 Scratch Arcade style board.
 
-Parts of the current device/runtime stack are based on [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32). The framework work is extracting only the runtime pieces Ava hardware apps need, then moving app behavior into smaller DeviceKit contracts and reference apps.
+Parts of the legacy device/runtime stack are based on [`nulllaborg/xiaozhi-esp32`](https://github.com/nulllaborg/xiaozhi-esp32). The new `ava-devicekit/` code does not import the legacy assistant runtime; it extracts the Ava Box capabilities into our own app, adapter, transport, screen, and confirmation contracts.
 
 For the cloud-side capability layer and Skills integration, also see [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill).
 
@@ -24,12 +24,12 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 
 | Layer | Role | Current code |
 |---|---|---|
-| Device Runtime | ESP32 firmware, board drivers, display/audio lifecycle, Wi-Fi, OTA, device state, transport | `firmware/` |
-| Screen Contracts | LVGL payloads shared by firmware and simulator | `shared/ave_screens/` |
-| Solana Action Gateway | Backend action APIs, screen payload pushes, trade/order drafts, confirmation/result handling | `server/main/xiaozhi-server/plugins_func/functions/` |
-| AI Router | ASR/TTS, wake/PTT, model routing, deterministic actions, LLM fallback | `server/main/xiaozhi-server/core/` |
-| DeviceKit Contracts | Manifests, schemas, examples, safety model, reference app metadata | `devicekit/` |
-| Reference Apps | Concrete hardware apps built on the framework | `apps/ava_box/`, `devicekit/examples/` |
+| Device Runtime | ESP32 firmware boundary, device messages, transport, future clean board ports | `ava-devicekit/firmware/`, legacy reference in `firmware/` |
+| Screen Contracts | Framework screen payload schema and portable LVGL target | `ava-devicekit/schemas/`, `ava-devicekit/shared_ui/`, legacy reference in `shared/ave_screens/` |
+| Solana Action Gateway | Clean `ChainAdapter` plus Solana feed/search/detail/watchlist/draft implementation | `ava-devicekit/backend/ava_devicekit/adapters/solana.py` |
+| AI Router | Vendor-neutral model routing policy and app-level deterministic routing | `ava-devicekit/backend/ava_devicekit/model/`, `ava-devicekit/backend/ava_devicekit/apps/ava_box.py` |
+| DeviceKit Contracts | Clean manifests, schemas, examples, safety model, reference app metadata | `ava-devicekit/` |
+| Reference Apps | Concrete hardware apps built on the framework | `ava-devicekit/apps/ava_box/`, `ava-devicekit/examples/` |
 
 ## Ava Box Reference App
 
@@ -46,8 +46,9 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 
 | Directory | Role |
 |---|---|
-| `devicekit/` | Ava DeviceKit contracts, manifests, schemas, examples, and framework notes |
-| `apps/ava_box/` | Ava Box reference app description and app-level contracts |
+| `ava-devicekit/` | Clean Ava DeviceKit framework implementation with backend package, adapters, schemas, examples, and Ava Box app |
+| `devicekit/` | Earlier framework notes kept as migration reference |
+| `apps/ava_box/` | Earlier Ava Box reference notes kept as migration reference |
 | `firmware/` | ESP32 firmware runtime, board ports, audio pipeline, OTA, protocols, and device integration |
 | `server/` | Backend stack, management services, action gateway, AI routing/tool logic, deployment docs, and tests |
 | `shared/` | Shared LVGL screens compiled into both firmware and simulator |
@@ -61,8 +62,8 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 
 | Task | Entry point |
 |---|---|
-| Understand the framework | [`devicekit/README.md`](devicekit/README.md) |
-| Review Ava Box as reference app | [`apps/ava_box/README.md`](apps/ava_box/README.md), [`devicekit/manifests/ava_box.solana.json`](devicekit/manifests/ava_box.solana.json) |
+| Understand the clean framework | [`ava-devicekit/README.md`](ava-devicekit/README.md) |
+| Review Ava Box as reference app | [`ava-devicekit/apps/ava_box/manifest.json`](ava-devicekit/apps/ava_box/manifest.json), [`ava-devicekit/backend/ava_devicekit/apps/ava_box.py`](ava-devicekit/backend/ava_devicekit/apps/ava_box.py) |
 | Bring up ESP32 runtime | [`firmware/README.md`](firmware/README.md), [`firmware/main/README.md`](firmware/main/README.md) |
 | Work on Solana backend behavior | [`server/README_en.md`](server/README_en.md), [`server/main/README_en.md`](server/main/README_en.md) |
 | Preview pages on desktop | [`simulator/README.md`](simulator/README.md), [`shared/ave_screens/README.md`](shared/ave_screens/README.md) |
@@ -74,24 +75,24 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 ```text
 voice + physical input
   -> firmware/ (ESP32 runtime, board drivers, transport)
-  -> server/ (AI router, action gateway, Solana tool/provider logic)
-  -> shared/ave_screens/ (feed, spotlight, portfolio, confirm, result, etc.)
-       -> compiled into firmware for hardware rendering
-       -> compiled into simulator for desktop validation
-  -> devicekit/ (manifest/schema/action contracts for reusable hardware apps)
+  -> ava-devicekit/backend (AvaBoxApp, session gateway, model router)
+  -> ChainAdapter(SolanaAdapter first, future adapters later)
+  -> ScreenPayload / ActionDraft contracts
+       -> current LVGL reference in shared/ave_screens
+       -> future clean runtime in ava-devicekit/shared_ui
 ```
 
 Key coupling points:
 
 | Coupling point | Purpose |
 |---|---|
-| `devicekit/manifests/ava_box.solana.json` | Reference app identity, device capabilities, actions, screens, and safety policy |
-| `devicekit/schemas/` | Stable framework contracts for hardware app, action, and screen payloads |
+| `ava-devicekit/apps/ava_box/manifest.json` | Reference app identity, device capabilities, adapters, actions, screens, and safety policy |
+| `ava-devicekit/schemas/` | Stable framework contracts for hardware app, action draft, and screen payloads |
 | `shared/ave_screens/` | Single source of truth for the current Ava Box screen layer |
 | `firmware/main/boards/scratch-arcade/` | Active Scratch Arcade ESP32-S3 hardware target |
 | `firmware/main/ave_transport_idf.cc` | Bridges device events into the shared screen/runtime layer |
-| `server/main/xiaozhi-server/plugins_func/functions/ava_devicekit.py` | Lightweight backend helper boundary for DeviceKit payloads |
-| `server/main/xiaozhi-server/plugins_func/functions/ave_tools.py` | Ava Box Solana market, wallet, watchlist, portfolio, and order tools |
+| `ava-devicekit/backend/ava_devicekit/adapters/base.py` | Adapter interface for chains/helpers |
+| `ava-devicekit/backend/ava_devicekit/adapters/solana.py` | Clean Solana market, watchlist, portfolio, and action draft adapter |
 | `simulator/` | Layout, navigation, mock scene, and regression validation before flashing hardware |
 
 ## Safety Position
@@ -117,4 +118,4 @@ This monorepo is Ava DeviceKit-first, with several major directories derived fro
 | `simulator/` | `lvgl/lv_port_pc_vscode` |
 | cloud capability layer | [`AveCloud/ave-cloud-skill`](https://github.com/AveCloud/ave-cloud-skill) |
 
-The public framework surface is `devicekit/`, `apps/`, shared screen contracts, and the backend action gateway. The xiaozhi-derived runtime remains an implementation layer, not the product boundary.
+The public framework surface is `ava-devicekit/`. The xiaozhi-derived runtime remains only as legacy reference while equivalent app, adapter, transport, screen, and confirmation contracts move into our own code.
