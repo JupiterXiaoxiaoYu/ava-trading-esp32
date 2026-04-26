@@ -242,7 +242,7 @@ class KeyActionHandler(TextMessageHandler):
                 source = "trending"
             logger.bind(tag=TAG).info(f"key_action feed_source source={source}")
             try:
-                ave_get_trending(conn, topic=source)
+                ave_get_trending(conn, chain="solana", topic=source)
                 state = getattr(conn, "ave_state", {})
                 state["feed_source"] = source
                 conn.ave_state = state
@@ -256,7 +256,7 @@ class KeyActionHandler(TextMessageHandler):
                 return
             logger.bind(tag=TAG).info(f"key_action feed_platform platform={platform}")
             try:
-                ave_get_trending(conn, topic="", platform=platform)
+                ave_get_trending(conn, chain="solana", topic="", platform=platform)
                 state = getattr(conn, "ave_state", {})
                 state["feed_source"] = "trending"
                 state["feed_platform"] = platform
@@ -471,9 +471,9 @@ class KeyActionHandler(TextMessageHandler):
                     source = state.get("feed_source", "trending")
                     platform = state.get("feed_platform", "")
                     if platform:
-                        ave_get_trending(conn, topic="", platform=platform)
+                        ave_get_trending(conn, chain="solana", topic="", platform=platform)
                     else:
-                        ave_get_trending(conn, topic=source)
+                        ave_get_trending(conn, chain="solana", topic=source)
                     return
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"key_action back→search error: {e}")
@@ -500,9 +500,9 @@ class KeyActionHandler(TextMessageHandler):
                 )
                 try:
                     if platform:
-                        ave_get_trending(conn, topic="", platform=platform)
+                        ave_get_trending(conn, chain="solana", topic="", platform=platform)
                     else:
-                        ave_get_trending(conn, topic=source)
+                        ave_get_trending(conn, chain="solana", topic=source)
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"key_action back→feed error: {e}")
 
