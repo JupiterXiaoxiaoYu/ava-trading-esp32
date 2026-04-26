@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.local/schemas/hardware_app.schema.json",
+  "title": "Ava DeviceKit Hardware App Manifest",
+  "type": "object",
+  "required": ["app_id", "name", "chain", "device", "screens", "actions", "safety"],
+  "properties": {
+    "app_id": { "type": "string", "pattern": "^[a-z0-9_\\-]+$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "chain": { "type": "string" },
+    "device": {
+      "type": "object",
+      "required": ["target", "display", "inputs", "outputs"],
+      "properties": {
+        "target": { "type": "string" },
+        "reference_board": { "type": "string" },
+        "display": { "type": "string" },
+        "inputs": { "type": "array", "items": { "type": "string" } },
+        "outputs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "asr": { "type": "string" },
+        "llm": { "type": "string" },
+        "tts": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "screens": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "actions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "safety": {
+      "type": "object",
+      "required": ["custody_mode", "requires_physical_confirmation"],
+      "properties": {
+        "custody_mode": { "type": "string" },
+        "requires_physical_confirmation": { "type": "array", "items": { "type": "string" } },
+        "primary_asset_keys_on_esp32": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

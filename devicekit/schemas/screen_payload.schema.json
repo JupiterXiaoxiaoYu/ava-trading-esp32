@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.local/schemas/screen_payload.schema.json",
+  "title": "Ava DeviceKit Screen Payload",
+  "type": "object",
+  "required": ["screen", "payload"],
+  "properties": {
+    "screen": {
+      "type": "string",
+      "enum": ["feed", "browse", "spotlight", "watchlist", "portfolio", "confirm", "limit_confirm", "result", "notify", "disambiguation"]
+    },
+    "payload": { "type": "object" },
+    "context": {
+      "type": "object",
+      "properties": {
+        "app_id": { "type": "string" },
+        "chain": { "type": "string" },
+        "cursor": { "type": ["integer", "null"] },
+        "selected": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

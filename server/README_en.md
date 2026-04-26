@@ -43,29 +43,31 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 
 ---
 
-## Ava Box Monorepo Note
+## Ava DeviceKit Monorepo Note
 
-Within this monorepo, `server/` is the backend foundation used by Ava Box.
+Within this monorepo, `server/` is the backend runtime used by Ava DeviceKit and the Ava Box reference app. The public framework boundary is the action gateway, model routing, and hardware-app contracts; the broader xiaozhi server remains an implementation layer.
 
-Use these entry points when working on the Ava Box Solana product path rather than the upstream generic server alone:
+Use these entry points when working on the Ava DeviceKit / Ava Box Solana path rather than the upstream generic server alone:
 
 | Entry point | Purpose |
 |---|---|
 | [`../README.md`](../README.md) | monorepo entry point |
+| [`../devicekit/README.md`](../devicekit/README.md) | DeviceKit framework contracts and safety model |
 | [`main/README_en.md`](main/README_en.md) | backend module map for `xiaozhi-server`, `manager-api`, `manager-web`, and `manager-mobile` |
-| [`../docs/README.md`](../docs/README.md) | Ava Box Solana product/reference docs |
-| `main/xiaozhi-server/` | active Python backend runtime for Ava Box routing, websocket, tool, wallet, watchlist, and trading logic |
+| [`../docs/README.md`](../docs/README.md) | DeviceKit and Ava Box product/reference docs |
+| `main/xiaozhi-server/` | active Python backend runtime for DeviceKit routing, websocket, tool, wallet, watchlist, and trading logic |
 
-## Solana Build Note
+## DeviceKit Solana Build Note
 
 | Backend area | Main path | Solana behavior |
 |---|---|---|
-| Product tools | `main/xiaozhi-server/plugins_func/functions/ave_tools.py` | Solana-only feed, Pump.fun feeds, search/detail, watchlist, portfolio, market trade, limit order, and order-list flows |
+| Reference app tools | `main/xiaozhi-server/plugins_func/functions/ave_tools.py` | Ava Box Solana-only feed, Pump.fun feeds, search/detail, watchlist, portfolio, market trade, limit order, and order-list flows |
+| DeviceKit helper | `main/xiaozhi-server/plugins_func/functions/ava_devicekit.py` | Lightweight action/screen payload boundary used while extracting from the larger runtime |
 | Wallet tools | `main/xiaozhi-server/plugins_func/functions/ave_skill_tools.py` | Solana wallet overview, holdings, history, and token-level PnL tools |
 | Device actions | `main/xiaozhi-server/core/handle/textHandler/keyActionHandler.py` | key-action routing pinned to Solana and Pump.fun platform entries |
 | Prompting | `main/xiaozhi-server/config.yaml` | Solana / SOL / Pump.fun routing and ASR context terms |
 
-This directory still contains the upstream XiaoZhi server stack; the surrounding repo documentation describes how Ava Box uses and customizes it for the Solana branch.
+This directory still contains the upstream XiaoZhi server stack. DeviceKit work should keep extracting only the pieces needed by ESP32 Solana hardware apps and avoid exposing the full upstream application model as the public API.
 
 ## Target Users 👥
 

@@ -1,0 +1,23 @@
+{
+  "schema": "../../schemas/hardware_app.schema.json",
+  "app_id": "solana_sensor_device_demo",
+  "name": "Solana Sensor Device Demo",
+  "description": "Example DePIN-style app for device identity, heartbeat, and sensor event submission.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32s3",
+    "display": "320x240",
+    "inputs": ["sensor", "buttons"],
+    "outputs": ["display"]
+  },
+  "models": {
+    "llm": "optional"
+  },
+  "screens": ["notify", "result"],
+  "actions": ["device.register", "device.heartbeat", "sensor.submit"],
+  "safety": {
+    "custody_mode": "device_identity_key",
+    "requires_physical_confirmation": ["device.register"],
+    "primary_asset_keys_on_esp32": false
+  }
+}

@@ -1,8 +1,8 @@
-# Shared Ava Box UI Layer
+# Shared Ava DeviceKit UI Layer
 
-This directory contains the shared Ava Box UI code that is compiled into both the ESP32 firmware and the desktop simulator.
+This directory contains shared LVGL UI code used by Ava DeviceKit reference apps and compiled into both the ESP32 firmware and the desktop simulator.
 
-If a page should look and behave the same on hardware and in the simulator, it should generally live here. This is the single most important cross-target UI surface in the monorepo.
+If a page should look and behave the same on hardware and in the simulator, it should generally live here. This is the main cross-target screen-contract surface in the monorepo.
 
 ## Why this folder matters
 
@@ -25,7 +25,7 @@ If a page should look and behave the same on hardware and in the simulator, it s
 
 ## Typical workflows
 
-- Add or change Ava Box pages in [`ave_screens/README.md`](ave_screens/README.md)
+- Add or change Ava Box reference app pages in [`ave_screens/README.md`](ave_screens/README.md)
 - Validate layout and navigation in [`../simulator/README.md`](../simulator/README.md)
 - Integrate target-specific display or input behavior from [`../firmware/main/README.md`](../firmware/main/README.md)
 
@@ -33,4 +33,4 @@ If a page should look and behave the same on hardware and in the simulator, it s
 
 - [`../simulator/README.md`](../simulator/README.md) - desktop validation harness for this code
 - [`../firmware/main/README.md`](../firmware/main/README.md) - ESP32-side integration points
-- [`../docs/README.md`](../docs/README.md) - current product/reference documents
+- [`../docs/README.md`](../docs/README.md) - current DeviceKit and product/reference documents

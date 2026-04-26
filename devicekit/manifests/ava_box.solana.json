@@ -1,0 +1,53 @@
+{
+  "schema": "../schemas/hardware_app.schema.json",
+  "app_id": "ava_box_solana",
+  "name": "Ava Box",
+  "description": "Reference Solana AI hardware terminal for token discovery, watchlists, portfolio views, and trade drafts.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32s3",
+    "reference_board": "scratch-arcade",
+    "display": "320x240",
+    "inputs": ["joystick", "buttons", "microphone"],
+    "outputs": ["display", "speaker"]
+  },
+  "models": {
+    "asr": "qwen3-asr-flash-realtime",
+    "llm": "server-configured",
+    "tts": "server-configured"
+  },
+  "screens": [
+    "feed",
+    "browse",
+    "spotlight",
+    "watchlist",
+    "portfolio",
+    "confirm",
+    "limit_confirm",
+    "result",
+    "notify"
+  ],
+  "actions": [
+    "token.feed",
+    "token.search",
+    "token.detail",
+    "watchlist.add",
+    "watchlist.remove",
+    "portfolio.view",
+    "trade.market_draft",
+    "trade.limit_draft",
+    "order.cancel_draft",
+    "action.confirm",
+    "action.cancel"
+  ],
+  "safety": {
+    "custody_mode": "external_wallet_or_backend_draft",
+    "requires_physical_confirmation": [
+      "trade.market_draft",
+      "trade.limit_draft",
+      "order.cancel_draft",
+      "payment.send"
+    ],
+    "primary_asset_keys_on_esp32": false
+  }
+}

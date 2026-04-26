@@ -1,0 +1,30 @@
+{
+  "app_id": "solana_payment_terminal_demo",
+  "action": "payment.draft",
+  "chain": "solana",
+  "summary": {
+    "title": "Pay merchant",
+    "token": "USDC",
+    "amount": "0.10",
+    "recipient": "merchant.sol"
+  },
+  "risk": {
+    "level": "medium",
+    "reason": "Transfers require explicit physical confirmation."
+  },
+  "confirm": {
+    "required": true,
+    "confirm_button": "A",
+    "cancel_button": "B",
+    "timeout_sec": 30
+  },
+  "screen": {
+    "name": "confirm",
+    "payload": {
+      "action": "PAY",
+      "symbol": "USDC",
+      "amount_native": "0.10 USDC",
+      "amount_usd": "$0.10"
+    }
+  }
+}

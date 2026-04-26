@@ -1,0 +1,25 @@
+{
+  "schema": "../../schemas/hardware_app.schema.json",
+  "app_id": "solana_payment_terminal_demo",
+  "name": "Solana Payment Terminal Demo",
+  "description": "Example hardware app that displays a payment draft and requires physical confirmation.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32s3",
+    "display": "320x240",
+    "inputs": ["buttons", "microphone"],
+    "outputs": ["display", "speaker"]
+  },
+  "models": {
+    "asr": "server-configured",
+    "llm": "server-configured",
+    "tts": "server-configured"
+  },
+  "screens": ["confirm", "result", "notify"],
+  "actions": ["payment.draft", "action.confirm", "action.cancel"],
+  "safety": {
+    "custody_mode": "external_wallet_or_backend_draft",
+    "requires_physical_confirmation": ["payment.draft"],
+    "primary_asset_keys_on_esp32": false
+  }
+}

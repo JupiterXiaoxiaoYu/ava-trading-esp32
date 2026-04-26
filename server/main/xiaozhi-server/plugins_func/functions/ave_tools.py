@@ -52,6 +52,7 @@ from plugins_func.functions.ave_trade_mgr import (
     _normalize_quote_token_address,
     _trade_get,
 )
+from plugins_func.functions.ava_devicekit import build_trade_confirmation_payload
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -4959,18 +4960,20 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
             order_ids=resolved_ids,
         )
 
-        conn.loop.create_task(_send_display(conn, "confirm", {
-            "trade_id": tid,
-            "action": "CANCEL",
-            "symbol": symbol,
-            "amount_native": order_count_label,
-            "amount_usd": "",
-            "tp_pct": 0,
-            "sl_pct": 0,
-            "slippage_pct": 0.0,
-            "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
-            "mode_label": _trade_mode_marker(conn),
-        }))
+        conn.loop.create_task(_send_display(conn, "confirm", build_trade_confirmation_payload(
+            trade_id=tid,
+            action="CANCEL",
+            symbol=symbol,
+            chain=chain,
+            amount_native=order_count_label,
+            timeout_sec=TRADE_CONFIRM_TIMEOUT_SEC,
+            mode_label=_trade_mode_marker(conn),
+            extra={
+                "tp_pct": 0,
+                "sl_pct": 0,
+                "slippage_pct": 0.0,
+            },
+        )))
 
         return ActionResponse(
             action=Action.NONE,
@@ -5340,19 +5343,22 @@ def ave_buy_token(
 
         # 9. Push CONFIRM screen
         identity = _asset_identity_fields({"addr": addr, "chain": chain, "symbol": symbol})
-        confirm_payload = {
-            **identity,
-            "trade_id": tid,
-            "action": "BUY",
-            "amount_native": native_amount_text,
-            "amount_usd": f"${usd_est:.2f}",
-            "tp_pct": tp,
-            "sl_pct": sl,
-            "slippage_pct": slippage / 100,
-            "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
-        }
-        if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
-            confirm_payload["mode_label"] = "PAPER"
+        confirm_payload = build_trade_confirmation_payload(
+            trade_id=tid,
+            action="BUY",
+            symbol=symbol,
+            chain=chain,
+            amount_native=native_amount_text,
+            amount_usd=f"${usd_est:.2f}",
+            timeout_sec=TRADE_CONFIRM_TIMEOUT_SEC,
+            identity=identity,
+            mode_label="PAPER" if _get_trade_mode(conn) == _TRADE_MODE_PAPER else "",
+            extra={
+                "tp_pct": tp,
+                "sl_pct": sl,
+                "slippage_pct": slippage / 100,
+            },
+        )
         if out_amount_str:
             confirm_payload["out_amount"] = out_amount_str
         conn.loop.create_task(_send_display(conn, "confirm", confirm_payload))
@@ -5473,19 +5479,23 @@ def ave_limit_order(
             dist_str = f"{dist_pct:+.1f}%"
 
         identity = _asset_identity_fields({"addr": addr, "chain": chain, "symbol": symbol})
-        conn.loop.create_task(_send_display(conn, "limit_confirm", {
-            **identity,
-            "trade_id": tid,
-            "action": "LIMIT BUY",
-            "limit_price": _fmt_price(limit_price),
-            "limit_price_raw": limit_price,
-            "current_price": _fmt_price(current_price),
-            "distance": dist_str,
-            "amount_native": native_amount_text,
-            "expire_hours": expire_hours,
-            "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
-            "mode_label": _trade_mode_marker(conn),
-        }))
+        conn.loop.create_task(_send_display(conn, "limit_confirm", build_trade_confirmation_payload(
+            trade_id=tid,
+            action="LIMIT BUY",
+            symbol=symbol,
+            chain=chain,
+            amount_native=native_amount_text,
+            timeout_sec=TRADE_CONFIRM_TIMEOUT_SEC,
+            identity=identity,
+            mode_label=_trade_mode_marker(conn),
+            extra={
+                "limit_price": _fmt_price(limit_price),
+                "limit_price_raw": limit_price,
+                "current_price": _fmt_price(current_price),
+                "distance": dist_str,
+                "expire_hours": expire_hours,
+            },
+        )))
 
         return ActionResponse(action=Action.NONE, result=f"limit_pending:{tid}", response=None)
 
@@ -5579,18 +5589,21 @@ def ave_sell_token(
             asset_token_address=addr,
         )
         identity = _asset_identity_fields({"addr": addr, "chain": chain, "symbol": symbol})
-        conn.loop.create_task(_send_display(conn, "confirm", {
-            **identity,
-            "trade_id": tid,
-            "action": "SELL",
-            "amount_native": f"{sell_pct}% holdings",
-            "amount_usd": "",
-            "tp_pct": None,
-            "sl_pct": None,
-            "slippage_pct": DEFAULT_SLIPPAGE / 100,
-            "timeout_sec": TRADE_CONFIRM_TIMEOUT_SEC,
-            "mode_label": _trade_mode_marker(conn),
-        }))
+        conn.loop.create_task(_send_display(conn, "confirm", build_trade_confirmation_payload(
+            trade_id=tid,
+            action="SELL",
+            symbol=symbol,
+            chain=chain,
+            amount_native=f"{sell_pct}% holdings",
+            timeout_sec=TRADE_CONFIRM_TIMEOUT_SEC,
+            identity=identity,
+            mode_label=_trade_mode_marker(conn),
+            extra={
+                "tp_pct": None,
+                "sl_pct": None,
+                "slippage_pct": DEFAULT_SLIPPAGE / 100,
+            },
+        )))
 
         return ActionResponse(action=Action.NONE, result=f"sell_pending:{tid}", response=None)
 

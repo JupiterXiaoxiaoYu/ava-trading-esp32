@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.local/schemas/action_payload.schema.json",
+  "title": "Ava DeviceKit Action Payload",
+  "type": "object",
+  "required": ["action", "chain", "summary", "confirm"],
+  "properties": {
+    "action": { "type": "string" },
+    "chain": { "type": "string" },
+    "app_id": { "type": "string" },
+    "request_id": { "type": "string" },
+    "summary": { "type": "object" },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "level": { "type": "string", "enum": ["info", "low", "medium", "high", "critical"] },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "confirm": {
+      "type": "object",
+      "required": ["required"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "confirm_button": { "type": "string" },
+        "cancel_button": { "type": "string" },
+        "timeout_sec": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "screen": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "payload": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
