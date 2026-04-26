@@ -6,6 +6,7 @@ from typing import Any
 
 from ava_devicekit.adapters.base import ChainAdapter
 from ava_devicekit.adapters.solana import SolanaAdapter
+from ava_devicekit.apps.ava_box_skills import AvaBoxSkillService
 from ava_devicekit.core.manifest import HardwareAppManifest
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, DeviceMessage, ScreenPayload, Selection
 from ava_devicekit.screen import builders
@@ -19,6 +20,7 @@ class AvaBoxApp:
 
     manifest: HardwareAppManifest
     chain_adapter: ChainAdapter
+    skills: AvaBoxSkillService = field(default_factory=AvaBoxSkillService)
     context: AppContext = field(init=False)
     last_screen: ScreenPayload | None = None
     last_draft: ActionDraft | None = None
@@ -27,9 +29,18 @@ class AvaBoxApp:
         self.context = AppContext(app_id=self.manifest.app_id, chain=self.manifest.chain, screen="boot")
 
     @classmethod
-    def create(cls, manifest_path: str | Path = DEFAULT_MANIFEST, chain_adapter: ChainAdapter | None = None) -> "AvaBoxApp":
+    def create(
+        cls,
+        manifest_path: str | Path = DEFAULT_MANIFEST,
+        chain_adapter: ChainAdapter | None = None,
+        skills: AvaBoxSkillService | None = None,
+    ) -> "AvaBoxApp":
         manifest = HardwareAppManifest.load(manifest_path)
-        return cls(manifest=manifest, chain_adapter=chain_adapter or SolanaAdapter())
+        return cls(
+            manifest=manifest,
+            chain_adapter=chain_adapter or SolanaAdapter(),
+            skills=skills or AvaBoxSkillService(),
+        )
 
     def boot(self) -> ScreenPayload:
         screen = self.chain_adapter.get_feed(topic="trending", context=self.context)
@@ -64,26 +75,29 @@ class AvaBoxApp:
             token_id = str(payload.get("token_id") or self._selected_token_id())
             return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
         if action in {"buy", "quick_buy"}:
-            draft = self.chain_adapter.create_action_draft("trade.market_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.market_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action in {"sell", "quick_sell"}:
-            draft = self.chain_adapter.create_action_draft("trade.sell_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action in {"limit", "limit_buy"}:
-            draft = self.chain_adapter.create_action_draft("trade.limit_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.limit_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action == "portfolio":
-            return self._remember_screen(self.chain_adapter.get_portfolio(context=self.context))
+            return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if action == "search":
             return self._remember_screen(self.chain_adapter.search_tokens(str(payload.get("keyword") or payload.get("query") or ""), context=self.context))
-        if action == "watchlist" and hasattr(self.chain_adapter, "get_watchlist"):
-            return self._remember_screen(self.chain_adapter.get_watchlist(context=self.context))  # type: ignore[attr-defined]
+        if action == "watchlist":
+            return self._remember_screen(self.skills.get_watchlist(context=self.context))
+        if action in {"watchlist_add", "add_watchlist", "favorite"}:
+            selected = self.context.selected.to_dict() if self.context.selected else {}
+            return self.skills.add_watchlist({**selected, **payload}, context=self.context)
         return builders.notify("Unknown action", action or "empty", level="warn", context=self.context)
 
     def _route_voice(self, text: str) -> ScreenPayload | ActionDraft | ActionResult:
@@ -91,20 +105,19 @@ class AvaBoxApp:
         if not normalized:
             return builders.notify("Voice", "empty command", level="warn", context=self.context)
         if any(word in normalized for word in ("portfolio", "持仓", "组合")):
-            return self._remember_screen(self.chain_adapter.get_portfolio(context=self.context))
+            return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if any(word in normalized for word in ("watchlist", "观察", "收藏列表")):
-            if hasattr(self.chain_adapter, "get_watchlist"):
-                return self._remember_screen(self.chain_adapter.get_watchlist(context=self.context))  # type: ignore[attr-defined]
+            return self._remember_screen(self.skills.get_watchlist(context=self.context))
         if any(word in normalized for word in ("search", "find", "搜索", "查找")):
             keyword = normalized.replace("search", "").replace("find", "").replace("搜索", "").replace("查找", "").strip()
             return self._remember_screen(self.chain_adapter.search_tokens(keyword, context=self.context))
         if any(word in normalized for word in ("buy", "买", "购买")):
-            draft = self.chain_adapter.create_action_draft("trade.market_draft", {"token_id": self._selected_token_id(), "symbol": self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.market_draft", {"token_id": self._selected_token_id(), "symbol": self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if any(word in normalized for word in ("sell", "卖")):
-            draft = self.chain_adapter.create_action_draft("trade.sell_draft", {"token_id": self._selected_token_id(), "symbol": self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.sell_draft", {"token_id": self._selected_token_id(), "symbol": self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
@@ -114,14 +127,14 @@ class AvaBoxApp:
 
     def _confirm(self, msg: DeviceMessage) -> ActionResult:
         request_id = str(msg.payload.get("request_id") or msg.payload.get("trade_id") or (self.last_draft.request_id if self.last_draft else ""))
-        result = self.chain_adapter.confirm_action(request_id, context=self.context)
+        result = self.skills.confirm_action(request_id, context=self.context)
         if result.screen:
             self._remember_screen(result.screen)
         return result
 
     def _cancel(self, msg: DeviceMessage) -> ActionResult:
         request_id = str(msg.payload.get("request_id") or msg.payload.get("trade_id") or (self.last_draft.request_id if self.last_draft else ""))
-        result = self.chain_adapter.cancel_action(request_id, context=self.context)
+        result = self.skills.cancel_action(request_id, context=self.context)
         if result.screen:
             self._remember_screen(result.screen)
         return result

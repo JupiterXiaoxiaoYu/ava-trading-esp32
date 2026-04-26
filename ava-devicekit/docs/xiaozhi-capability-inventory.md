@@ -65,11 +65,11 @@ This document is the review checklist before migrating more legacy runtime code 
 | Capability | Legacy source | Proposed decision | DeviceKit target | Notes to confirm |
 |---|---|---|---|---|
 | `plugins_func` registration | `plugins_func/register.py`, registered tool descriptors | `drop` | none | Replace with app actions and adapters |
-| Ava market tools | `plugins_func/functions/ave_tools.py` | `replace` | `SolanaAdapter` + `AvaBoxApp` | Continue splitting monolith into adapter modules |
+| Ava market tools | `plugins_func/functions/ave_tools.py` | `replace` | `SolanaAdapter` for basic chain data; `AvaBoxSkillService` for app trading/watchlist/portfolio | Keep framework adapter thin; app owns server skill behavior |
 | Wallet skill tools | `ave_skill_tools.py` | `replace` | `WalletAdapter` / `PortfolioProvider` | Keep wallet capability, replace tool shape |
 | Paper store | `ave_paper_store.py` | `keep` | `storage/paper_store.py` | Useful for safe demos and hackathon flow |
 | Watchlist store | `ave_watchlist_store.py` | `keep` | `storage/watchlist_store.py` | Keep local JSON store first |
-| Trade manager | `ave_trade_mgr.py` | `replace` | `ConfirmationState` + chain trade provider | Keep draft/confirm/result semantics |
+| Trade manager | `ave_trade_mgr.py` | `replace` | `AvaBoxSkillService` + future app-level execution provider | Keep draft/confirm/result semantics outside the base chain adapter |
 | AVE WSS market stream | `ave_wss.py` | `confirm` | `MarketStreamAdapter` | Needed if live price/kline updates remain in v1 |
 | MCP endpoint / server tools | `core/providers/tools/*mcp*` | `later` | optional helper adapter | Not core for hardware framework v1 |
 | IoT tools | `core/providers/tools/device_iot` | `later` | optional device helper adapter | Useful for robots/sensors later |
@@ -121,9 +121,9 @@ These are the defaults used by the current `ava-devicekit/` skeleton until chang
 | Area | Default |
 |---|---|
 | Core dependency on xiaozhi | none |
-| First chain adapter | Solana |
+| First chain adapter | Solana basic market/token data only |
 | First app | Ava Box |
 | First transport | WebSocket / JSON messages |
 | First UI contract | `ScreenPayload` into `ava_dk_ui_runtime_t` |
-| Execution safety | action drafts + physical confirmation |
+| Execution safety | app-level action drafts + physical confirmation |
 | Custody | no primary user asset keys on ESP32 |

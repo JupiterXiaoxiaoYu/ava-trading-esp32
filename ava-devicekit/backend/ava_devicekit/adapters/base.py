@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
-from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, ScreenPayload
+from ava_devicekit.core.types import AppContext, ScreenPayload
 
 
 class ChainAdapter(ABC):
-    """Blockchain/application data adapter used by hardware apps."""
+    """Basic blockchain data adapter used by hardware apps.
+
+    Keep this interface chain-focused. App-specific skills such as trading,
+    watchlists, portfolio composition, and voice command behavior belong in the
+    app layer or helper adapters, not in the framework chain adapter.
+    """
 
     chain: str
 
@@ -21,20 +25,4 @@ class ChainAdapter(ABC):
 
     @abstractmethod
     def get_token_detail(self, token_id: str, *, interval: str = "60", context: AppContext | None = None) -> ScreenPayload:
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_portfolio(self, *, wallet_id: str = "paper", context: AppContext | None = None) -> ScreenPayload:
-        raise NotImplementedError
-
-    @abstractmethod
-    def create_action_draft(self, action: str, params: dict[str, Any], *, context: AppContext | None = None) -> ActionDraft:
-        raise NotImplementedError
-
-    @abstractmethod
-    def confirm_action(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
-        raise NotImplementedError
-
-    @abstractmethod
-    def cancel_action(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
         raise NotImplementedError
