@@ -12,10 +12,10 @@ from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
-class XiaozhiCompatConnection:
-    """xiaozhi WebSocket protocol shim backed by a DeviceKit session.
+class LegacyFirmwareConnection:
+    """legacy firmware WebSocket protocol shim backed by a DeviceKit session.
 
-    Existing ESP32 firmware expects xiaozhi-style text frames (`hello`,
+    Existing ESP32 firmware expects legacy-style text frames (`hello`,
     `listen`, `key_action`) and display payloads. This adapter preserves that
     wire shape while routing app behavior through Ava DeviceKit.
     """
@@ -116,7 +116,7 @@ def _spoken_summary(payload: dict[str, Any]) -> str:
     return "OK"
 
 
-async def run_xiaozhi_compat_gateway(
+async def run_legacy_firmware_gateway(
     host: str = "0.0.0.0",
     port: int = 8787,
     *,
@@ -130,7 +130,7 @@ async def run_xiaozhi_compat_gateway(
     try:
         import websockets
     except ImportError as exc:  # pragma: no cover - optional dependency boundary
-        raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the xiaozhi-compatible gateway") from exc
+        raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the legacy-firmware-compatible gateway") from exc
 
     settings = runtime_settings or RuntimeSettings.load()
 
@@ -142,7 +142,7 @@ async def run_xiaozhi_compat_gateway(
             mock=mock,
             skill_store_path=skill_store_path,
         )
-        await XiaozhiCompatConnection(session).open(ws)
+        await LegacyFirmwareConnection(session).open(ws)
 
     async with websockets.serve(
         handler,
@@ -155,7 +155,7 @@ async def run_xiaozhi_compat_gateway(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the xiaozhi-compatible Ava DeviceKit WebSocket gateway.")
+    parser = argparse.ArgumentParser(description="Run the legacy-firmware-compatible Ava DeviceKit WebSocket gateway.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--app-id", default="ava_box")
@@ -166,7 +166,7 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true")
     args = parser.parse_args()
     asyncio.run(
-        run_xiaozhi_compat_gateway(
+        run_legacy_firmware_gateway(
             args.host,
             args.port,
             app_id=args.app_id,

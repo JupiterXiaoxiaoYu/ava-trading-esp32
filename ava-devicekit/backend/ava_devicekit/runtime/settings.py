@@ -19,7 +19,7 @@ DEFAULT_WEBSOCKET_PING_TIMEOUT = 10
 class RuntimeSettings:
     """Deployment-owned DeviceKit runtime settings.
 
-    This keeps xiaozhi-style OTA/WebSocket configuration as data, without
+    This keeps legacy-style OTA/WebSocket configuration as data, without
     importing the legacy config loader or manager API.
     """
 
@@ -61,7 +61,7 @@ class RuntimeSettings:
     def websocket_endpoint(self, host_hint: str = "127.0.0.1") -> str:
         if self.websocket_url and "你的" not in self.websocket_url:
             return self.websocket_url
-        return f"ws://{host_hint}:{self.websocket_port}/xiaozhi/v1/"
+        return f"ws://{host_hint}:{self.websocket_port}/ava/v1/"
 
     def ota_base_url(self, host_hint: str = "127.0.0.1") -> str:
         if self.public_base_url:

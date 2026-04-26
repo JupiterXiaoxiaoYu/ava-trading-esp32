@@ -8,7 +8,7 @@ from http.server import ThreadingHTTPServer
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.http_server import make_handler
 from ava_devicekit.ota.version import is_higher_version, scan_firmware
-from ava_devicekit.ota.xiaozhi import build_ota_response
+from ava_devicekit.ota.firmware import build_ota_response
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
@@ -22,14 +22,14 @@ def test_version_compare_and_scan_firmware(tmp_path):
     assert [item.version for item in files["scratch-arcade"]] == ["1.2.0", "1.0.2"]
 
 
-def test_xiaozhi_ota_response_includes_websocket_and_update(tmp_path):
+def test_ava_ota_response_includes_websocket_and_update(tmp_path):
     (tmp_path / "scratch-arcade_1.2.0.bin").write_bytes(b"bin")
     settings = RuntimeSettings(
         http_port=9003,
         websocket_port=9000,
         firmware_bin_dir=str(tmp_path),
         public_base_url="https://ava.example.com",
-        websocket_url="wss://ava.example.com/xiaozhi/v1/",
+        websocket_url="wss://ava.example.com/ava/v1/",
     )
     payload = build_ota_response(
         settings=settings,
@@ -37,14 +37,14 @@ def test_xiaozhi_ota_response_includes_websocket_and_update(tmp_path):
         body={},
         host_hint="127.0.0.1",
     )
-    assert payload["websocket"]["url"] == "wss://ava.example.com/xiaozhi/v1/"
+    assert payload["websocket"]["url"] == "wss://ava.example.com/ava/v1/"
     assert payload["firmware"]["version"] == "1.2.0"
-    assert payload["firmware"]["url"] == "https://ava.example.com/xiaozhi/ota/download/scratch-arcade_1.2.0.bin"
+    assert payload["firmware"]["url"] == "https://ava.example.com/ava/ota/download/scratch-arcade_1.2.0.bin"
 
 
-def test_http_gateway_serves_xiaozhi_ota_contract(tmp_path):
+def test_http_gateway_serves_ava_ota_contract(tmp_path):
     (tmp_path / "scratch-arcade_1.2.0.bin").write_bytes(b"bin")
-    settings = RuntimeSettings(firmware_bin_dir=str(tmp_path), websocket_url="ws://unit.test/xiaozhi/v1/")
+    settings = RuntimeSettings(firmware_bin_dir=str(tmp_path), websocket_url="ws://unit.test/ava/v1/")
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -52,14 +52,14 @@ def test_http_gateway_serves_xiaozhi_ota_contract(tmp_path):
     base_url = f"http://127.0.0.1:{server.server_port}"
     try:
         req = urllib.request.Request(
-            base_url + "/xiaozhi/ota/",
+            base_url + "/ava/ota/",
             data=json.dumps({"application": {"version": "1.0.0"}}).encode(),
             headers={"Content-Type": "application/json", "device-model": "scratch-arcade"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             payload = json.loads(resp.read().decode())
-        assert payload["websocket"]["url"] == "ws://unit.test/xiaozhi/v1/"
+        assert payload["websocket"]["url"] == "ws://unit.test/ava/v1/"
         assert payload["firmware"]["version"] == "1.2.0"
     finally:
         server.shutdown()

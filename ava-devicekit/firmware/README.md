@@ -22,7 +22,7 @@ The current production firmware still lives in the repo-level `firmware/` direct
 | `src/ava_devicekit_runtime.c` | Framework-owned implementation adapted from the legacy application/network state flow |
 | `tests/test_ava_devicekit_runtime.c` | Host-side contract test compiled by pytest |
 
-The code intentionally does not include ESP-IDF or xiaozhi headers. ESP32 board ports should wire their Wi-Fi manager, WebSocket transport, microphone, speaker, and screen code into this boundary.
+The code intentionally does not include ESP-IDF or legacy assistant headers. ESP32 board ports should wire their Wi-Fi manager, WebSocket transport, microphone, speaker, and screen code into this boundary.
 
 ## Mapping From Legacy Firmware
 

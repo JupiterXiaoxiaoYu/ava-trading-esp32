@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 
 from ava_devicekit.gateway.factory import create_device_session
-from ava_devicekit.gateway.xiaozhi_compat import XiaozhiCompatConnection
+from ava_devicekit.gateway.legacy_firmware import LegacyFirmwareConnection
 
 
-def test_xiaozhi_compat_hello_and_key_action_flow():
-    conn = XiaozhiCompatConnection(create_device_session(mock=True))
+def test_legacy_firmware_hello_and_key_action_flow():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
     hello = conn.handle_text(json.dumps({"type": "hello", "transport": "websocket", "audio_params": {"sample_rate": 16000}}))
     assert hello[0]["type"] == "hello"
     assert hello[0]["transport"] == "websocket"
@@ -16,8 +16,8 @@ def test_xiaozhi_compat_hello_and_key_action_flow():
     assert detail[0]["screen"] == "spotlight"
 
 
-def test_xiaozhi_compat_listen_detect_preserves_selection_context():
-    conn = XiaozhiCompatConnection(create_device_session(mock=True))
+def test_legacy_firmware_listen_detect_preserves_selection_context():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
     replies = conn.handle_text(
         json.dumps(
             {

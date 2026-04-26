@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
-from ava_devicekit.ota.xiaozhi import build_ota_response, resolve_firmware_download
+from ava_devicekit.ota.firmware import build_ota_response, resolve_firmware_download
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 SessionFactory = Callable[[], DeviceSession]
@@ -37,12 +37,12 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
             if path == "/device/outbox":
                 self._send_json({"items": session.outbox, "count": len(session.outbox)})
                 return
-            if path == "/xiaozhi/ota/":
+            if path == "/ava/ota/":
                 host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]
                 message = f"OTA OK. WebSocket: {settings.websocket_endpoint(host_hint)}"
                 self._send_bytes(message.encode("utf-8"), "text/plain; charset=utf-8")
                 return
-            if path.startswith("/xiaozhi/ota/download/"):
+            if path.startswith("/ava/ota/download/"):
                 filename = path.rsplit("/", 1)[-1]
                 file_path = resolve_firmware_download(settings, filename)
                 if not file_path:
@@ -64,7 +64,7 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
                 except Exception as exc:  # pragma: no cover - defensive server boundary
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
-            if path == "/xiaozhi/ota/":
+            if path == "/ava/ota/":
                 try:
                     body = self._read_json()
                     host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]

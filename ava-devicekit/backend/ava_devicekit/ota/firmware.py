@@ -15,7 +15,7 @@ def build_ota_response(
     body: dict[str, Any] | None = None,
     host_hint: str = "127.0.0.1",
 ) -> dict[str, Any]:
-    """Build the xiaozhi-compatible OTA response used by existing firmware.
+    """Build the legacy-firmware-compatible OTA response used by existing firmware.
 
     The shape follows the legacy OTA contract, but the implementation is owned
     by DeviceKit and only emits the runtime config Ava Box needs.
@@ -43,7 +43,7 @@ def build_ota_response(
     if update:
         response["firmware"] = {
             "version": update.version,
-            "url": f"{settings.ota_base_url(host_hint)}/xiaozhi/ota/download/{update.filename}",
+            "url": f"{settings.ota_base_url(host_hint)}/ava/ota/download/{update.filename}",
         }
     return response
 
