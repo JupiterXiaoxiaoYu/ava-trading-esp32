@@ -14,6 +14,15 @@ If a page should look and behave the same on hardware and in the simulator, it s
 
 - `ave_screens/` - the shared screen implementations, manager, transport hooks, JSON helpers, and formatting utilities
 
+## Solana branch scope
+
+| UI area | Branch behavior |
+|---|---|
+| Feed sources | Solana topics plus Pump.fun hot/new |
+| Chain labels | Runtime payloads are expected to resolve to `SOL` |
+| Watchlist / portfolio | Solana rows only |
+| Confirm / result | SOL-denominated action review |
+
 ## Typical workflows
 
 - Add or change Ava Box pages in [`ave_screens/README.md`](ave_screens/README.md)

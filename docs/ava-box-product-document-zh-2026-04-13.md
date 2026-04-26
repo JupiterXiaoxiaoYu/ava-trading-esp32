@@ -115,14 +115,14 @@ Ava Box 由这些核心页面和界面层组成：
 | `Explorer` - search guide | 语音搜索引导页 | 告诉用户直接说 token 名；设备上没有键盘式搜索输入 | `LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT，用于搜索 token |
 | `Explorer` - sources | Source / platform 选择页 | 加载 topic feed 和 platform feed | `UP/DOWN`：移动 source 选择<br>`RIGHT` 或 `A`：把该 source 加载到 `Feed`<br>`LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Explorer` - trading mode | 执行模式切换页 | 在 `real` 和 `paper` 之间切换 | `UP/DOWN`：选择模式<br>`RIGHT` 或 `A`：应用 `real` 或 `paper`<br>`LEFT` 或 `B`：回到 Explorer 菜单<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Browse` - signals | 公开 signal 浏览页 | 浏览 signal 列表；进入 token 详情；切换 signal 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 signal 链，可在 `solana / bsc` 间切换<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
-| `Browse` - watchlist | 自选列表浏览页 | 浏览 watchlist；进入 token 详情；切换 watchlist 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：切换 watchlist 链，可在 `all / solana / base / eth / bsc` 间切换<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Browse` - signals | 公开 signal 浏览页 | 浏览 signal 列表；进入 token 详情；切换 signal 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：signal 浏览固定在 `solana`<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
+| `Browse` - watchlist | 自选列表浏览页 | 浏览 watchlist；进入 token 详情；切换 watchlist 链 | `UP/DOWN`：移动选择<br>`RIGHT` 或 `A`：打开所选 token 的 `Spotlight`<br>`X`：watchlist 浏览固定在 `solana`<br>`LEFT` 或 `B`：返回 `Explorer`<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Disambiguation` | 搜索歧义选择页 | 当多个 token 匹配时，选择正确资产 | `UP/DOWN`：移动光标<br>`RIGHT` 或 `A`：选择当前候选项并进入 token 详情<br>`LEFT` 或 `B`：返回<br>`X`：锁定，不可操作，会弹 notify<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Spotlight` | Token 详情和操作页 | 显示 token 详情、K 线、价格、合约信息；切换周期；买入；卖出；切换前后 token | `LEFT`：切到当前 feed 上下文中的前一个 token<br>`RIGHT`：切到后一个 token<br>`UP`：切到下一个 K 线周期<br>`DOWN`：切到上一个 K 线周期<br>`A`：发起 market buy，进入 `Confirm`<br>`X`：发起 quick sell，进入 `Confirm`<br>`B`：返回上一个列表上下文<br>`Y`：全局进入 `Portfolio`<br>`FN`：语音唤醒 / PTT |
 | `Confirm` | Market trade 确认页 | 查看已起草的 market trade，并显式确认或取消 | `A`：确认交易并等待服务端 ack<br>`B`：取消交易<br>`Y`：先取消当前草稿交易，再进入 `Portfolio`；若确认回执已在等待中，则保持当前流程<br>`LEFT/RIGHT/UP/DOWN/X`：本页无单独动作<br>`FN`：语音唤醒 / PTT |
 | `Limit Confirm` | Limit order 确认页 | 查看已起草的 limit order，并显式确认或取消 | `A`：确认 limit order<br>`B`：取消 limit order<br>`Y`：先取消当前草稿交易，再进入 `Portfolio`；若确认回执已在等待中，则保持当前流程<br>`LEFT/RIGHT/UP/DOWN/X`：本页无单独动作<br>`FN`：语音唤醒 / PTT |
 | `Result` | 交易结果页 | 展示 success、failure、timeout、cancellation 或 deferred / reconciled result | `任意键`：立即请求 back<br>`Y`：若先触发全局快捷逻辑则进入 `Portfolio`，否则和其他按键一样退出 Result<br>`FN`：语音唤醒 / PTT |
-| `Portfolio` - holdings list | 持仓总览页 | 查看 holdings；切链；进入 Spotlight；进入 token activity detail；卖出持仓 | `UP/DOWN`：移动持仓选择<br>`RIGHT`：打开所选 token 的 `Spotlight`<br>`A`：打开 token activity detail 子视图<br>`X`：卖出当前 holding<br>`B`：返回上一个列表上下文<br>`Y`：切换 portfolio 链，可在 `solana / base / eth / bsc` 间切换<br>`FN`：语音唤醒 / PTT |
+| `Portfolio` - holdings list | 持仓总览页 | 查看 holdings；切链；进入 Spotlight；进入 token activity detail；卖出持仓 | `UP/DOWN`：移动持仓选择<br>`RIGHT`：打开所选 token 的 `Spotlight`<br>`A`：打开 token activity detail 子视图<br>`X`：卖出当前 holding<br>`B`：返回上一个列表上下文<br>`Y`：portfolio 浏览固定在 `solana`<br>`FN`：语音唤醒 / PTT |
 | `Portfolio` - activity detail | 单个 token 的交易聚合详情 | 展示 Buy Avg、Buy Tot、Sell Avg、Sell Tot、P&L、Open、First Buy、Last Buy、First Sell、Last Sell | `RIGHT`：从 detail 视图跳到该 token 的 `Spotlight`<br>`B`：返回 portfolio 列表<br>`Y`：当前 detail 视图无单独本地动作；仍在 portfolio 页面体系内<br>`FN`：语音唤醒 / PTT |
 | `Notify` overlay | 非阻塞消息层 | 展示 info / warning / error / 交易状态消息，不替换当前页面 | `任意键`：先关闭 overlay；同一次按键不会继续透传到底下页面 |
 
@@ -134,7 +134,7 @@ Ava Box 已经具备以下产品能力。
 
 - trending feed
 - topic feeds：`trending`、`gainer`、`loser`、`new`、`meme`、`ai`、`depin`、`gamefi`
-- platform feeds：`pump_in_hot`、`pump_in_new`、`fourmeme_in_hot`、`fourmeme_in_new`
+- platform feeds：`pump_in_hot`、`pump_in_new`
 - token search
 - 多结果 disambiguation
 - signals 浏览

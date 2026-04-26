@@ -69,10 +69,11 @@ DEFAULT_SL_PCT = 15             # %
 DEFAULT_SLIPPAGE = 100          # basis points (1%)
 _BATCH_PRICE_EVM_SUFFIXES = ("-bsc", "-eth", "-base")
 _CHAIN_SUFFIXES = ("solana", "bsc", "eth", "base")
-_SUPPORTED_FEED_CHAINS = frozenset(_CHAIN_SUFFIXES)
-_CHAIN_CYCLE_ORDER = ("solana", "base", "eth", "bsc")
-_SIGNALS_SUPPORTED_CHAINS = frozenset({"solana", "bsc"})
-_SIGNALS_CHAIN_CYCLE_ORDER = ("solana", "bsc")
+_SOLANA_ONLY_BUILD = True
+_SUPPORTED_FEED_CHAINS = frozenset(("solana",))
+_CHAIN_CYCLE_ORDER = ("solana",)
+_SIGNALS_SUPPORTED_CHAINS = frozenset({"solana"})
+_SIGNALS_CHAIN_CYCLE_ORDER = ("solana",)
 _MAX_DISAMBIGUATION_ITEMS = 12
 _DEFERRED_RESULT_FLUSH_POLL_ATTEMPTS = 200
 _DEFERRED_RESULT_FLUSH_BLOCKED_DELAY_SEC = 0.05
@@ -81,6 +82,9 @@ _PAPER_STORE_PATH = Path(__file__).resolve().parents[2] / "data" / "ave_paper_ac
 _TRADE_MODE_REAL = "real"
 _TRADE_MODE_PAPER = "paper"
 _VALID_TRADE_MODES = frozenset({_TRADE_MODE_REAL, _TRADE_MODE_PAPER})
+_SOLANA_PLATFORM_TAGS = frozenset({"pump_in_hot", "pump_in_new"})
+
+
 _PAPER_NATIVE_TOKEN_META = {
     "solana": {
         "symbol": "SOL",
@@ -693,6 +697,8 @@ def _format_quote_out_amount(quote_resp: dict, symbol: str = "") -> str:
 def _split_token_reference(token_ref: str, chain: str = "solana") -> tuple[str, str]:
     token_text = str(token_ref or "").strip()
     chain_text = str(chain or "solana").strip().lower() or "solana"
+    if _SOLANA_ONLY_BUILD:
+        chain_text = "solana"
     if not token_text:
         return "", chain_text
 
@@ -702,7 +708,7 @@ def _split_token_reference(token_ref: str, chain: str = "solana") -> tuple[str, 
         if token_lower.endswith(suffix):
             base_addr = token_text[:-len(suffix)]
             if base_addr:
-                return base_addr, suffix_chain
+                return base_addr, "solana" if _SOLANA_ONLY_BUILD else suffix_chain
     return token_text, chain_text
 
 
@@ -1407,7 +1413,7 @@ def _resolve_proxy_wallet_target(
     conn: "ConnectionHandler",
     chain: str = "",
 ) -> tuple[str, str]:
-    requested_chain = _normalize_chain_name(chain)
+    requested_chain = "solana" if _SOLANA_ONLY_BUILD else _normalize_chain_name(chain)
     state = _ensure_ave_state(conn)
 
     cached_wallets = state.get("portfolio_wallets")
@@ -1437,9 +1443,11 @@ def _resolve_proxy_wallet_target(
     first_address = (first_wallet.get("addresses") or [{}])[0]
     fallback_address = str(first_address.get("address", "") or "").strip()
     fallback_chain = _normalize_chain_name(first_address.get("chain"), requested_chain or "solana")
+    if _SOLANA_ONLY_BUILD and fallback_chain != "solana":
+        raise ValueError("AVE proxy wallet has no usable Solana address")
     if not fallback_address:
         raise ValueError("AVE proxy wallet has no usable chain address")
-    return fallback_address, fallback_chain
+    return fallback_address, "solana" if _SOLANA_ONLY_BUILD else fallback_chain
 
 
 def _paper_store_path() -> Path:
@@ -1512,6 +1520,8 @@ def _resolve_spotlight_origin_hint(
 
 
 def _is_watchlisted_for_token(conn: "ConnectionHandler", addr: str, chain: str) -> bool:
+    if _SOLANA_ONLY_BUILD and addr:
+        chain = "solana"
     if not addr or not chain:
         return False
     try:
@@ -1537,6 +1547,8 @@ def _resolve_watchlist_target(
             token.get("addr") or token.get("token_id") or "",
             token.get("chain") or "solana",
         )
+        if _SOLANA_ONLY_BUILD and addr:
+            chain = "solana"
         if addr and chain:
             return {
                 "addr": addr,
@@ -1550,6 +1562,8 @@ def _resolve_watchlist_target(
             current.get("addr", ""),
             current.get("chain", "solana"),
         )
+        if _SOLANA_ONLY_BUILD and addr:
+            chain = "solana"
         if addr and chain:
             return {
                 "addr": addr,
@@ -1570,6 +1584,8 @@ def _resolve_watchlist_target(
                 row.get("addr", ""),
                 row.get("chain", "solana"),
             )
+            if _SOLANA_ONLY_BUILD and addr:
+                chain = "solana"
             if addr and chain:
                 return {
                     "addr": addr,
@@ -2300,6 +2316,8 @@ def _normalize_chain_name(value, default: str = "") -> str:
 
 
 def _normalize_surface_chain(value, default: str, *, allow_all: bool = False) -> str:
+    if _SOLANA_ONLY_BUILD:
+        return "solana"
     chain_name = _normalize_chain_name(value, default)
     if allow_all and chain_name == "all":
         return "all"
@@ -2309,6 +2327,8 @@ def _normalize_surface_chain(value, default: str, *, allow_all: bool = False) ->
 
 
 def _cycle_surface_chain(current, *, allow_all: bool = False) -> str:
+    if _SOLANA_ONLY_BUILD:
+        return "solana"
     order = (("all",) + _CHAIN_CYCLE_ORDER) if allow_all else _CHAIN_CYCLE_ORDER
     normalized = _normalize_surface_chain(current, order[0], allow_all=allow_all)
     try:
@@ -2339,6 +2359,8 @@ def _browse_source_label(base_label: str, chain: str) -> str:
 
 
 def _normalize_signals_chain(value, default: str = "solana") -> str:
+    if _SOLANA_ONLY_BUILD:
+        return "solana"
     chain_name = _normalize_surface_chain(value, default, allow_all=False)
     if chain_name not in _SIGNALS_SUPPORTED_CHAINS:
         return default
@@ -4347,14 +4369,14 @@ ave_get_trending_desc = {
     "type": "function",
     "function": {
         "name": "ave_get_trending",
-        "description": "获取多链热门代币列表展示到发现流屏幕。默认混合抓取 solana/eth/bsc/base 四链；用户说'看 ETH 热门'时传 chain=eth。topic 参数可切换榜单类型：trending=热门（默认），gainer=涨幅榜，loser=跌幅榜，new=新币，meme=meme榜，ai=AI板块，depin=DePIN板块，gamefi=GameFi板块。platform 参数可指定平台：pump_in_hot=Pump.fun热门，pump_in_new=Pump.fun新币，fourmeme_in_hot=4.meme热门，fourmeme_in_new=4.meme新币。",
+        "description": "获取 Solana 热门代币列表展示到发现流屏幕。本分支固定为 solana；topic 参数可切换榜单类型：trending=热门（默认），gainer=涨幅榜，loser=跌幅榜，new=新币，meme=meme榜，ai=AI板块，depin=DePIN板块，gamefi=GameFi板块。platform 参数仅支持 Solana 相关平台：pump_in_hot=Pump.fun热门，pump_in_new=Pump.fun新币。",
         "parameters": {
             "type": "object",
             "properties": {
                 "chain": {
                     "type": "string",
-                    "description": "区块链名称，all=四链混合（默认），或指定单链",
-                    "enum": ["all", "solana", "bsc", "eth", "base"],
+                    "description": "区块链名称，本分支固定为 solana",
+                    "enum": ["solana"],
                 },
                 "topic": {
                     "type": "string",
@@ -4363,7 +4385,7 @@ ave_get_trending_desc = {
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Platform filter. Correct tag values: pump_in_hot (Pump.fun hot), pump_in_new (Pump.fun new), fourmeme_in_hot (4.meme hot), fourmeme_in_new (4.meme new). Leave empty for no platform filter.",
+                    "description": "Solana platform filter. Correct tag values: pump_in_hot (Pump.fun hot), pump_in_new (Pump.fun new). Leave empty for no platform filter.",
                 },
             },
             "required": [],
@@ -4472,9 +4494,14 @@ def _build_limit_order_rows(orders: list, chain: str = "solana") -> list:
 
 
 @register_function("ave_get_trending", ave_get_trending_desc, ToolType.SYSTEM_CTL)
-def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str = "", platform: str = ""):
-    """获取多链热门代币列表并推送到设备 FEED 屏幕"""
+def ave_get_trending(conn: "ConnectionHandler", chain: str = "solana", topic: str = "", platform: str = ""):
+    """获取 Solana 热门代币列表并推送到设备 FEED 屏幕"""
     import concurrent.futures
+
+    if _SOLANA_ONLY_BUILD:
+        chain = "solana"
+        if platform and platform not in _SOLANA_PLATFORM_TAGS:
+            platform = ""
 
     # Platform path: single call to /tokens/platform, short-circuits per-chain loop
     use_platform = bool(platform)
@@ -4486,8 +4513,8 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
             raw = resp.get("data", {})
             if isinstance(raw, dict):
                 raw = raw.get("tokens", raw.get("list", raw.get("ranks", [])))
-            lst = raw if isinstance(raw, list) else []
-            tokens = _build_token_list(lst[:20], chain if chain != "all" else "???")
+            lst = _filter_supported_feed_items(raw if isinstance(raw, list) else [], "solana")
+            tokens = _build_token_list(lst[:20], "solana")
             state = _ensure_ave_state(conn)
             state["screen"] = "feed"
             state["feed_source"] = "trending"
@@ -4529,7 +4556,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
     # Normalize topic: empty or "trending" → use /tokens/trending endpoint
     use_ranks = topic and topic != "trending"
 
-    CHAINS = ["solana", "eth", "bsc", "base"] if chain == "all" else [chain]
+    CHAINS = ["solana"] if _SOLANA_ONLY_BUILD else (["solana", "eth", "bsc", "base"] if chain == "all" else [chain])
     if use_ranks:
         # `/ranks` behaves like a global board mirrored across chain params.
         # Pull a deeper slice per request, then dedupe globally to fill 20.
@@ -4579,7 +4606,7 @@ def ave_get_trending(conn: "ConnectionHandler", chain: str = "all", topic: str =
                         seen.add(dedupe_key)
                         raw_all.append(t)
 
-        tokens = _build_token_list(raw_all[:20], chain if chain != "all" else "???")
+        tokens = _build_token_list(raw_all[:20], "solana" if _SOLANA_ONLY_BUILD else (chain if chain != "all" else "???"))
 
         # Track state so LLM can reference tokens by symbol in follow-up commands
         state = _ensure_ave_state(conn)
@@ -4639,8 +4666,8 @@ ave_search_token_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "Chain filter: 'all', 'solana', 'eth', 'bsc', 'base'. Default: 'all'",
-                    "enum": ["all", "solana", "eth", "bsc", "base"]
+                    "description": "Chain filter: solana only in this branch.",
+                    "enum": ["solana"]
                 }
             },
             "required": ["keyword"]
@@ -4650,9 +4677,10 @@ ave_search_token_desc = {
 
 
 @register_function("ave_search_token", ave_search_token_desc, ToolType.SYSTEM_CTL)
-def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"):
-    """搜索代币并推送结果到设备 FEED 屏幕"""
+def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "solana"):
+    """搜索 Solana 代币并推送结果到设备 FEED 屏幕"""
     try:
+        chain = "solana" if _SOLANA_ONLY_BUILD else (chain or "all")
         params = {"keyword": keyword, "limit": 20}
         if chain and chain != "all":
             params["chain"] = chain
@@ -4660,9 +4688,9 @@ def ave_search_token(conn: "ConnectionHandler", keyword: str, chain: str = "all"
         raw = resp.get("data", {})
         if isinstance(raw, dict):
             raw = raw.get("tokens", raw.get("list", []))
-        lst = raw if isinstance(raw, list) else []
+        lst = _filter_supported_feed_items(raw if isinstance(raw, list) else [], "solana")
 
-        tokens = _build_token_list(lst[:20], chain if chain != "all" else "???")
+        tokens = _build_token_list(lst[:20], "solana" if _SOLANA_ONLY_BUILD else (chain if chain != "all" else "???"))
         state = _ensure_ave_state(conn)
         normalized_keyword = str(keyword or "").strip().upper()
         disambiguation_items = [
@@ -4756,8 +4784,8 @@ ave_list_orders_desc = {
             "properties": {
                 "chain": {
                     "type": "string",
-                    "description": "区块链，默认沿用当前上下文或 solana",
-                    "enum": ["solana", "bsc", "eth", "base"]
+                    "description": "区块链，本分支固定为 solana",
+                    "enum": ["solana"]
                 }
             },
             "required": []
@@ -4770,7 +4798,9 @@ ave_list_orders_desc = {
 def ave_list_orders(conn: "ConnectionHandler", chain: str = "solana"):
     try:
         state = getattr(conn, "ave_state", {})
-        if not chain:
+        if _SOLANA_ONLY_BUILD:
+            chain = "solana"
+        elif not chain:
             chain = state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
         if _get_trade_mode(conn) == _TRADE_MODE_PAPER:
             _try_fill_paper_limit_orders(conn, chain=chain)
@@ -4858,8 +4888,8 @@ ave_cancel_order_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "区块链，默认沿用最近一次挂单列表查询的链",
-                    "enum": ["solana", "bsc", "eth", "base"]
+                    "description": "区块链，本分支固定为 solana",
+                    "enum": ["solana"]
                 },
                 "symbol": {
                     "type": "string",
@@ -4879,7 +4909,7 @@ def ave_cancel_order(conn: "ConnectionHandler", order_ids: list, chain: str = ""
             return ActionResponse(action=Action.RESPONSE, result="no_order_ids", response="请先告诉我要撤销哪个挂单")
 
         state = getattr(conn, "ave_state", {})
-        chain = chain or state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana"
+        chain = "solana" if _SOLANA_ONLY_BUILD else (chain or state.get("last_orders_chain") or state.get("current_token", {}).get("chain") or "solana")
         resolved_ids = [str(order_id) for order_id in order_ids]
         trade_mode = _get_trade_mode(conn)
 
@@ -4965,7 +4995,7 @@ ave_token_detail_desc = {
             "type": "object",
             "properties": {
                 "addr": {"type": "string", "description": "代币合约地址（可省略，省略时用当前显示的代币）"},
-                "chain": {"type": "string", "description": "区块链名称", "enum": ["solana", "bsc", "eth", "base"]},
+                "chain": {"type": "string", "description": "区块链名称，本分支固定为 solana", "enum": ["solana"]},
                 "symbol": {"type": "string", "description": "代币符号，如 BONK（addr省略时按此查找）"},
                 "interval": {
                     "type": "string",
@@ -5149,6 +5179,7 @@ ave_risk_check_desc = {
 def ave_risk_check(conn: "ConnectionHandler", addr: str, chain: str = "solana"):
     """检查合约风险，返回风险信息但不阻止后续交易流程。"""
     try:
+        chain = "solana" if _SOLANA_ONLY_BUILD else chain
         risk_resp = _data_get(f"/contracts/{addr}-{chain}")
         flags = _risk_flags(risk_resp)
 
@@ -5177,7 +5208,7 @@ ave_buy_token_desc = {
             "type": "object",
             "properties": {
                 "addr": {"type": "string", "description": "代币合约地址（可省略，省略时用当前代币）"},
-                "chain": {"type": "string", "description": "区块链", "enum": ["solana", "bsc", "eth", "base"]},
+                "chain": {"type": "string", "description": "区块链，本分支固定为 solana", "enum": ["solana"]},
                 "in_amount_sol": {"type": "number", "description": "买入金额（SOL单位），默认0.1"},
                 "tp_pct": {"type": "integer", "description": "止盈百分比，默认25"},
                 "sl_pct": {"type": "integer", "description": "止损百分比，默认15"},
@@ -5355,7 +5386,7 @@ ave_limit_order_desc = {
             "type": "object",
             "properties": {
                 "addr": {"type": "string", "description": "代币合约地址"},
-                "chain": {"type": "string", "description": "区块链"},
+                "chain": {"type": "string", "description": "区块链，本分支固定为 solana", "enum": ["solana"]},
                 "in_amount_sol": {"type": "number", "description": "买入金额（SOL）"},
                 "limit_price": {"type": "number", "description": "目标价格（USD）"},
                 "current_price": {"type": "number", "description": "当前价格（USD，用于展示距离）"},
@@ -5476,7 +5507,7 @@ ave_sell_token_desc = {
             "type": "object",
             "properties": {
                 "addr": {"type": "string", "description": "要卖出的代币合约地址"},
-                "chain": {"type": "string", "description": "区块链"},
+                "chain": {"type": "string", "description": "区块链，本分支固定为 solana", "enum": ["solana"]},
                 "sell_ratio": {"type": "number", "description": "卖出比例 0-1，默认1.0（全部卖出）"},
                 "symbol": {"type": "string", "description": "代币符号"},
                 "holdings_amount": {"type": "string", "description": "当前持仓 raw 机器单位字符串，必须保留精确值"},

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 
 
-_SUPPORTED_CHAIN_HINTS = ("solana", "bsc", "eth", "base")
+_SUPPORTED_CHAIN_HINTS = ("solana",)
 
 
 def _short_addr(value: str) -> str:
@@ -70,19 +70,7 @@ def _pct_text(value) -> str:
 
 
 def _chain_from_state(conn: "ConnectionHandler") -> str:
-    state = getattr(conn, "ave_state", {})
-    if not isinstance(state, dict):
-        return ""
-    current = state.get("current_token")
-    if isinstance(current, dict):
-        chain = _normalize_chain_name(current.get("chain"))
-        if chain:
-            return chain
-    for key in ("last_orders_chain", "feed_chain"):
-        chain = _normalize_chain_name(state.get(key))
-        if chain:
-            return chain
-    return ""
+    return "solana"
 
 
 def _current_token(conn: "ConnectionHandler") -> dict:
@@ -119,34 +107,23 @@ def _resolve_wallet_target(
     wallet_address: str = "",
     chain: str = "",
 ) -> tuple[str, str]:
-    requested_chain = _normalize_chain_name(chain)
-    preferred_chain = requested_chain or _chain_from_state(conn)
+    preferred_chain = "solana"
 
     if wallet_address:
-        if not preferred_chain:
-            raise ValueError("请补充链信息，例如 solana、bsc、eth 或 base。")
         return str(wallet_address).strip(), preferred_chain
 
     wallets = _load_proxy_wallets(conn)
     if not wallets:
-        raise ValueError("未提供钱包地址，且未配置可解析的 AVE_PROXY_WALLET_ID。")
+        raise ValueError("未提供 Solana 钱包地址，且未配置可解析的 AVE_PROXY_WALLET_ID。")
 
     for wallet in wallets:
         for address_info in wallet.get("addresses", []):
             chain_name = _normalize_chain_name(address_info.get("chain"))
             address = str(address_info.get("address", "") or "").strip()
-            if not chain_name or not address:
-                continue
-            if preferred_chain and chain_name == preferred_chain:
-                return address, chain_name
+            if chain_name == preferred_chain and address:
+                return address, preferred_chain
 
-    first_wallet = wallets[0] if wallets else {}
-    first_address = (first_wallet.get("addresses") or [{}])[0]
-    fallback_address = str(first_address.get("address", "") or "").strip()
-    fallback_chain = _normalize_chain_name(first_address.get("chain"), "solana")
-    if not fallback_address:
-        raise ValueError("代理钱包已配置，但没有可用链地址。")
-    return fallback_address, fallback_chain
+    raise ValueError("代理钱包已配置，但没有可用的 Solana 地址。")
 
 
 def _metric_parts(parts: Iterable[str]) -> str:
@@ -272,7 +249,7 @@ ave_wallet_overview_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名，例如 solana、bsc、eth、base。",
+                    "description": "链名，本分支固定为 solana。",
                 },
             },
             "required": [],
@@ -318,7 +295,7 @@ ave_wallet_tokens_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名，例如 solana、bsc、eth、base。",
+                    "description": "链名，本分支固定为 solana。",
                 },
             },
             "required": [],
@@ -364,7 +341,7 @@ ave_wallet_history_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名，例如 solana、bsc、eth、base。",
+                    "description": "链名，本分支固定为 solana。",
                 },
                 "token_address": {
                     "type": "string",
@@ -415,7 +392,7 @@ ave_wallet_pnl_desc = {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名，例如 solana、bsc、eth、base。",
+                    "description": "链名，本分支固定为 solana。",
                 },
                 "token_address": {
                     "type": "string",

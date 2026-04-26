@@ -1,29 +1,22 @@
 # Docs Directory
 
-This directory now holds the small set of current product/reference documents that still matter for the Ava Box repo state.
+This directory holds the current product/reference documents for the Ava Box Solana branch.
 
-Older exploratory notes and superseded documentation were intentionally removed. Do not assume missing historical docs still represent the product.
+## Reading order
 
-## What is here now
+| Document | Purpose |
+|---|---|
+| [`../README.md`](../README.md) | Monorepo overview and navigation |
+| [`ave-claw-hackathon-product-document-2026-04-13.md`](ave-claw-hackathon-product-document-2026-04-13.md) | English product/reference write-up |
+| [`ava-box-product-document-zh-2026-04-13.md`](ava-box-product-document-zh-2026-04-13.md) | 中文产品 / 参考文档 |
 
-- `ave-claw-hackathon-product-document-2026-04-13.md` - current Ava Box-facing product/reference write-up
-- `ava-box-product-document-zh-2026-04-13.md` - Chinese product/reference document
+## Branch scope
 
-## How to use this folder
+| Area | Solana branch rule |
+|---|---|
+| Chain | Solana only |
+| Platform feed | Pump.fun hot/new only |
+| Native unit | SOL |
+| Implementation source of truth | `server/main/xiaozhi-server/plugins_func/functions/ave_tools.py` and `shared/ave_screens/` |
 
-- Start here only if you need product context or a high-level written reference
-- Treat the codebase as the source of truth for implementation details
-- Prefer the repo entry points below when you are actively building features
-
-## Better starting points for implementation
-
-- [`../README.md`](../README.md) - monorepo overview and navigation
-- [`../shared/README.md`](../shared/README.md) - shared Ava Box UI layer
-- [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - concrete screen implementation surface
-- [`../firmware/main/README.md`](../firmware/main/README.md) - device runtime internals
-- [`../server/main/README_en.md`](../server/main/README_en.md) - backend module map
-
-## Notes
-
-- Keep new durable project notes here only if they stay current
-- Avoid rebuilding a large stale-doc archive; prefer short documentation that matches the code
+Keep new durable notes short and tied to code that exists in this branch.

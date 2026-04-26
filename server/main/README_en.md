@@ -26,6 +26,22 @@ Quick navigation:
 
 ---
 
+## Ava Box Solana Build Summary
+
+| Path | Role |
+|---|---|
+| `xiaozhi-server/plugins_func/functions/ave_tools.py` | Solana-only market tools, Pump.fun feeds, search/detail, watchlist, portfolio, and trading flows |
+| `xiaozhi-server/plugins_func/functions/ave_skill_tools.py` | Solana wallet overview, holdings, history, and token-level PnL tools |
+| `xiaozhi-server/core/handle/textHandler/keyActionHandler.py` | page-aware device key-action routing pinned to Solana |
+| `xiaozhi-server/config.yaml` | Solana prompt rules, ASR context, and tool-routing guidance |
+
+| Surface | Branch rule |
+|---|---|
+| Discovery | Solana trending/rank feeds plus Pump.fun hot/new |
+| Spotlight | Solana token detail, chart, price, risk, and market context |
+| Wallet | Solana wallet overview, holdings, history, and token-level PnL |
+| Trading | SOL-denominated market and limit-order confirmation flows |
+
 ## 1. Introduction
 
 The `xiaozhi-esp32-server` project is a **comprehensive backend system** designed to support intelligent hardware based on ESP32. Its core goal is to enable developers to quickly build a robust server infrastructure that can understand natural language commands, interact efficiently with various AI services (for speech recognition, natural language understanding, and speech synthesis), manage IoT devices, and provide a web-based user interface for system configuration and management. By integrating multiple cutting-edge technologies into a cohesive and extensible platform, this project aims to simplify and accelerate the development process of customizable voice assistants and intelligent control systems. It is not just a simple server, but a bridge connecting hardware, AI capabilities, and user management.

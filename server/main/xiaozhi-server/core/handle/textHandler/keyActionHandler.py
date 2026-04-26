@@ -26,10 +26,8 @@ logger = setup_logging()
 VALID_FEED_PLATFORMS = {
     "pump_in_hot",
     "pump_in_new",
-    "fourmeme_in_hot",
-    "fourmeme_in_new",
 }
-VALID_ACTION_CHAINS = {"solana", "bsc", "eth", "base"}
+VALID_ACTION_CHAINS = {"solana"}
 
 
 class KeyActionHandler(TextMessageHandler):
@@ -57,13 +55,9 @@ class KeyActionHandler(TextMessageHandler):
 
         def _resolve_asset_ref(ref_value, chain_value):
             raw_ref = str(ref_value or "").strip()
-            raw_chain = str(chain_value or "").strip().lower()
-            resolved_addr, resolved_chain = _split_token_reference(raw_ref, raw_chain)
-            has_chain = (
-                resolved_chain in VALID_ACTION_CHAINS and
-                (bool(raw_chain) or (bool(raw_ref) and resolved_addr != raw_ref))
-            )
-            return raw_ref, resolved_addr, resolved_chain, has_chain
+            raw_chain = str(chain_value or "solana").strip().lower() or "solana"
+            resolved_addr, _resolved_chain = _split_token_reference(raw_ref, raw_chain)
+            return raw_ref, resolved_addr, "solana", bool(resolved_addr)
 
         def _normalize_supported_chain(chain_value):
             normalized = str(chain_value or "").strip().lower()
@@ -74,14 +68,7 @@ class KeyActionHandler(TextMessageHandler):
             return normalized
 
         def _cycle_action_chain(current_value, *, allow_all=False):
-            order = ["solana", "base", "eth", "bsc"]
-            if allow_all:
-                order = ["all"] + order
-            normalized = str(current_value or "").strip().lower()
-            if normalized not in order:
-                normalized = order[0]
-            next_idx = (order.index(normalized) + 1) % len(order)
-            return order[next_idx]
+            return "solana"
 
         action = msg_json.get("action", "")
         token_id = msg_json.get("token_id", "")
@@ -293,11 +280,7 @@ class KeyActionHandler(TextMessageHandler):
 
         elif action == "signals_chain_cycle":
             state = getattr(conn, "ave_state", {})
-            order = ["solana", "bsc"]
-            current_chain = str(state.get("signals_chain") or "").strip().lower()
-            if current_chain not in order:
-                current_chain = order[0]
-            next_chain = order[(order.index(current_chain) + 1) % len(order)]
+            next_chain = "solana"
             logger.bind(tag=TAG).info(f"key_action signals_chain_cycle -> {next_chain}")
             try:
                 ave_list_signals(conn, chain=next_chain)

@@ -97,8 +97,6 @@ static const explorer_source_entry_t SOURCE_MENU[] = {
     {"NEW",         "new",             "Topic",    EXPLORER_SOURCE_TOPIC},
     {"PUMP HOT",    "pump_in_hot",     "Platform", EXPLORER_SOURCE_PLATFORM},
     {"PUMP NEW",    "pump_in_new",     "Platform", EXPLORER_SOURCE_PLATFORM},
-    {"4MEME HOT",   "fourmeme_in_hot", "Platform", EXPLORER_SOURCE_PLATFORM},
-    {"4MEME NEW",   "fourmeme_in_new", "Platform", EXPLORER_SOURCE_PLATFORM},
 };
 
 static const explorer_surface_model_t MENU_MODEL = {

@@ -1,6 +1,6 @@
 /**
  * @file screen_feed.c
- * @brief FEED screen - multi-chain token list view with FEED-local Explore/Search-guide overlays.
+ * @brief FEED screen - Solana token list view with FEED-local Explore/Search-guide overlays.
  *
  * Layout (320x240 landscape):
  *   y=  0..21   top bar (22px): [source label (left)] [context hint (mid)] [N/M counter (far right)]
@@ -200,8 +200,6 @@ static const feed_source_entry_t SOURCE_MENU[] = {
     {"NEW",         "new",             "Topic",    FEED_SOURCE_ENTRY_TOPIC},
     {"PUMP HOT",    "pump_in_hot",     "Platform", FEED_SOURCE_ENTRY_PLATFORM},
     {"PUMP NEW",    "pump_in_new",     "Platform", FEED_SOURCE_ENTRY_PLATFORM},
-    {"4MEME HOT",   "fourmeme_in_hot", "Platform", FEED_SOURCE_ENTRY_PLATFORM},
-    {"4MEME NEW",   "fourmeme_in_new", "Platform", FEED_SOURCE_ENTRY_PLATFORM},
 };
 
 static const feed_surface_model_t FEED_SURFACE_MODELS[] = {

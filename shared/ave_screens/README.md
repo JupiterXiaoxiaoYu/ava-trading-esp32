@@ -8,7 +8,7 @@ These files define the market-facing UI surfaces that are shown on both the ESP3
 
 ### Screen implementations
 
-- `screen_feed.c` - list/feed style market view and top-bar interactions
+- `screen_feed.c` - Solana feed/list market view and Pump.fun source entries
 - `screen_spotlight.c` - token detail / spotlight page
 - `screen_portfolio.c` - holdings surface
 - `screen_disambiguation.c` - ambiguous search result selection
@@ -24,6 +24,17 @@ These files define the market-facing UI surfaces that are shown on both the ESP3
 - `ave_price_fmt.c` / `.h` - compact market number formatting helpers
 - `ave_font_provider.c` / `.h` - font selection and font-loading glue
 - `CMakeLists.txt` - shared build wiring for simulator and firmware consumers
+
+## Solana screen responsibilities
+
+| File | Product responsibility |
+|---|---|
+| `screen_feed.c` | Solana feed, topic menu, Pump.fun source menu, selection cursor |
+| `screen_browse.c` | Solana watchlist and signals browsing |
+| `screen_explorer.c` | Search, orders, trading mode, sources, signals, and watchlist entry points |
+| `screen_spotlight.c` | Solana token detail and watchlist star state |
+| `screen_confirm.c` / `screen_limit_confirm.c` | SOL-denominated market and limit action review |
+| `screen_portfolio.c` | Solana holdings and portfolio detail surfaces |
 
 ## Development workflow
 
