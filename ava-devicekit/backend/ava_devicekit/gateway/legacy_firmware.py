@@ -201,6 +201,7 @@ async def run_legacy_firmware_gateway(
             adapter=adapter,
             mock=mock,
             skill_store_path=skill_store_path,
+            skill_config=settings.ava_box_skill_config(store_path=skill_store_path),
         )
         audio = AudioInputBuffer(decoder=create_audio_decoder(settings.audio_decoder_class, settings.audio_decoder_options))
         await LegacyFirmwareConnection(session, voice_pipeline=providers.pipeline, asr_provider=providers.asr, audio=audio).open(ws)

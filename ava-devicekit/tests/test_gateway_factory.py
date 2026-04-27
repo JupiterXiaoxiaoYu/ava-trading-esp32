@@ -54,3 +54,14 @@ def test_voice_command_uses_device_selection_context():
     )
     assert draft["screen"] == "confirm"
     assert draft["action_draft"]["summary"]["symbol"] == "SOL"
+
+from ava_devicekit.runtime.settings import RuntimeSettings
+
+
+def test_runtime_settings_builds_ava_box_custodial_skill_config():
+    settings = RuntimeSettings.from_dict({"execution": {"mode": "custodial", "proxy_wallet_id_env": "WALLET_ID", "secret_key_env": "SECRET"}})
+    config = settings.ava_box_skill_config(store_path="state.json")
+    assert config.execution_mode == "custodial"
+    assert config.proxy_wallet_id_env == "WALLET_ID"
+    assert config.execution_secret_key_env == "SECRET"
+    assert config.store_path == "state.json"

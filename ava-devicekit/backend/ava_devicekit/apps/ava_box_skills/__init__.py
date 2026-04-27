@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig
-from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider
+from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, AveSolanaTradeConfig, AveSolanaTradeProvider
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.apps.ava_box_skills.portfolio import PortfolioSkill
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
@@ -56,7 +56,17 @@ class AvaBoxSkillService:
         mode = self.config.execution_mode.lower()
         if mode == "paper":
             return PaperExecutionProvider(self.store)
-        if mode in {"ave_solana", "real", "wallet"}:
+        if mode in {"proxy", "proxy_wallet", "custodial", "hosted", "real"}:
+            return AveProxyWalletTradeProvider(
+                AveSolanaTradeConfig(
+                    base_url=self.config.execution_base_url,
+                    api_key_env=self.config.execution_api_key_env,
+                    secret_key_env=self.config.execution_secret_key_env,
+                    proxy_wallet_id_env=self.config.proxy_wallet_id_env,
+                    proxy_default_gas=self.config.proxy_default_gas,
+                )
+            )
+        if mode in {"ave_solana", "chain_wallet", "self_custody", "wallet"}:
             return AveSolanaTradeProvider(
                 AveSolanaTradeConfig(
                     base_url=self.config.execution_base_url,
@@ -66,4 +76,4 @@ class AvaBoxSkillService:
         return None
 
 
-__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveSolanaTradeConfig", "AveSolanaTradeProvider"]
+__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveProxyWalletTradeProvider", "AveSolanaTradeConfig", "AveSolanaTradeProvider"]

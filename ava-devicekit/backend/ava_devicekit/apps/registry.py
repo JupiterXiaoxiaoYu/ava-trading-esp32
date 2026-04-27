@@ -23,11 +23,12 @@ def create_hardware_app(
     manifest_path: str | Path | None = None,
     chain_adapter: ChainAdapter,
     skill_store_path: str | None = None,
+    skill_config: AvaBoxSkillConfig | None = None,
 ) -> HardwareApp:
     manifest = load_manifest(app_id=app_id, manifest_path=manifest_path)
     if manifest.app_id != "ava_box":
         raise ValueError(f"unsupported app manifest: {manifest.app_id}")
-    config = AvaBoxSkillConfig(store_path=skill_store_path) if skill_store_path else AvaBoxSkillConfig()
+    config = skill_config or (AvaBoxSkillConfig(store_path=skill_store_path) if skill_store_path else AvaBoxSkillConfig())
     return AvaBoxApp(
         manifest=manifest,
         chain_adapter=chain_adapter,

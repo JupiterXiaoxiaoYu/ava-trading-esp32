@@ -35,5 +35,13 @@
   "audio": {
     "decoder_class": "",
     "options": {}
+  },
+  "execution": {
+    "mode": "custodial",
+    "base_url": "https://bot-api.ave.ai",
+    "api_key_env": "AVE_API_KEY",
+    "secret_key_env": "AVE_SECRET_KEY",
+    "proxy_wallet_id_env": "AVE_PROXY_WALLET_ID",
+    "proxy_default_gas": "1000000"
   }
 }

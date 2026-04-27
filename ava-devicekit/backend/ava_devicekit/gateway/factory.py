@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from ava_devicekit.adapters.registry import default_adapter_registry, normalize_adapter_name
+from ava_devicekit.apps.ava_box_skills import AvaBoxSkillConfig
 from ava_devicekit.apps.registry import create_hardware_app, load_manifest
 from ava_devicekit.gateway.session import DeviceSession
 
@@ -15,6 +16,7 @@ def create_device_session(
     adapter: str = "auto",
     mock: bool = False,
     skill_store_path: str | None = None,
+    skill_config: AvaBoxSkillConfig | None = None,
     adapter_options: dict[str, Any] | None = None,
 ) -> DeviceSession:
     manifest = load_manifest(app_id=app_id, manifest_path=manifest_path)
@@ -25,6 +27,7 @@ def create_device_session(
         manifest_path=manifest_path,
         chain_adapter=chain_adapter,
         skill_store_path=skill_store_path,
+        skill_config=skill_config,
     )
     return DeviceSession(app)
 

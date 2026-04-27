@@ -15,3 +15,6 @@ class AvaBoxSkillConfig:
     execution_mode: str = "paper"
     execution_base_url: str = "https://bot-api.ave.ai"
     execution_api_key_env: str = "AVE_API_KEY"
+    execution_secret_key_env: str = "AVE_SECRET_KEY"
+    proxy_wallet_id_env: str = "AVE_PROXY_WALLET_ID"
+    proxy_default_gas: str = "1000000"

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from ava_devicekit.apps.ava_box_skills import AvaBoxSkillConfig
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
 
@@ -40,15 +41,30 @@ class RuntimeManager:
         adapter: str = "auto",
         mock: bool = False,
         skill_store_path: str | None = None,
+        skill_config: AvaBoxSkillConfig | None = None,
     ) -> "RuntimeManager":
         def build(device_id: str) -> DeviceSession:
             store = _device_store_path(skill_store_path, device_id)
+            config = skill_config
+            if config and store:
+                config = AvaBoxSkillConfig(
+                    store_path=store,
+                    default_buy_sol=config.default_buy_sol,
+                    default_slippage_bps=config.default_slippage_bps,
+                    execution_mode=config.execution_mode,
+                    execution_base_url=config.execution_base_url,
+                    execution_api_key_env=config.execution_api_key_env,
+                    execution_secret_key_env=config.execution_secret_key_env,
+                    proxy_wallet_id_env=config.proxy_wallet_id_env,
+                    proxy_default_gas=config.proxy_default_gas,
+                )
             return create_device_session(
                 app_id=app_id,
                 manifest_path=manifest_path,
                 adapter=adapter,
                 mock=mock,
                 skill_store_path=store,
+                skill_config=config,
             )
 
         return cls(build)

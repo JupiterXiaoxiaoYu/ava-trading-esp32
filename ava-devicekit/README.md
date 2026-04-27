@@ -93,7 +93,7 @@ ESP32 input / voice
 | TTS provider | Framework provider boundary | Selectable TTS registry with mock, OpenAI-compatible HTTP TTS, and custom provider classes |
 | LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider plus custom LLM provider classes through `providers/registry.py` |
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
-| Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE Solana transaction construction provider in `apps/ava_box_skills/execution.py` for external wallet signing |
+| Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider and optional self-custody transaction provider in `apps/ava_box_skills/execution.py` |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, optional bearer auth |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `run-http`, and `run-legacy-ws` |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |

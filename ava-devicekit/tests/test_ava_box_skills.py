@@ -95,3 +95,65 @@ def test_trading_skill_submits_signed_transaction_with_external_executor():
     result = skill.submit_signed("r1", "signed-payload")
     assert result.ok is True
     assert result.data["response"]["signed_tx"] == "signed-payload"
+
+from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, build_proxy_wallet_order_payload
+
+
+def test_proxy_wallet_order_payload_uses_custodial_assets_id(monkeypatch):
+    monkeypatch.setenv("TEST_PROXY_WALLET_ID", "assets-1")
+    payload = build_proxy_wallet_order_payload(
+        {"action": "trade.market_draft", "token_id": "Token111-solana", "symbol": "TOK", "amount": "0.1 SOL"},
+        {"request_id": "r1"},
+        AveSolanaTradeConfig(proxy_wallet_id_env="TEST_PROXY_WALLET_ID"),
+    )
+    assert payload["assetsId"] == "assets-1"
+    assert payload["inTokenAddress"] == "sol"
+    assert payload["outTokenAddress"] == "Token111"
+    assert payload["inAmount"] == "100000000"
+    assert payload["gas"] == "1000000"
+
+
+def test_proxy_wallet_provider_posts_signed_hmac_order(monkeypatch):
+    monkeypatch.setenv("TEST_AVE_KEY", "key")
+    monkeypatch.setenv("TEST_AVE_SECRET", "secret")
+    monkeypatch.setenv("TEST_PROXY_WALLET_ID", "assets-1")
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"ok":true,"data":{"orderId":"order-1"}}'
+
+    def fake_urlopen(req, timeout=0):
+        captured["url"] = req.full_url
+        captured["body"] = req.data.decode()
+        captured["headers"] = dict(req.header_items())
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = AveProxyWalletTradeProvider(
+        AveSolanaTradeConfig(
+            base_url="https://trade.example",
+            api_key_env="TEST_AVE_KEY",
+            secret_key_env="TEST_AVE_SECRET",
+            proxy_wallet_id_env="TEST_PROXY_WALLET_ID",
+        )
+    )
+    result = provider.execute(
+        {"action": "trade.market_draft", "token_id": "Token111-solana", "symbol": "TOK", "amount": "0.1 SOL"},
+        {"request_id": "r1"},
+    )
+    assert captured["url"].endswith("/v1/thirdParty/tx/sendSwapOrder")
+    assert "ave-access-sign" in {k.lower(): v for k, v in captured["headers"].items()}
+    assert result["status"] == "order_submitted"
+
+
+def test_skill_service_real_mode_uses_proxy_wallet_provider(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEST_PROXY_WALLET_ID", "assets-1")
+    service = AvaBoxSkillService(AvaBoxSkillConfig(store_path=str(tmp_path / "s.json"), execution_mode="custodial", proxy_wallet_id_env="TEST_PROXY_WALLET_ID"))
+    assert isinstance(service.executor, AveProxyWalletTradeProvider)

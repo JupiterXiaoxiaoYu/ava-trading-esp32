@@ -17,6 +17,6 @@ Rules:
 - Deterministic app routing should run before LLM fallback.
 - TTS providers should return both text and audio metadata.
 - ASR providers should state their expected audio format; Qwen realtime expects PCM16.
-- Real trade providers should construct/sign through external wallet infrastructure unless a secure custody design is explicitly added.
+- Real trade providers should keep credentials server-side. Ava Box defaults to proxy/custodial wallet execution for real orders; ESP32 remains the confirmation surface.
 
 Use `provider.catalog.example.json` for selectable ASR/LLM/TTS config examples, including custom Python provider classes.

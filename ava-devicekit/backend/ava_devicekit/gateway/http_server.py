@@ -249,6 +249,7 @@ def run_http_gateway(
     skill_store_path: str | None = None,
     runtime_settings: RuntimeSettings | None = None,
 ) -> None:
+    runtime_settings = runtime_settings or RuntimeSettings.load()
     factory = session_factory or (
         lambda: create_device_session(
             app_id=app_id,
@@ -256,6 +257,7 @@ def run_http_gateway(
             adapter=adapter,
             mock=mock,
             skill_store_path=skill_store_path,
+            skill_config=runtime_settings.ava_box_skill_config(store_path=skill_store_path),
         )
     )
     server = ThreadingHTTPServer((host, port), make_handler(factory, runtime_settings))

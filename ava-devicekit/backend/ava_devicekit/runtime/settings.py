@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ava_devicekit.apps.ava_box_skills.config import DEFAULT_STORE, AvaBoxSkillConfig
+
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 8788
 DEFAULT_WEBSOCKET_PORT = 8787
@@ -60,6 +62,12 @@ class RuntimeSettings:
     tts_timeout_sec: int = 30
     tts_class: str = ""
     tts_options: dict[str, Any] = field(default_factory=dict)
+    execution_mode: str = "paper"
+    execution_base_url: str = "https://bot-api.ave.ai"
+    execution_api_key_env: str = "AVE_API_KEY"
+    execution_secret_key_env: str = "AVE_SECRET_KEY"
+    proxy_wallet_id_env: str = "AVE_PROXY_WALLET_ID"
+    proxy_default_gas: str = "1000000"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "RuntimeSettings":
@@ -70,6 +78,7 @@ class RuntimeSettings:
         asr = providers.get("asr") if isinstance(providers.get("asr"), dict) else {}
         llm = providers.get("llm") if isinstance(providers.get("llm"), dict) else {}
         tts = providers.get("tts") if isinstance(providers.get("tts"), dict) else {}
+        execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
         return cls(
             host=str(data.get("host") or server.get("ip") or DEFAULT_HOST),
             http_port=int(data.get("http_port") or server.get("http_port") or DEFAULT_HTTP_PORT),
@@ -108,6 +117,12 @@ class RuntimeSettings:
             tts_timeout_sec=int(data.get("tts_timeout_sec") or tts.get("timeout_sec") or 30),
             tts_class=str(data.get("tts_class") or tts.get("class") or tts.get("class_path") or ""),
             tts_options=_provider_options(tts),
+            execution_mode=str(data.get("execution_mode") or execution.get("mode") or "paper"),
+            execution_base_url=str(data.get("execution_base_url") or execution.get("base_url") or "https://bot-api.ave.ai"),
+            execution_api_key_env=str(data.get("execution_api_key_env") or execution.get("api_key_env") or "AVE_API_KEY"),
+            execution_secret_key_env=str(data.get("execution_secret_key_env") or execution.get("secret_key_env") or "AVE_SECRET_KEY"),
+            proxy_wallet_id_env=str(data.get("proxy_wallet_id_env") or execution.get("proxy_wallet_id_env") or "AVE_PROXY_WALLET_ID"),
+            proxy_default_gas=str(data.get("proxy_default_gas") or execution.get("proxy_default_gas") or "1000000"),
         )
 
     @classmethod
@@ -147,7 +162,26 @@ class RuntimeSettings:
                 "tts": {"provider": self.tts_provider, "class": self.tts_class, "model": self.tts_model, "base_url": self.tts_base_url, "api_key_env": self.tts_api_key_env, "voice": self.tts_voice, "options": _sanitize_options(self.tts_options)},
             },
             "audio": {"decoder_class": self.audio_decoder_class, "options": _sanitize_options(self.audio_decoder_options)},
+            "execution": {
+                "mode": self.execution_mode,
+                "base_url": self.execution_base_url,
+                "api_key_env": self.execution_api_key_env,
+                "secret_key_env": self.execution_secret_key_env,
+                "proxy_wallet_id_env": self.proxy_wallet_id_env,
+                "proxy_default_gas": self.proxy_default_gas,
+            },
         }
+
+    def ava_box_skill_config(self, *, store_path: str | None = None) -> AvaBoxSkillConfig:
+        return AvaBoxSkillConfig(
+            store_path=store_path or DEFAULT_STORE,
+            execution_mode=self.execution_mode,
+            execution_base_url=self.execution_base_url,
+            execution_api_key_env=self.execution_api_key_env,
+            execution_secret_key_env=self.execution_secret_key_env,
+            proxy_wallet_id_env=self.proxy_wallet_id_env,
+            proxy_default_gas=self.proxy_default_gas,
+        )
 
     def __post_init__(self) -> None:
         if self.asr_options is None:
