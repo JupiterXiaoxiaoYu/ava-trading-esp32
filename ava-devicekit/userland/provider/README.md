@@ -18,3 +18,5 @@ Rules:
 - TTS providers should return both text and audio metadata.
 - ASR providers should state their expected audio format; Qwen realtime expects PCM16.
 - Real trade providers should construct/sign through external wallet infrastructure unless a secure custody design is explicitly added.
+
+Use `provider.catalog.example.json` for selectable ASR/LLM/TTS config examples, including custom Python provider classes.

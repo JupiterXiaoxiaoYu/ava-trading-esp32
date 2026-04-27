@@ -88,9 +88,9 @@ ESP32 input / voice
 
 | Area | Framework Or App | Current Implementation |
 |---|---|---|
-| ASR audio chain | Framework provider boundary | Qwen realtime PCM16 session/event transport in `providers/asr/qwen_realtime.py`; OPUS-to-PCM is an explicit `AudioDecoder` board/deployment hook |
-| TTS provider | Framework provider boundary | Mock TTS for tests plus OpenAI-compatible HTTP TTS in `providers/tts/openai_compatible.py` |
-| LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider through `providers/registry.py` |
+| ASR audio chain | Framework provider boundary | Selectable ASR registry with Qwen realtime, OpenAI-compatible transcription, custom provider classes, and explicit `AudioDecoder` board/deployment hook |
+| TTS provider | Framework provider boundary | Selectable TTS registry with mock, OpenAI-compatible HTTP TTS, and custom provider classes |
+| LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider plus custom LLM provider classes through `providers/registry.py` |
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE Solana transaction construction provider in `apps/ava_box_skills/execution.py` for external wallet signing |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps` |

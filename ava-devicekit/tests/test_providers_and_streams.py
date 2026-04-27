@@ -122,3 +122,51 @@ def test_ave_data_wss_builds_frames_and_parses_price_events():
 def test_audio_decoder_boundary_accepts_pcm16_only():
     decoder = Pcm16PassthroughDecoder()
     assert decoder.decode_to_pcm16(AudioFrame(b"pcm", format="pcm16")) == b"pcm"
+
+from ava_devicekit.providers.asr.openai_compatible import OpenAICompatibleASRConfig, OpenAICompatibleASRProvider
+from ava_devicekit.providers.tts.mock import MockTTSProvider
+
+
+def test_registry_selects_openai_compatible_asr_and_custom_tts():
+    settings = RuntimeSettings.from_dict(
+        {
+            "providers": {
+                "asr": {"provider": "openai-compatible", "base_url": "https://asr.example/v1", "model": "whisper-x", "api_key_env": "ASR_KEY", "language": "en"},
+                "tts": {"provider": "custom", "class": "ava_devicekit.providers.tts.mock.MockTTSProvider"},
+            }
+        }
+    )
+    bundle = create_provider_bundle(settings)
+    assert isinstance(bundle.asr, OpenAICompatibleASRProvider)
+    assert bundle.asr.config.model == "whisper-x"
+    assert isinstance(bundle.tts, MockTTSProvider)
+
+
+def test_openai_compatible_asr_posts_wav_transcription(monkeypatch):
+    monkeypatch.setenv("TEST_ASR_KEY", "secret")
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"text":"hello"}'
+
+    def fake_urlopen(req, timeout=0):
+        captured["url"] = req.full_url
+        captured["body"] = req.data
+        captured["content_type"] = req.headers["Content-type"]
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenAICompatibleASRProvider(OpenAICompatibleASRConfig(base_url="https://asr.example/v1", api_key_env="TEST_ASR_KEY", model="whisper-x"))
+    result = provider._transcribe_pcm16_blocking(b"\x00\x00\x01\x00", 16000, "en")
+    assert captured["url"] == "https://asr.example/v1/audio/transcriptions"
+    assert b"audio.wav" in captured["body"]
+    assert b"RIFF" in captured["body"]
+    assert "multipart/form-data" in captured["content_type"]
+    assert result.text == "hello"

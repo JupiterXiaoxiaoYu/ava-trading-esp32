@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,11 +38,15 @@ class RuntimeSettings:
     asr_api_key_env: str = "DASHSCOPE_API_KEY"
     asr_language: str = "zh"
     asr_sample_rate: int = 16000
+    asr_class: str = ""
+    asr_options: dict[str, Any] = field(default_factory=dict)
     llm_provider: str = "disabled"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
     llm_api_key_env: str = "OPENAI_API_KEY"
     llm_timeout_sec: int = 30
+    llm_class: str = ""
+    llm_options: dict[str, Any] = field(default_factory=dict)
     tts_provider: str = "mock"
     tts_base_url: str = "https://api.openai.com/v1"
     tts_model: str = "gpt-4o-mini-tts"
@@ -50,6 +54,8 @@ class RuntimeSettings:
     tts_voice: str = "alloy"
     tts_format: str = "opus"
     tts_timeout_sec: int = 30
+    tts_class: str = ""
+    tts_options: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "RuntimeSettings":
@@ -75,11 +81,15 @@ class RuntimeSettings:
             asr_api_key_env=str(data.get("asr_api_key_env") or asr.get("api_key_env") or "DASHSCOPE_API_KEY"),
             asr_language=str(data.get("asr_language") or asr.get("language") or "zh"),
             asr_sample_rate=int(data.get("asr_sample_rate") or asr.get("sample_rate") or 16000),
+            asr_class=str(data.get("asr_class") or asr.get("class") or asr.get("class_path") or ""),
+            asr_options=_provider_options(asr),
             llm_provider=str(data.get("llm_provider") or llm.get("provider") or "disabled"),
             llm_base_url=str(data.get("llm_base_url") or llm.get("base_url") or "https://api.openai.com/v1"),
             llm_model=str(data.get("llm_model") or llm.get("model") or "gpt-4o-mini"),
             llm_api_key_env=str(data.get("llm_api_key_env") or llm.get("api_key_env") or "OPENAI_API_KEY"),
             llm_timeout_sec=int(data.get("llm_timeout_sec") or llm.get("timeout_sec") or 30),
+            llm_class=str(data.get("llm_class") or llm.get("class") or llm.get("class_path") or ""),
+            llm_options=_provider_options(llm),
             tts_provider=str(data.get("tts_provider") or tts.get("provider") or "mock"),
             tts_base_url=str(data.get("tts_base_url") or tts.get("base_url") or "https://api.openai.com/v1"),
             tts_model=str(data.get("tts_model") or tts.get("model") or "gpt-4o-mini-tts"),
@@ -87,6 +97,8 @@ class RuntimeSettings:
             tts_voice=str(data.get("tts_voice") or tts.get("voice") or "alloy"),
             tts_format=str(data.get("tts_format") or tts.get("format") or "opus"),
             tts_timeout_sec=int(data.get("tts_timeout_sec") or tts.get("timeout_sec") or 30),
+            tts_class=str(data.get("tts_class") or tts.get("class") or tts.get("class_path") or ""),
+            tts_options=_provider_options(tts),
         )
 
     @classmethod
@@ -119,8 +131,30 @@ class RuntimeSettings:
             "websocket_ping_interval": self.websocket_ping_interval,
             "websocket_ping_timeout": self.websocket_ping_timeout,
             "providers": {
-                "asr": {"provider": self.asr_provider, "model": self.asr_model, "api_key_env": self.asr_api_key_env},
-                "llm": {"provider": self.llm_provider, "model": self.llm_model, "base_url": self.llm_base_url, "api_key_env": self.llm_api_key_env},
-                "tts": {"provider": self.tts_provider, "model": self.tts_model, "base_url": self.tts_base_url, "api_key_env": self.tts_api_key_env, "voice": self.tts_voice},
+                "asr": {"provider": self.asr_provider, "class": self.asr_class, "model": self.asr_model, "api_key_env": self.asr_api_key_env, "options": _sanitize_options(self.asr_options)},
+                "llm": {"provider": self.llm_provider, "class": self.llm_class, "model": self.llm_model, "base_url": self.llm_base_url, "api_key_env": self.llm_api_key_env, "options": _sanitize_options(self.llm_options)},
+                "tts": {"provider": self.tts_provider, "class": self.tts_class, "model": self.tts_model, "base_url": self.tts_base_url, "api_key_env": self.tts_api_key_env, "voice": self.tts_voice, "options": _sanitize_options(self.tts_options)},
             },
         }
+
+    def __post_init__(self) -> None:
+        if self.asr_options is None:
+            self.asr_options = {}
+        if self.llm_options is None:
+            self.llm_options = {}
+        if self.tts_options is None:
+            self.tts_options = {}
+
+
+def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
+    options = data.get("options") if isinstance(data.get("options"), dict) else {}
+    reserved = {"provider", "class", "class_path", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format"}
+    inline = {k: v for k, v in data.items() if k not in reserved}
+    return {**inline, **options}
+
+
+def _sanitize_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    if not options:
+        return {}
+    blocked = ("key", "secret", "token", "password")
+    return {k: ("<redacted>" if any(word in k.lower() for word in blocked) else v) for k, v in options.items()}

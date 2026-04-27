@@ -77,7 +77,7 @@
       "name": "Provider Registry",
       "path": "backend/ava_devicekit/providers/registry.py",
       "user_action": "configure",
-      "description": "Builds ASR, LLM, TTS, and voice fallback pipeline from runtime settings."
+      "description": "Builds ASR, LLM, TTS, and voice fallback pipeline from runtime settings, including built-in aliases and custom provider classes."
     },
     {
       "id": "admin_api",
@@ -162,14 +162,14 @@
       "interface": "backend/ava_devicekit/providers/asr/base.py::ASRProvider",
       "template": "userland/provider/",
       "user_action": "implement_or_configure",
-      "description": "Accepts PCM16 audio and returns transcript text."
+      "description": "Accepts PCM16 audio and returns transcript text. Built-ins include Qwen realtime and OpenAI-compatible transcription; custom Python classes can be selected in runtime config."
     },
     {
       "id": "tts_provider",
       "interface": "backend/ava_devicekit/providers/tts/base.py::TTSProvider",
       "template": "userland/provider/",
       "user_action": "implement_or_configure",
-      "description": "Converts response text to device-playable audio."
+      "description": "Converts response text to device-playable audio. Built-ins include mock and OpenAI-compatible speech; custom Python classes can be selected in runtime config."
     },
     {
       "id": "trade_execution_provider",

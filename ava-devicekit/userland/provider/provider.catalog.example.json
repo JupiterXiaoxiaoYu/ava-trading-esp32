@@ -1,0 +1,76 @@
+{
+  "providers": {
+    "asr": {
+      "qwen_realtime": {
+        "provider": "qwen",
+        "base_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+        "model": "qwen3-asr-flash-realtime",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "language": "zh",
+        "sample_rate": 16000
+      },
+      "openai_compatible_transcription": {
+        "provider": "openai-compatible",
+        "base_url": "https://api.openai.com/v1",
+        "model": "whisper-1",
+        "api_key_env": "OPENAI_API_KEY",
+        "language": "en"
+      },
+      "custom_python_provider": {
+        "provider": "custom",
+        "class": "my_app.providers.MyASRProvider",
+        "options": {
+          "base_url": "https://asr.example.com",
+          "api_key_env": "MY_ASR_KEY",
+          "model": "my-asr-model"
+        }
+      }
+    },
+    "llm": {
+      "openai": {
+        "provider": "openai-compatible",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+        "api_key_env": "OPENAI_API_KEY"
+      },
+      "deepseek_or_compatible": {
+        "provider": "openai-compatible",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "api_key_env": "DEEPSEEK_API_KEY"
+      },
+      "custom_python_provider": {
+        "provider": "custom",
+        "class": "my_app.providers.MyLLMProvider",
+        "options": {
+          "base_url": "https://llm.example.com",
+          "api_key_env": "MY_LLM_KEY",
+          "model": "my-llm-model"
+        }
+      }
+    },
+    "tts": {
+      "mock": {
+        "provider": "mock"
+      },
+      "openai_compatible_speech": {
+        "provider": "openai-compatible",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini-tts",
+        "voice": "alloy",
+        "format": "opus",
+        "api_key_env": "OPENAI_API_KEY"
+      },
+      "custom_python_provider": {
+        "provider": "custom",
+        "class": "my_app.providers.MyTTSProvider",
+        "options": {
+          "base_url": "https://tts.example.com",
+          "api_key_env": "MY_TTS_KEY",
+          "model": "my-tts-model",
+          "voice": "ava"
+        }
+      }
+    }
+  }
+}
