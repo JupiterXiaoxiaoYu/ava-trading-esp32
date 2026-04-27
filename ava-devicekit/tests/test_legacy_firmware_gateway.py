@@ -16,6 +16,18 @@ def test_legacy_firmware_hello_and_key_action_flow():
 
     detail = conn.handle_text(json.dumps({"type": "key_action", "action": "watch"}))
     assert detail[0]["screen"] == "spotlight"
+    assert detail[0]["data"]["chart_min_y"]
+    assert detail[0]["data"]["chart_mid_y"]
+    assert detail[0]["data"]["chart_max_y"]
+
+    kline = conn.handle_text(json.dumps({"type": "key_action", "action": "kline_interval", "interval": "240"}))
+    assert kline[0]["screen"] == "spotlight"
+    assert kline[0]["data"]["interval"] == "240"
+    assert kline[0]["data"]["chart_min_y"] != ""
+
+    typo_compat = conn.handle_text(json.dumps({"type": "key_action", "action": "kline_internal", "interval": "1440"}))
+    assert typo_compat[0]["screen"] == "spotlight"
+    assert typo_compat[0]["data"]["interval"] == "1440"
 
 
 def test_legacy_firmware_hello_reports_boot_config_error(monkeypatch):

@@ -79,6 +79,12 @@ class AvaBoxApp:
         if action in {"watch", "detail", "open"}:
             token_id = str(payload.get("token_id") or self._selected_token_id())
             return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
+        if action in {"kline_interval", "kline_internal"}:
+            token_id = str(payload.get("token_id") or self._selected_token_id())
+            interval = str(payload.get("interval") or self.context.state.get("interval") or "60")
+            return self._remember_screen(self.chain_adapter.get_token_detail(token_id, interval=interval, context=self.context))
+        if action in {"feed_prev", "feed_next"}:
+            return self._route_feed_nav(action)
         if action in {"buy", "quick_buy"}:
             draft = self.skills.create_action_draft("trade.market_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
@@ -106,6 +112,24 @@ class AvaBoxApp:
             selected = self.context.selected.to_dict() if self.context.selected else {}
             return self.skills.add_watchlist({**selected, **payload}, context=self.context)
         return builders.notify("Unknown action", action or "empty", level="warn", context=self.context)
+
+    def _route_feed_nav(self, action: str) -> ScreenPayload:
+        rows = self.context.visible_rows or []
+        if not rows:
+            return builders.notify("Navigation", "No feed context", level="warn", context=self.context)
+        cursor = self.context.cursor
+        if cursor is None and self.context.selected:
+            cursor = self.context.selected.cursor
+        cursor = cursor if cursor is not None else 0
+        next_cursor = cursor + (1 if action == "feed_next" else -1)
+        if next_cursor < 0 or next_cursor >= len(rows):
+            return builders.notify("Navigation", "Feed boundary", level="info", context=self.context)
+        row = rows[next_cursor] if isinstance(rows[next_cursor], dict) else {}
+        token_id = str(row.get("token_id") or row.get("addr") or "")
+        self.context.cursor = next_cursor
+        if self.context.selected:
+            self.context.selected.cursor = next_cursor
+        return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
 
     def _route_voice(self, text: str) -> ScreenPayload | ActionDraft | ActionResult:
         normalized = text.strip().lower()
@@ -205,6 +229,10 @@ class AvaBoxApp:
                         source=str(row.get("source") or row.get("source_tag") or ""),
                     )
         elif screen.screen == "spotlight":
+            if screen.payload.get("cursor") is not None:
+                self.context.cursor = _optional_int(screen.payload.get("cursor"))
+            if screen.payload.get("interval") is not None:
+                self.context.state["interval"] = str(screen.payload.get("interval") or "")
             self.context.selected = Selection(
                 token_id=str(screen.payload.get("token_id") or ""),
                 addr=str(screen.payload.get("addr") or ""),

@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from ava_devicekit.adapters.base import ChainAdapter
@@ -111,7 +112,7 @@ class SolanaAdapter(ChainAdapter):
         token = _first_payload(self.client.get(f"/tokens/{addr}-{chain}"))
         risk = _safe(lambda: self.client.get(f"/contracts/{addr}-{chain}"), {})
         kline = _safe(lambda: self.client.get(f"/klines/token/{addr}-{chain}", {"interval": interval, "limit": 48}), {})
-        chart_points = _extract_chart(kline)
+        chart = _extract_chart_payload(kline)
         flags = _risk_flags(risk)
         identity = _token_identity({**token, "addr": addr, "chain": chain, "token_id": f"{addr}-{chain}"})
         payload = {
@@ -128,13 +129,20 @@ class SolanaAdapter(ChainAdapter):
             "volume_24h": _fmt_volume(token.get("token_tx_volume_usd_24h", token.get("tx_volume_u_24h"))),
             "market_cap": _fmt_volume(token.get("market_cap", token.get("fdv"))),
             "contract_short": _contract_short(addr),
-            "chart": chart_points,
+            **chart,
             "is_honeypot": flags["is_honeypot"],
             "is_mintable": flags["is_mintable"],
             "is_freezable": flags["is_freezable"],
             "risk_level": flags["risk_level"],
             "is_watchlisted": False,
         }
+        if context and context.visible_rows:
+            payload["total"] = len(context.visible_rows)
+            cursor = context.cursor
+            if cursor is None and context.selected:
+                cursor = context.selected.cursor
+            if cursor is not None:
+                payload["cursor"] = cursor
         return builders.spotlight(payload, context=context)
 
 
@@ -200,16 +208,41 @@ def _token_row(token: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _extract_chart(kline_resp: dict[str, Any]) -> list[int]:
+def _extract_chart_payload(kline_resp: dict[str, Any]) -> dict[str, Any]:
     points = _extract_rows(kline_resp)
     closes = [_safe_float(p.get("close", p.get("c"))) for p in points if isinstance(p, dict)]
     closes = [v for v in closes if v > 0]
     if not closes:
-        return []
+        return {
+            "chart": [],
+            "chart_min": "--",
+            "chart_max": "--",
+            "chart_min_y": "--",
+            "chart_mid_y": "--",
+            "chart_max_y": "--",
+            "chart_t_start": "",
+            "chart_t_mid": "",
+            "chart_t_end": "now",
+        }
     lo, hi = min(closes), max(closes)
+    times = [_safe_int(p.get("time", p.get("t"))) for p in points if isinstance(p, dict)]
+    times = [v for v in times if v > 0]
+    chart: list[int]
     if hi <= lo:
-        return [500 for _ in closes]
-    return [int((value - lo) / (hi - lo) * 1000) for value in closes]
+        chart = [500 for _ in closes]
+    else:
+        chart = [int((value - lo) / (hi - lo) * 1000) for value in closes]
+    return {
+        "chart": chart,
+        "chart_min": _fmt_price(lo),
+        "chart_max": _fmt_price(hi),
+        "chart_min_y": _fmt_y_label(lo),
+        "chart_mid_y": _fmt_y_label((lo + hi) / 2.0),
+        "chart_max_y": _fmt_y_label(hi),
+        "chart_t_start": _fmt_chart_time(times[0]) if times else "",
+        "chart_t_mid": _fmt_chart_time(times[len(times) // 2]) if times else "",
+        "chart_t_end": "now",
+    }
 
 
 def _risk_flags(resp: dict[str, Any]) -> dict[str, Any]:
@@ -255,6 +288,30 @@ def _fmt_volume(vol: Any) -> str:
     return f"${value:.0f}"
 
 
+def _fmt_y_label(price: Any) -> str:
+    value = _safe_float(price, default=-1)
+    if value <= 0:
+        return "N/A"
+    if value >= 1000:
+        return f"${value:,.0f}"
+    if value >= 1:
+        return f"${value:.2f}"
+    if value >= 0.001:
+        return f"${value:.4f}"
+    exp = int(math.floor(math.log10(abs(value))))
+    mantissa = value / (10 ** exp)
+    return f"{mantissa:.2f}e{exp}"
+
+
+def _fmt_chart_time(ts: int) -> str:
+    if not ts:
+        return ""
+    try:
+        return datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         parsed = float(value)
@@ -263,6 +320,13 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         pass
     return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _contract_short(addr: str) -> str:

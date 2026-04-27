@@ -35,7 +35,28 @@ class MockSolanaAdapter(ChainAdapter):
                 "pair": "BONK / USDC",
                 "risk_level": "LOW",
                 "chart": [200, 350, 600],
+                "chart_min": "$0.000010",
+                "chart_max": "$0.000030",
+                "chart_min_y": "1.00e-5",
+                "chart_mid_y": "2.00e-5",
+                "chart_max_y": "3.00e-5",
+                "chart_t_start": "01/01 00:00",
+                "chart_t_mid": "01/01 12:00",
+                "chart_t_end": "now",
                 "interval": interval,
+                **_cursor_payload(context),
             },
             context=context,
         )
+
+
+def _cursor_payload(context: AppContext | None) -> dict:
+    if not context or not context.visible_rows:
+        return {}
+    cursor = context.cursor
+    if cursor is None and context.selected:
+        cursor = context.selected.cursor
+    data = {"total": len(context.visible_rows)}
+    if cursor is not None:
+        data["cursor"] = cursor
+    return data

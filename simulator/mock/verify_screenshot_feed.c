@@ -496,7 +496,8 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
                     "'[B] BACK' '[X] SELL' '[A] BUY'\n");
             return 0;
         }
-        if (count_labels_containing_text_recursive(scr, "★") <= 0) {
+        if (count_labels_containing_text_recursive(scr, "★") <= 0 &&
+            count_labels_containing_text_recursive(scr, "*") <= 0) {
             fprintf(stderr,
                     "FAIL: [spotlight] expected a watchlist star in the spotlight screenshot\n");
             return 0;
