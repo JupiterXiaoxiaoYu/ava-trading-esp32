@@ -1,0 +1,131 @@
+{
+  "schema_version": "0.1.0",
+  "framework": "Ava DeviceKit",
+  "core_capabilities": [
+    {
+      "id": "device_session",
+      "name": "Device Session",
+      "path": "backend/ava_devicekit/gateway/session.py",
+      "user_action": "use",
+      "description": "Runs a hardware app session, keeps app context, emits screen/action payloads."
+    },
+    {
+      "id": "hardware_app_manifest",
+      "name": "Hardware App Manifest",
+      "path": "schemas/hardware_app.schema.json",
+      "user_action": "configure",
+      "description": "Declares app identity, device capabilities, adapters, screens, actions, models, and safety rules."
+    },
+    {
+      "id": "screen_payloads",
+      "name": "Screen Payload Contract",
+      "path": "schemas/screen_payload.schema.json",
+      "user_action": "use_or_extend",
+      "description": "Defines display payloads that firmware or simulator screens can render."
+    },
+    {
+      "id": "action_drafts",
+      "name": "Action Draft Contract",
+      "path": "schemas/action_draft.schema.json",
+      "user_action": "use",
+      "description": "Defines high-risk action drafts that require physical confirmation."
+    },
+    {
+      "id": "http_gateway",
+      "name": "HTTP Gateway",
+      "path": "backend/ava_devicekit/gateway/http_server.py",
+      "user_action": "configure",
+      "description": "Exposes health, manifest, boot, message, state, outbox, and OTA endpoints."
+    },
+    {
+      "id": "websocket_gateway",
+      "name": "WebSocket Gateway",
+      "path": "backend/ava_devicekit/gateway/websocket_server.py",
+      "user_action": "configure",
+      "description": "Runs DeviceKit sessions over WebSocket transport."
+    },
+    {
+      "id": "legacy_firmware_gateway",
+      "name": "Legacy Firmware Gateway",
+      "path": "backend/ava_devicekit/gateway/legacy_firmware.py",
+      "user_action": "configure",
+      "description": "Bridges existing firmware hello/listen/key_action frames into DeviceKit sessions."
+    },
+    {
+      "id": "ota_runtime",
+      "name": "OTA Runtime",
+      "path": "backend/ava_devicekit/ota/",
+      "user_action": "configure",
+      "description": "Serves runtime WebSocket configuration and firmware update metadata."
+    },
+    {
+      "id": "firmware_runtime_c",
+      "name": "Firmware Runtime C Boundary",
+      "path": "firmware/include/ava_devicekit_runtime.h",
+      "user_action": "integrate",
+      "description": "Hardware-agnostic C API for network state, hello, listen, wake detect, and device state."
+    },
+    {
+      "id": "shared_ui_c",
+      "name": "Shared UI C Runtime",
+      "path": "shared_ui/include/ava_devicekit_ui.h",
+      "user_action": "integrate",
+      "description": "Dispatches display JSON and key events to app/device screen vtables."
+    }
+  ],
+  "extension_points": [
+    {
+      "id": "hardware_app",
+      "interface": "backend/ava_devicekit/apps/base.py::HardwareApp",
+      "template": "userland/app/",
+      "developer_implements": ["manifest.json", "app routing", "app skills", "screen payload choices"]
+    },
+    {
+      "id": "chain_adapter",
+      "interface": "backend/ava_devicekit/adapters/base.py::ChainAdapter",
+      "template": "userland/adapter/chain_adapter_template.py",
+      "developer_implements": ["get_feed", "search_tokens", "get_token_detail"]
+    },
+    {
+      "id": "market_stream_adapter",
+      "interface": "backend/ava_devicekit/streams/base.py::MarketStreamAdapter",
+      "template": "userland/adapter/market_stream_adapter_template.py",
+      "developer_implements": ["subscribe", "snapshot"]
+    },
+    {
+      "id": "model_providers",
+      "interface": "backend/ava_devicekit/providers/",
+      "template": "userland/provider/",
+      "developer_implements": ["ASRProvider", "LLMProvider", "TTSProvider"]
+    },
+    {
+      "id": "hardware_port",
+      "interface": "firmware/include/ava_devicekit_runtime.h",
+      "template": "userland/hardware_port/",
+      "developer_implements": ["GPIO/input mapping", "transport send", "network events", "audio hooks", "display driver binding"]
+    },
+    {
+      "id": "ui_screens",
+      "interface": "shared_ui/include/ava_devicekit_ui.h",
+      "template": "userland/ui/",
+      "developer_implements": ["screen vtables", "LVGL/layout rendering", "selection context JSON"]
+    }
+  ],
+  "reference_implementations": [
+    {
+      "id": "ava_box",
+      "kind": "hardware_app",
+      "paths": ["apps/ava_box/manifest.json", "backend/ava_devicekit/apps/ava_box.py", "backend/ava_devicekit/apps/ava_box_skills/"]
+    },
+    {
+      "id": "solana_adapter",
+      "kind": "chain_adapter",
+      "paths": ["backend/ava_devicekit/adapters/solana.py"]
+    },
+    {
+      "id": "scratch_arcade_port",
+      "kind": "hardware_port",
+      "paths": ["firmware/ports/scratch_arcade/"]
+    }
+  ]
+}

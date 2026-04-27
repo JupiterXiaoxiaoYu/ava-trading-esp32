@@ -1,0 +1,31 @@
+{
+  "schema": "../../schemas/hardware_app.schema.json",
+  "app_id": "my_hardware_app",
+  "name": "My Hardware App",
+  "description": "Describe what this ESP32 AI hardware app does.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32s3",
+    "reference_board": "my_board",
+    "display": "320x240",
+    "inputs": ["buttons", "microphone"],
+    "outputs": ["display", "speaker"]
+  },
+  "adapters": {
+    "chain": "solana",
+    "model": "deployment-configured",
+    "transport": "websocket"
+  },
+  "models": {
+    "asr": "qwen3-asr-flash-realtime",
+    "llm": "openai-compatible",
+    "tts": "deployment-configured"
+  },
+  "screens": ["feed", "detail", "confirm", "result", "notify"],
+  "actions": ["item.feed", "item.detail", "action.confirm", "action.cancel"],
+  "safety": {
+    "custody_mode": "external_wallet_or_backend_draft",
+    "primary_asset_keys_on_esp32": false,
+    "requires_physical_confirmation": ["payment.send", "trade.market_draft"]
+  }
+}

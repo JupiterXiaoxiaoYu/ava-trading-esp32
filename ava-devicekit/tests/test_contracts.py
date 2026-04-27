@@ -51,8 +51,23 @@ def test_clean_framework_has_no_legacy_imports():
 
 
 def test_json_files_parse():
-    for path in list((ROOT / "schemas").glob("*.json")) + [ROOT / "apps" / "ava_box" / "manifest.json"]:
+    paths = (
+        list((ROOT / "schemas").glob("*.json"))
+        + [
+            ROOT / "apps" / "ava_box" / "manifest.json",
+            ROOT / "userland" / "capabilities.json",
+            ROOT / "userland" / "runtime.example.json",
+            ROOT / "userland" / "app" / "manifest.template.json",
+        ]
+    )
+    for path in paths:
         json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_userland_capability_map_declares_extension_points():
+    data = json.loads((ROOT / "userland" / "capabilities.json").read_text(encoding="utf-8"))
+    extension_ids = {item["id"] for item in data["extension_points"]}
+    assert {"hardware_app", "chain_adapter", "market_stream_adapter", "model_providers", "hardware_port", "ui_screens"} <= extension_ids
 
 
 def test_device_message_preserves_selection_context():

@@ -1,0 +1,11 @@
+{
+  "host": "0.0.0.0",
+  "http_port": 8788,
+  "websocket_port": 8787,
+  "public_base_url": "https://ava.example.com",
+  "websocket_url": "wss://ava.example.com/ava/v1/",
+  "firmware_bin_dir": "data/bin",
+  "timezone_offset_hours": 8,
+  "websocket_ping_interval": 30,
+  "websocket_ping_timeout": 10
+}

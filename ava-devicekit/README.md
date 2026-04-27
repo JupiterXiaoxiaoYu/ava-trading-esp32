@@ -13,10 +13,27 @@ Ava DeviceKit is the clean framework boundary for ESP32-based Solana AI hardware
 | `examples/` | Runnable local examples and payload fixtures |
 | `firmware/` | Target boundary for clean ESP32 runtime integration |
 | `shared_ui/` | Target boundary for portable LVGL screen runtime |
+| `userland/` | Developer-facing configuration templates, capability list, and extension templates |
 
 ## Boundary
 
 The clean framework must not import parent-repo legacy modules such as `core.*`, `plugins_func.*`, or legacy-assistant-specific registration/connection classes.
+
+## Userland Boundary
+
+Framework users should start in `userland/`, not by editing core files. That directory documents the capabilities available to app developers and separates configuration/development work from framework maintenance.
+
+| User Goal | Start Here | Implement Or Configure |
+|---|---|---|
+| Deploy an existing app | `userland/runtime.example.json`, `userland/env.example` | Public URL, WS URL, ports, firmware bin dir, API keys |
+| Build a new hardware app | `userland/app/` | App manifest, app routing, app skills, screen choices |
+| Add a chain or data source | `userland/adapter/chain_adapter_template.py` | `ChainAdapter` implementation and registry entry |
+| Add live market updates | `userland/adapter/market_stream_adapter_template.py` | `MarketStreamAdapter` implementation |
+| Add AI providers | `userland/provider/` | ASR, LLM, TTS provider implementations |
+| Port a board | `userland/hardware_port/` | GPIO/input mapping, transport send, network events, audio/display hooks |
+| Build screens | `userland/ui/` | Screen vtables, LVGL/layout rendering, selection context JSON |
+
+The machine-readable capability map is `userland/capabilities.json`.
 
 ## App Logic Boundary
 
