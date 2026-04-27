@@ -11,6 +11,7 @@ from ava_devicekit.providers.llm.base import LLMProvider
 from ava_devicekit.providers.llm.openai_compatible import OpenAICompatibleLLMConfig, OpenAICompatibleLLMProvider
 from ava_devicekit.providers.pipeline import VoicePipeline
 from ava_devicekit.providers.tts.base import TTSProvider
+from ava_devicekit.providers.tts.alibl_stream import AliBLTTSConfig, AliBLTTSProvider
 from ava_devicekit.providers.tts.mock import MockTTSProvider
 from ava_devicekit.providers.tts.openai_compatible import OpenAICompatibleTTSConfig, OpenAICompatibleTTSProvider
 from ava_devicekit.runtime.settings import RuntimeSettings
@@ -92,6 +93,18 @@ def create_tts_provider(settings: RuntimeSettings) -> TTSProvider:
         return MockTTSProvider()
     if name in {"custom", "class", "python"} or settings.tts_class:
         return _load_custom_provider(settings.tts_class, settings.tts_options)
+    if name in {"alibl", "alibl-tts", "alibl_stream", "aliyun-bailian", "cosyvoice"}:
+        return AliBLTTSProvider(
+            AliBLTTSConfig(
+                api_key_env=settings.tts_api_key_env,
+                ws_url=settings.tts_base_url,
+                model=settings.tts_model,
+                voice=settings.tts_voice,
+                response_format=settings.tts_format,
+                timeout_sec=settings.tts_timeout_sec,
+                **_known_options(settings.tts_options, AliBLTTSConfig, exclude={"api_key_env", "ws_url", "model", "voice", "response_format", "timeout_sec"}),
+            )
+        )
     if name in {"openai", "openai-compatible", "compatible"}:
         return OpenAICompatibleTTSProvider(
             OpenAICompatibleTTSConfig(

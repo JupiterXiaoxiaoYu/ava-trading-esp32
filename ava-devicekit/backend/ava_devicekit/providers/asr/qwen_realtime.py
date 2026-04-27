@@ -15,9 +15,10 @@ from ava_devicekit.providers.asr.base import ASRResult
 class QwenRealtimeASRConfig:
     api_key_env: str = "DASHSCOPE_API_KEY"
     model: str = "qwen3-asr-flash-realtime"
-    base_url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+    base_url: str = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
     language: str = "zh"
     sample_rate: int = 16000
+    context: str = ""
     vad_threshold: float = 0.2
     silence_duration_ms: int = 800
 
@@ -36,6 +37,8 @@ class QwenRealtimeASRProvider:
         self.config = config or QwenRealtimeASRConfig()
 
     def url(self) -> str:
+        if "?" in self.config.base_url:
+            return self.config.base_url
         return f"{self.config.base_url}?model={self.config.model}"
 
     def headers(self) -> list[str]:
@@ -43,7 +46,7 @@ class QwenRealtimeASRProvider:
         return ["Authorization: Bearer " + api_key, "OpenAI-Beta: realtime=v1"]
 
     def session_update_event(self, *, event_id: str = "event_session_update") -> dict[str, Any]:
-        return {
+        event = {
             "event_id": event_id,
             "type": "session.update",
             "session": {
@@ -58,6 +61,9 @@ class QwenRealtimeASRProvider:
                 },
             },
         }
+        if self.config.context:
+            event["session"]["input_audio_transcription"]["corpus"] = {"text": self.config.context}
+        return event
 
     def audio_append_event(self, audio: bytes, *, event_id: str) -> dict[str, Any]:
         return {
@@ -77,6 +83,7 @@ class QwenRealtimeASRProvider:
                 base_url=self.config.base_url,
                 language=language,
                 sample_rate=sample_rate,
+                context=self.config.context,
                 vad_threshold=self.config.vad_threshold,
                 silence_duration_ms=self.config.silence_duration_ms,
             )

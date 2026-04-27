@@ -211,7 +211,7 @@
       "interface": "backend/ava_devicekit/providers/tts/base.py::TTSProvider",
       "template": "userland/provider/",
       "user_action": "implement_or_configure",
-      "description": "Converts response text to device-playable audio. Built-ins include mock and OpenAI-compatible speech; custom Python classes can be selected in runtime config."
+      "description": "Converts response text to device-playable audio. Built-ins include mock, OpenAI-compatible speech, and AliBL CosyVoice WebSocket TTS; custom Python classes can be selected in runtime config."
     },
     {
       "id": "trade_execution_provider",

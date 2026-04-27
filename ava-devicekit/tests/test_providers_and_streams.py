@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import base64
+import asyncio
+import sys
+import types
 
 from ava_devicekit.core.types import AppContext, Selection
+from ava_devicekit.providers.asr.qwen_realtime import QwenRealtimeASRConfig
+from ava_devicekit.providers.llm.base import LLMMessage
+from ava_devicekit.providers.llm.openai_compatible import OpenAICompatibleLLMConfig, OpenAICompatibleLLMProvider
 from ava_devicekit.providers.asr import AudioFrame, Pcm16PassthroughDecoder, QwenRealtimeASRProvider
 from ava_devicekit.providers.pipeline import VoicePipeline
 from ava_devicekit.streams import MockMarketStreamAdapter, StreamSubscription
 
 
 def test_qwen_asr_realtime_builds_events_and_parses_transcript():
-    provider = QwenRealtimeASRProvider()
+    provider = QwenRealtimeASRProvider(QwenRealtimeASRConfig(context="常用词：Ava"))
     session = provider.session_update_event()
     assert session["session"]["input_audio_transcription"]["language"] == "zh"
+    assert session["session"]["input_audio_transcription"]["corpus"]["text"] == "常用词：Ava"
+    assert provider.url() == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=qwen3-asr-flash-realtime"
     event = provider.audio_append_event(b"abc", event_id="e1")
     assert event["audio"] == base64.b64encode(b"abc").decode("ascii")
     parsed = provider.parse_transcript_event({"response": {"text": "你好 Ava"}})
@@ -38,6 +46,7 @@ def test_mock_market_stream_snapshots_prices():
     assert events[0].data["price_raw"] == 123.456
 
 from ava_devicekit.providers.registry import create_provider_bundle
+from ava_devicekit.providers.tts.alibl_stream import AliBLTTSConfig, AliBLTTSProvider
 from ava_devicekit.providers.tts.openai_compatible import OpenAICompatibleTTSConfig, OpenAICompatibleTTSProvider
 from ava_devicekit.runtime.settings import RuntimeSettings
 from ava_devicekit.streams.ave_data_wss import AveDataWSSAdapter
@@ -109,6 +118,126 @@ def test_openai_compatible_tts_posts_audio(monkeypatch):
     assert result.audio == b"audio"
 
 
+def test_alibl_tts_streams_audio_from_websocket(monkeypatch):
+    monkeypatch.setenv("TEST_ALIBL_KEY", "secret")
+    captured = {"sent": []}
+
+    class _Conn:
+        def __init__(self):
+            self.messages = [
+                '{"header":{"event":"task-started"}}',
+                b"opus-audio",
+                '{"header":{"event":"task-finished"}}',
+            ]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def send(self, payload):
+            captured["sent"].append(payload)
+
+        async def recv(self):
+            return self.messages.pop(0)
+
+    def connect(url, additional_headers=None, **kwargs):
+        captured["url"] = url
+        captured["headers"] = additional_headers
+        captured["kwargs"] = kwargs
+        return _Conn()
+
+    monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=connect))
+    provider = AliBLTTSProvider(
+        AliBLTTSConfig(
+            api_key_env="TEST_ALIBL_KEY",
+            ws_url="wss://dashscope.example/ws",
+            model="cosyvoice-v2",
+            voice="longcheng_v2",
+            response_format="opus",
+        )
+    )
+    result = provider.synthesize("**Ava**")
+    assert captured["url"] == "wss://dashscope.example/ws"
+    assert captured["headers"]["Authorization"] == "Bearer secret"
+    assert any('"action":"run-task"' in item for item in captured["sent"])
+    assert any('"voice":"longcheng_v2"' in item for item in captured["sent"])
+    assert any('"text":"Ava"' in item for item in captured["sent"])
+    assert result.audio == b"opus-audio"
+    assert result.content_type == "audio/opus"
+
+
+def test_alibl_tts_can_run_inside_existing_event_loop(monkeypatch):
+    monkeypatch.setenv("TEST_ALIBL_KEY", "secret")
+
+    class _Conn:
+        def __init__(self):
+            self.messages = [
+                '{"header":{"event":"task-started"}}',
+                b"opus-audio",
+                '{"header":{"event":"task-finished"}}',
+            ]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def send(self, payload):
+            pass
+
+        async def recv(self):
+            return self.messages.pop(0)
+
+    monkeypatch.setitem(sys.modules, "websockets", types.SimpleNamespace(connect=lambda *a, **k: _Conn()))
+    provider = AliBLTTSProvider(AliBLTTSConfig(api_key_env="TEST_ALIBL_KEY"))
+
+    async def _call():
+        return provider.synthesize("Ava")
+
+    assert asyncio.run(_call()).audio == b"opus-audio"
+
+
+def test_openai_compatible_llm_uses_runtime_options(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "secret")
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    def fake_urlopen(req, timeout=0):
+        captured["body"] = req.data.decode()
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenAICompatibleLLMProvider(
+        OpenAICompatibleLLMConfig(
+            base_url="https://llm.example/v1",
+            api_key_env="TEST_LLM_KEY",
+            model="qwen3-235b-a22b",
+            temperature=0.7,
+            max_tokens=500,
+            top_p=1,
+            frequency_penalty=0,
+        )
+    )
+    result = provider.complete([LLMMessage("user", "hello")])
+    assert result.text == "ok"
+    assert '"temperature": 0.7' in captured["body"]
+    assert '"max_tokens": 500' in captured["body"]
+    assert '"top_p": 1' in captured["body"]
+    assert '"frequency_penalty": 0' in captured["body"]
+
+
 def test_ave_data_wss_builds_frames_and_parses_price_events():
     adapter = AveDataWSSAdapter()
     frame = adapter.subscribe_frame(StreamSubscription("price", ["So111-solana"]), request_id=7)
@@ -141,6 +270,26 @@ def test_registry_selects_openai_compatible_asr_and_custom_tts():
     assert isinstance(bundle.asr, OpenAICompatibleASRProvider)
     assert bundle.asr.config.model == "whisper-x"
     assert isinstance(bundle.tts, MockTTSProvider)
+
+
+def test_registry_selects_alibl_tts():
+    settings = RuntimeSettings.from_dict(
+        {
+            "providers": {
+                "tts": {
+                    "provider": "alibl",
+                    "base_url": "wss://dashscope.example/ws",
+                    "model": "cosyvoice-v2",
+                    "voice": "longcheng_v2",
+                    "format": "opus",
+                    "api_key_env": "TEST_ALIBL_KEY",
+                }
+            }
+        }
+    )
+    bundle = create_provider_bundle(settings)
+    assert isinstance(bundle.tts, AliBLTTSProvider)
+    assert bundle.tts.config.voice == "longcheng_v2"
 
 
 def test_openai_compatible_asr_posts_wav_transcription(monkeypatch):

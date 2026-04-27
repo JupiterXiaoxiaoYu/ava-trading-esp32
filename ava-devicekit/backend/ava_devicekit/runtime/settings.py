@@ -39,7 +39,7 @@ class RuntimeSettings:
     audio_decoder_class: str = ""
     audio_decoder_options: dict[str, Any] = field(default_factory=dict)
     asr_provider: str = "disabled"
-    asr_base_url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+    asr_base_url: str = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
     asr_model: str = "qwen3-asr-flash-realtime"
     asr_api_key_env: str = "DASHSCOPE_API_KEY"
     asr_language: str = "zh"
@@ -94,7 +94,7 @@ class RuntimeSettings:
             audio_decoder_class=str(data.get("audio_decoder_class") or audio.get("decoder_class") or audio.get("decoder") or ""),
             audio_decoder_options=_provider_options(audio),
             asr_provider=str(data.get("asr_provider") or asr.get("provider") or "disabled"),
-            asr_base_url=str(data.get("asr_base_url") or asr.get("base_url") or "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"),
+            asr_base_url=str(data.get("asr_base_url") or asr.get("base_url") or "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"),
             asr_model=str(data.get("asr_model") or asr.get("model") or "qwen3-asr-flash-realtime"),
             asr_api_key_env=str(data.get("asr_api_key_env") or asr.get("api_key_env") or "DASHSCOPE_API_KEY"),
             asr_language=str(data.get("asr_language") or asr.get("language") or "zh"),
@@ -205,4 +205,5 @@ def _sanitize_options(options: dict[str, Any] | None) -> dict[str, Any]:
     if not options:
         return {}
     blocked = ("key", "secret", "token", "password")
-    return {k: ("<redacted>" if any(word in k.lower() for word in blocked) else v) for k, v in options.items()}
+    safe_token_fields = {"max_tokens", "max_output_tokens"}
+    return {k: ("<redacted>" if k.lower() not in safe_token_fields and any(word in k.lower() for word in blocked) else v) for k, v in options.items()}

@@ -6,7 +6,7 @@ Providers are configured in `RuntimeSettings` or `userland/runtime.example.json`
 |---|---|---|---|
 | ASR | `ASRProvider.transcribe_pcm16` | Qwen realtime PCM16, OpenAI-compatible transcription, custom class | provider-specific env var |
 | LLM | `LLMProvider.complete` | OpenAI-compatible chat completions, custom class | provider-specific env var |
-| TTS | `TTSProvider.synthesize` | Mock, OpenAI-compatible `/audio/speech`, custom class | provider-specific env var |
+| TTS | `TTSProvider.synthesize` | Mock, OpenAI-compatible `/audio/speech`, AliBL CosyVoice WebSocket, custom class | provider-specific env var |
 | Market stream | `MarketStreamAdapter` | Mock, polling, AVE data WSS reference | `AVE_API_KEY` for AVE WSS |
 | Trade execution | App-level execution provider | Paper, AVE Solana transaction construction | `AVE_API_KEY` for real provider |
 
@@ -53,6 +53,10 @@ Provider aliases currently supported by the built-in registry:
 |---|---|---|
 | ASR | `qwen`, `qwen_realtime`, `qwen3-asr-flash-realtime`, `openai-compatible`, `whisper`, `transcription` | `provider: custom` + `class` |
 | LLM | `openai-compatible`, `openai`, `compatible` | `provider: custom` + `class` |
-| TTS | `mock`, `openai-compatible`, `openai`, `compatible` | `provider: custom` + `class` |
+| TTS | `mock`, `openai-compatible`, `openai`, `compatible`, `alibl`, `alibl_stream`, `cosyvoice` | `provider: custom` + `class` |
 
 See `userland/provider/provider.catalog.example.json` for copyable examples.
+
+### AliBL / CosyVoice TTS
+
+Ava Box uses the same Bailian CosyVoice WebSocket provider shape as the original server `AliBLTTS` block. Configure it in runtime JSON with `provider: alibl`, `format: opus`, and set `DASHSCOPE_API_KEY` in the deployment environment, or set `api_key_env` to a separate AliBL key such as `ALIBL_TTS_API_KEY`. The checked-in runtime defaults use the international DashScope endpoint with `model: cosyvoice-v3-flash` and `voice: longanyang`; deployments with a China-region Bailian key can switch back to `wss://dashscope.aliyuncs.com/api-ws/v1/inference/`, `cosyvoice-v2`, and `longcheng_v2`.

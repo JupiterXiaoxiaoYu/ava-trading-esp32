@@ -3,11 +3,16 @@
     "asr": {
       "qwen_realtime": {
         "provider": "qwen",
-        "base_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+        "base_url": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime",
         "model": "qwen3-asr-flash-realtime",
         "api_key_env": "DASHSCOPE_API_KEY",
         "language": "zh",
-        "sample_rate": 16000
+        "sample_rate": 16000,
+        "options": {
+          "context": "常用词：Ava、Eva、Ai Wa、艾娃、诶娃、欸娃、AVA、AVE、Hey Ava、Hi Ava、Hello Ava、Ni Hao Ava、代币详情页、详情页、spotlight、feed、钱包、持仓、买入、卖出、pump.fun、Solana、SOL、BONK、WIF。若识别到接近 Ava / Eva / Ai Wa 的发音，优先输出 Ava。",
+          "vad_threshold": 0.2,
+          "silence_duration_ms": 800
+        }
       },
       "openai_compatible_transcription": {
         "provider": "openai-compatible",
@@ -69,6 +74,21 @@
           "api_key_env": "MY_TTS_KEY",
           "model": "my-tts-model",
           "voice": "ava"
+        }
+      },
+      "alibl_cosyvoice": {
+        "provider": "alibl",
+        "base_url": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference/",
+        "model": "cosyvoice-v3-flash",
+        "voice": "longanyang",
+        "format": "opus",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "options": {
+          "sample_rate": 16000,
+          "volume": 50,
+          "rate": 1.0,
+          "pitch": 1.0,
+          "data_inspection": "enable"
         }
       }
     }

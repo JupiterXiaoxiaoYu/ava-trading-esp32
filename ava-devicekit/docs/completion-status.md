@@ -6,7 +6,7 @@ This status file separates framework responsibility from Ava Box reference-app r
 |---|---|---|---|
 | ASR provider selection | Framework | Complete | Runtime provider registry supports Qwen realtime, OpenAI-compatible transcription, and custom provider classes. |
 | ASR audio transport | Framework gateway | Complete for PCM16; OPUS supported through configurable decoder plugin | Existing-firmware WebSocket buffers binary audio, decodes through `AudioDecoder`, calls ASR on `listen:stop`, and routes transcript into app commands. |
-| TTS provider selection | Framework | Complete | Runtime provider registry supports mock, OpenAI-compatible speech, and custom provider classes. |
+| TTS provider selection | Framework | Complete | Runtime provider registry supports mock, OpenAI-compatible speech, AliBL CosyVoice WebSocket TTS, and custom provider classes. |
 | TTS device return | Framework gateway | Complete at protocol boundary | Existing-firmware gateway sends text TTS frames and optional base64 audio frames with content type. |
 | LLM fallback config | Framework | Complete | OpenAI-compatible and custom LLM providers are runtime selectable; deterministic app routes run before fallback. |
 | Live market stream contract | Framework | Complete | `MarketStreamAdapter` + `MarketStreamRuntime`. |

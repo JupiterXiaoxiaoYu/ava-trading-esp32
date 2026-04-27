@@ -5,7 +5,7 @@ DeviceKit is the reusable framework. Ava Box is the first reference app built on
 | Capability | Layer | Implemented In | Notes |
 |---|---|---|---|
 | ASR provider contract and runtime wiring | Framework | `providers/asr`, `providers/registry.py`, `runtime/settings.py` | Qwen realtime and OpenAI-compatible ASR providers are selectable. The gateway buffers binary audio, decodes through `AudioDecoder`, and routes ASR transcript into app commands. |
-| TTS provider contract and OpenAI-compatible TTS | Framework | `providers/tts` | Mock remains default for tests; real HTTP TTS is config-driven. |
+| TTS provider contract and OpenAI-compatible TTS | Framework | `providers/tts` | Mock remains available for tests; real HTTP/WebSocket TTS is config-driven, including OpenAI-compatible speech and AliBL CosyVoice. |
 | LLM fallback production config | Framework | `providers/llm`, `providers/registry.py`, `providers/pipeline.py` | Deterministic app routing happens before LLM fallback. |
 | Generic gateway, admin, OTA, app session | Framework | `gateway`, `ota`, `runtime` | `/admin/*` endpoints expose capabilities, sanitized runtime, and app manifests. |
 | CLI, package, templates, docs | Framework | `cli.py`, `pyproject.toml`, `userland`, `docs` | Used by app developers and board-port developers. |

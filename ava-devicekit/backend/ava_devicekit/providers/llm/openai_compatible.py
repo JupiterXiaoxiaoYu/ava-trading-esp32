@@ -14,6 +14,10 @@ class OpenAICompatibleLLMConfig:
     api_key_env: str = "OPENAI_API_KEY"
     model: str = "gpt-4o-mini"
     timeout_sec: int = 30
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
 
 
 class OpenAICompatibleLLMProvider:
@@ -29,8 +33,14 @@ class OpenAICompatibleLLMProvider:
         payload = {
             "model": self.config.model,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
-            "temperature": temperature,
+            "temperature": self.config.temperature if self.config.temperature is not None else temperature,
         }
+        if self.config.max_tokens is not None:
+            payload["max_tokens"] = self.config.max_tokens
+        if self.config.top_p is not None:
+            payload["top_p"] = self.config.top_p
+        if self.config.frequency_penalty is not None:
+            payload["frequency_penalty"] = self.config.frequency_penalty
         req = urllib.request.Request(
             self.config.base_url.rstrip("/") + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
