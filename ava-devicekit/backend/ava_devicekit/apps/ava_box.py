@@ -187,6 +187,12 @@ class AvaBoxApp:
             return self._remember_screen(self.skills.get_orders(context=self.context))
         if any(word in normalized for word in ("watchlist", "观察", "收藏列表")):
             return self._remember_screen(self.skills.get_watchlist(context=self.context))
+        if any(word in normalized for word in ("取消收藏", "移除收藏", "remove watch", "unfavorite")):
+            selected = self.context.selected.to_dict() if self.context.selected else {}
+            return self.skills.remove_watchlist(selected, context=self.context)
+        if any(word in normalized for word in ("收藏", "加入收藏", "加自选", "favorite", "add watch")):
+            selected = self.context.selected.to_dict() if self.context.selected else {}
+            return self.skills.add_watchlist(selected, context=self.context)
         if any(word in normalized for word in ("search", "find", "搜索", "查找")):
             keyword = normalized.replace("search", "").replace("find", "").replace("搜索", "").replace("查找", "").strip()
             return self._remember_screen(self.chain_adapter.search_tokens(keyword, context=self.context))

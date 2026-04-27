@@ -165,6 +165,29 @@ def test_generic_input_event_routes_semantic_action_with_context():
     assert reply["screen"] == "confirm"
     assert reply["action_draft"]["summary"]["symbol"] == "SOL"
 
+
+def test_voice_can_add_selected_token_to_watchlist(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    reply = session.handle(
+        {
+            "type": "listen_detect",
+            "text": "收藏这个币",
+            "context": {
+                "screen": "spotlight",
+                "selected": {
+                    "token_id": "So11111111111111111111111111111111111111112-solana",
+                    "addr": "So11111111111111111111111111111111111111112",
+                    "chain": "solana",
+                    "symbol": "SOL",
+                },
+            },
+        }
+    )
+    assert reply["screen"] == "notify"
+    assert reply["data"]["title"] == "Watchlist"
+    watchlist = session.handle({"type": "key_action", "action": "watchlist"})
+    assert watchlist["data"]["tokens"][0]["symbol"] == "SOL"
+
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
