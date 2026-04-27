@@ -73,6 +73,8 @@ class LegacyFirmwareConnection:
             return [self.session.handle({"type": "input_event", **_message_context(msg), **{k: v for k, v in msg.items() if k not in {"type", "context", "selection"}}})]
         if msg_type == "listen":
             return await self._handle_listen(msg, allow_async_asr=allow_async_asr)
+        if msg_type == "trade_action":
+            return [self.session.handle(_device_message_from_trade_action(msg))]
         if msg_type == "confirm":
             return [self.session.handle({"type": "confirm", **_message_context(msg)})]
         if msg_type == "cancel" or (msg_type == "abort"):
@@ -156,6 +158,13 @@ class LegacyFirmwareConnection:
 def _device_message_from_key_action(msg: dict[str, Any]) -> dict[str, Any]:
     payload = {k: v for k, v in msg.items() if k not in {"type", "action", "context", "selection"}}
     return {"type": "key_action", "action": str(msg.get("action") or ""), "payload": payload, **_message_context(msg)}
+
+
+def _device_message_from_trade_action(msg: dict[str, Any]) -> dict[str, Any]:
+    action = str(msg.get("action") or "").strip().lower()
+    msg_type = "cancel" if action in {"cancel", "abort"} else "confirm"
+    payload = {k: v for k, v in msg.items() if k not in {"type", "action", "context", "selection"}}
+    return {"type": msg_type, "payload": payload, **_message_context(msg)}
 
 
 def _message_context(msg: dict[str, Any]) -> dict[str, Any]:

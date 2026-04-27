@@ -25,8 +25,9 @@ class AvaBoxSkillService:
         self.store = JsonStore(self.config.store_path)
         self.watchlist = WatchlistSkill(self.store)
         self.portfolio = PortfolioSkill(self.store)
+        self.paper_executor = PaperExecutionProvider(self.store)
         self.executor = self._create_executor()
-        self.trading = TradingSkill(self.config, self.executor)
+        self.trading = TradingSkill(self.config, self.executor, paper_executor=self.paper_executor)
 
     def get_portfolio(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.portfolio.open(context=context)
@@ -58,7 +59,7 @@ class AvaBoxSkillService:
     def _create_executor(self):
         mode = self.config.execution_mode.lower()
         if mode == "paper":
-            return PaperExecutionProvider(self.store)
+            return self.paper_executor
         if mode in {"proxy", "proxy_wallet", "custodial", "hosted", "real"}:
             return AveProxyWalletTradeProvider(
                 AveSolanaTradeConfig(

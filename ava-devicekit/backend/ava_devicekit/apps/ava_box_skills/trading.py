@@ -18,9 +18,10 @@ class PendingDraft:
 
 
 class TradingSkill:
-    def __init__(self, config: AvaBoxSkillConfig, executor: PaperExecutionProvider | None = None):
+    def __init__(self, config: AvaBoxSkillConfig, executor: Any | None = None, *, paper_executor: PaperExecutionProvider | None = None):
         self.config = config
         self.executor = executor
+        self.paper_executor = paper_executor or (executor if isinstance(executor, PaperExecutionProvider) else None)
         self.pending: dict[str, PendingDraft] = {}
 
     def create_draft(self, action: str, params: dict[str, Any], *, context: AppContext | None = None) -> ActionDraft:
@@ -28,6 +29,7 @@ class TradingSkill:
         symbol = str(params.get("symbol") or _selected_symbol(context) or "TOKEN")
         request_id = str(params.get("request_id") or f"ava_{int(time.time() * 1000)}")
         amount_sol = str(params.get("amount_sol") or params.get("amount_native") or self.config.default_buy_sol)
+        execution_mode = _execution_mode(params, context, self.config.execution_mode)
         action_name = normalize_action(action)
         limit_price = params.get("limit_price")
         is_limit = action_name == "trade.limit_draft"
@@ -48,7 +50,7 @@ class TradingSkill:
             "amount_native": amount_label(amount_sol),
             "amount_usd": str(params.get("amount_usd") or ""),
             "timeout_sec": int(params.get("timeout_sec") or 30),
-            "mode_label": str(params.get("mode_label") or "DRAFT"),
+            "mode_label": str(params.get("mode_label") or execution_mode.upper()),
         }
         if is_limit:
             screen_payload.update({
@@ -71,7 +73,7 @@ class TradingSkill:
             request_id=request_id,
             screen=builders.confirm(screen_payload, context=context, limit=is_limit),
         )
-        self.pending[request_id] = PendingDraft(draft=draft, params={**params, "token_id": token_id, "request_id": request_id})
+        self.pending[request_id] = PendingDraft(draft=draft, params={**params, "token_id": token_id, "request_id": request_id, "execution_mode": execution_mode})
         return draft
 
     def confirm(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
@@ -80,8 +82,10 @@ class TradingSkill:
             screen = builders.result("No pending action", "The draft expired or was already handled.", ok=False, context=context)
             return ActionResult(False, "pending action not found", screen=screen)
         summary = pending.draft.summary
-        execution = self.executor.execute(summary, pending.params) if self.executor else {}
-        body = f"{summary.get('action')} {summary.get('symbol')} confirmed as {self.config.execution_mode} draft."
+        execution_mode = str(pending.params.get("execution_mode") or self.config.execution_mode).lower()
+        executor = self.paper_executor if execution_mode == "paper" else self.executor
+        execution = executor.execute(summary, pending.params) if executor else {}
+        body = f"{summary.get('action')} {summary.get('symbol')} confirmed as {execution_mode} draft."
         screen = builders.result("Action confirmed", body, ok=True, context=context)
         return ActionResult(True, "confirmed", screen=screen, data={**summary, "execution": execution})
 
@@ -127,6 +131,17 @@ def screen_action_label(action: str) -> str:
 def amount_label(amount: str) -> str:
     text = str(amount or "").strip()
     return text if "SOL" in text.upper() else f"{text} SOL"
+
+
+def _execution_mode(params: dict[str, Any], context: AppContext | None, default: str) -> str:
+    mode = str(params.get("execution_mode") or params.get("trade_mode") or "").lower()
+    if not mode and context:
+        mode = str(context.state.get("trade_mode") or "").lower()
+    if mode in {"paper", "demo", "mock"}:
+        return "paper"
+    if mode in {"real", "proxy", "proxy_wallet", "custodial", "hosted"}:
+        return mode
+    return str(default or "paper").lower()
 
 
 def _selected_token_id(context: AppContext | None) -> str:

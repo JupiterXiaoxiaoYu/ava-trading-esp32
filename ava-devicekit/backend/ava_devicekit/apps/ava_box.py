@@ -85,6 +85,8 @@ class AvaBoxApp:
 
     def _route_key(self, action: str, payload: dict[str, Any]) -> ScreenPayload | ActionDraft | ActionResult:
         action = str(action or "").strip().lower()
+        trade_mode = str(self.context.state.get("trade_mode") or "").lower()
+        trade_mode_payload = {"execution_mode": trade_mode} if trade_mode else {}
         if action in {"home", "feed", "refresh", "feed_home", "back"}:
             return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
         if action == "confirm":
@@ -121,23 +123,23 @@ class AvaBoxApp:
         if action in {"feed_prev", "feed_next"}:
             return self._route_feed_nav(action)
         if action in {"buy", "quick_buy"}:
-            draft = self.skills.create_action_draft("trade.market_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.market_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action in {"sell", "quick_sell"}:
-            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action == "portfolio_sell":
             token_id = str(payload.get("token_id") or payload.get("addr") or self._selected_token_id())
-            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, "token_id": token_id, "symbol": payload.get("symbol") or self._selected_symbol(), "amount_native": payload.get("balance_raw") or payload.get("amount_native") or ""}, context=self.context)
+            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, **trade_mode_payload, "token_id": token_id, "symbol": payload.get("symbol") or self._selected_symbol(), "amount_native": payload.get("balance_raw") or payload.get("amount_native") or ""}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action in {"limit", "limit_buy"}:
-            draft = self.skills.create_action_draft("trade.limit_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.limit_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft

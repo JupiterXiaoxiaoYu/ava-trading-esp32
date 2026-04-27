@@ -102,6 +102,36 @@ def test_trading_skill_submits_signed_transaction_with_external_executor():
     assert result.ok is True
     assert result.data["response"]["signed_tx"] == "signed-payload"
 
+
+class _NamedExecutor:
+    def __init__(self, name):
+        self.name = name
+
+    def execute(self, summary, params):
+        return {"executor": self.name, "mode": params.get("execution_mode")}
+
+
+def test_trading_skill_respects_paper_trade_mode_override():
+    from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
+
+    context = AppContext(
+        app_id="ava_box",
+        chain="solana",
+        screen="spotlight",
+        selected=Selection(token_id="So111-solana", addr="So111", chain="solana", symbol="SOL"),
+        state={"trade_mode": "paper"},
+    )
+    skill = TradingSkill(
+        AvaBoxSkillConfig(execution_mode="custodial"),
+        _NamedExecutor("real"),
+        paper_executor=_NamedExecutor("paper"),
+    )
+    draft = skill.create_draft("buy", {}, context=context)
+    result = skill.confirm(draft.request_id, context=context)
+    assert result.ok is True
+    assert result.data["execution"]["executor"] == "paper"
+    assert result.data["execution"]["mode"] == "paper"
+
 from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, build_proxy_wallet_order_payload
 
 

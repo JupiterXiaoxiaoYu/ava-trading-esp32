@@ -90,6 +90,35 @@ def test_legacy_firmware_listen_detect_accepts_screen_selection_shape():
     assert display["action_draft"]["summary"]["symbol"] == "SOL"
     assert display["action_draft"]["summary"]["token_id"] == "So11111111111111111111111111111111111111112-solana"
 
+
+def test_legacy_firmware_trade_action_confirm_routes_pending_draft():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    token = {
+        "token_id": "So11111111111111111111111111111111111111112-solana",
+        "addr": "So11111111111111111111111111111111111111112",
+        "chain": "solana",
+        "symbol": "SOL",
+    }
+    draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy", **token}))[0]
+    request_id = draft["action_draft"]["request_id"]
+
+    display = conn.handle_text(json.dumps({"type": "trade_action", "action": "confirm", "trade_id": request_id}))[0]
+    assert display["screen"] == "result"
+    assert display["data"]["title"] == "Action confirmed"
+    assert display["action_result"]["ok"] is True
+
+
+def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
+    request_id = draft["action_draft"]["request_id"]
+
+    display = conn.handle_text(json.dumps({"type": "trade_action", "action": "cancel", "trade_id": request_id}))[0]
+    assert display["screen"] == "result"
+    assert display["data"]["title"] == "Action cancelled"
+    assert display["action_result"]["ok"] is True
+
+
 import asyncio
 
 from ava_devicekit.providers.asr.base import ASRResult
