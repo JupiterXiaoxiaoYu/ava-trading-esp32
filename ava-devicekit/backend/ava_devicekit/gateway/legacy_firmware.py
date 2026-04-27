@@ -131,11 +131,17 @@ class LegacyFirmwareConnection:
         spoken = _spoken_summary(result)
         tts_result = None
         if _is_model_fallback(result):
-            reply = self.voice_pipeline.reply(text, context=self.session.app.context)
-            spoken = reply.text
-            tts_result = reply.tts
+            try:
+                reply = self.voice_pipeline.reply(text, context=self.session.app.context)
+                spoken = reply.text
+                tts_result = reply.tts
+            except Exception as exc:
+                spoken = f"Ava model reply failed: {exc}"
         else:
-            tts_result = self.voice_pipeline.tts.synthesize(spoken)
+            try:
+                tts_result = self.voice_pipeline.tts.synthesize(spoken)
+            except Exception:
+                tts_result = None
         return [
             {"type": "stt", "text": text, "session_id": self.session_id},
             result,
