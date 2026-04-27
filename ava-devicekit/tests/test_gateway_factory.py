@@ -55,6 +55,55 @@ def test_voice_command_uses_device_selection_context():
     assert draft["screen"] == "confirm"
     assert draft["action_draft"]["summary"]["symbol"] == "SOL"
 
+
+def test_ui_emitted_key_actions_are_routed_without_unknown_action(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    token_payload = {
+        "token_id": token["token_id"],
+        "addr": token["addr"],
+        "chain": token["chain"],
+        "symbol": token["symbol"],
+    }
+
+    session.handle({"type": "key_action", "action": "favorite", **token_payload})
+    session.handle({"type": "key_action", "action": "buy", **token_payload})
+
+    cases = [
+        {"type": "key_action", "action": "back"},
+        {"type": "key_action", "action": "cancel_trade"},
+        {"type": "key_action", "action": "feed_home"},
+        {"type": "key_action", "action": "explorer_sync"},
+        {"type": "key_action", "action": "trade_mode_set", "mode": "paper"},
+        {"type": "key_action", "action": "feed_source", "source": "gainer"},
+        {"type": "key_action", "action": "feed_platform", "platform": "pump_in_hot"},
+        {"type": "key_action", "action": "feed_prev"},
+        {"type": "key_action", "action": "feed_next"},
+        {"type": "key_action", "action": "signals"},
+        {"type": "key_action", "action": "signals_chain_cycle"},
+        {"type": "key_action", "action": "watchlist"},
+        {"type": "key_action", "action": "watchlist_chain_cycle"},
+        {"type": "key_action", "action": "watchlist_remove", **token_payload},
+        {"type": "key_action", "action": "watch", **token_payload},
+        {"type": "key_action", "action": "quick_sell", **token_payload},
+        {"type": "key_action", "action": "confirm"},
+        {"type": "key_action", "action": "cancel"},
+        {"type": "key_action", "action": "kline_interval", **token_payload, "interval": "240"},
+        {"type": "key_action", "action": "disambiguation_select", **token_payload, "cursor": "0"},
+        {"type": "key_action", "action": "portfolio_watch", **token_payload},
+        {"type": "key_action", "action": "portfolio_activity_detail", **token_payload},
+        {"type": "key_action", "action": "portfolio_sell", **token_payload, "balance_raw": "1.0"},
+        {"type": "key_action", "action": "portfolio_chain_cycle"},
+        {"type": "key_action", "action": "orders"},
+        {"type": "key_action", "action": "portfolio"},
+    ]
+
+    for message in cases:
+        reply = session.handle(message)
+        data = reply.get("data", {})
+        assert not (reply.get("screen") == "notify" and data.get("title") == "Unknown action"), message
+
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 

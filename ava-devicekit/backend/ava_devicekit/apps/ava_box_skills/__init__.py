@@ -40,6 +40,9 @@ class AvaBoxSkillService:
     def add_watchlist(self, token: dict[str, Any], *, context: AppContext | None = None) -> ScreenPayload:
         return self.watchlist.add(token, context=context)
 
+    def remove_watchlist(self, token: dict[str, Any], *, context: AppContext | None = None) -> ScreenPayload:
+        return self.watchlist.remove(token, context=context)
+
     def create_action_draft(self, action: str, params: dict[str, Any], *, context: AppContext | None = None) -> ActionDraft:
         return self.trading.create_draft(action, params, context=context)
 

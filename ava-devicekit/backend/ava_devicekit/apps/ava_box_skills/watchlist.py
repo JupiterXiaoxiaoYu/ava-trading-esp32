@@ -28,6 +28,20 @@ class WatchlistSkill:
         self.store.write(state)
         return builders.notify("Watchlist", f"Added {row.get('symbol', 'token')}", context=context)
 
+    def remove(self, token: dict[str, Any], *, context: AppContext | None = None) -> ScreenPayload:
+        token_id = str(token.get("token_id") or token.get("addr") or "").strip()
+        if token_id and not token_id.endswith("-solana"):
+            token_id = f"{token_id}-{SOLANA}"
+        if not token_id:
+            return builders.notify("Watchlist", "No token selected", level="warn", context=context)
+        state = _state(self.store)
+        before = len(state.get("watchlist", []))
+        state["watchlist"] = [item for item in state.get("watchlist", []) if item.get("token_id") != token_id]
+        self.store.write(state)
+        removed = before - len(state["watchlist"])
+        body = "Removed token" if removed else "Token was not in watchlist"
+        return builders.notify("Watchlist", body, context=context)
+
 
 def token_identity(token: dict[str, Any]) -> dict[str, Any]:
     token_id = str(token.get("token_id") or token.get("addr") or "").strip()

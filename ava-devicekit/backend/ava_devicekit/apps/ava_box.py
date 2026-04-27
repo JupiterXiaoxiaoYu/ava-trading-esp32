@@ -70,13 +70,33 @@ class AvaBoxApp:
 
     def _route_key(self, action: str, payload: dict[str, Any]) -> ScreenPayload | ActionDraft | ActionResult:
         action = str(action or "").strip().lower()
-        if action in {"home", "feed", "refresh"}:
+        if action in {"home", "feed", "refresh", "feed_home", "back"}:
             return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
+        if action == "confirm":
+            return self._confirm(DeviceMessage(type="confirm", context=self.context))
+        if action in {"cancel", "cancel_trade"}:
+            return self._cancel(DeviceMessage(type="cancel", context=self.context))
+        if action == "explorer_sync":
+            return self._remember_screen(ScreenPayload("explorer", {"trade_mode": self.context.state.get("trade_mode", "real")}, self.context))
+        if action == "trade_mode_set":
+            mode = str(payload.get("mode") or "real").lower()
+            mode = "paper" if mode == "paper" else "real"
+            self.context.state["trade_mode"] = mode
+            return self._remember_screen(ScreenPayload("explorer", {"trade_mode": mode}, self.context))
         if action == "feed_source":
             topic = str(payload.get("topic") or payload.get("source") or "trending")
             platform = str(payload.get("platform") or "")
             return self._remember_screen(self.chain_adapter.get_feed(topic=topic, platform=platform, context=self.context))
-        if action in {"watch", "detail", "open"}:
+        if action == "feed_platform":
+            platform = str(payload.get("platform") or "")
+            return self._remember_screen(self.chain_adapter.get_feed(platform=platform, context=self.context))
+        if action in {"signals", "signals_chain_cycle"}:
+            feed = self.chain_adapter.get_feed(topic="gainer", context=self.context)
+            return self._remember_screen(_as_browse(feed, mode="signals", source_label="SIGNALS"))
+        if action == "watchlist_chain_cycle":
+            feed = self.skills.get_watchlist(context=self.context)
+            return self._remember_screen(_as_browse(feed, mode="watchlist", source_label="WATCHLIST"))
+        if action in {"watch", "detail", "open", "disambiguation_select", "portfolio_watch", "portfolio_activity_detail"}:
             token_id = str(payload.get("token_id") or self._selected_token_id())
             return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
         if action in {"kline_interval", "kline_internal"}:
@@ -92,6 +112,12 @@ class AvaBoxApp:
             return draft
         if action in {"sell", "quick_sell"}:
             draft = self.skills.create_action_draft("trade.sell_draft", {**payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            self.last_draft = draft
+            self._remember_screen(draft.screen)
+            return draft
+        if action == "portfolio_sell":
+            token_id = str(payload.get("token_id") or payload.get("addr") or self._selected_token_id())
+            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, "token_id": token_id, "symbol": payload.get("symbol") or self._selected_symbol(), "amount_native": payload.get("balance_raw") or payload.get("amount_native") or ""}, context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
@@ -111,6 +137,11 @@ class AvaBoxApp:
         if action in {"watchlist_add", "add_watchlist", "favorite"}:
             selected = self.context.selected.to_dict() if self.context.selected else {}
             return self.skills.add_watchlist({**selected, **payload}, context=self.context)
+        if action in {"watchlist_remove", "remove_watchlist", "unfavorite"}:
+            selected = self.context.selected.to_dict() if self.context.selected else {}
+            return self.skills.remove_watchlist({**selected, **payload}, context=self.context)
+        if action == "portfolio_chain_cycle":
+            return builders.notify("Portfolio", "Only Solana portfolio is enabled in this build", level="info", context=self.context)
         return builders.notify("Unknown action", action or "empty", level="warn", context=self.context)
 
     def _route_feed_nav(self, action: str) -> ScreenPayload:
@@ -317,3 +348,21 @@ def _optional_float(value: Any) -> float:
         return float(str(value).replace("$", "").replace("%", ""))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _as_browse(screen: ScreenPayload, *, mode: str, source_label: str) -> ScreenPayload:
+    payload = dict(screen.payload)
+    rows = payload.get("tokens")
+    if not isinstance(rows, list):
+        rows = payload.get("items") if isinstance(payload.get("items"), list) else []
+    return ScreenPayload(
+        "browse",
+        {
+            "tokens": rows,
+            "chain": payload.get("chain") or "solana",
+            "mode": mode,
+            "source_label": source_label,
+            "cursor": payload.get("cursor", 0),
+        },
+        screen.context,
+    )
