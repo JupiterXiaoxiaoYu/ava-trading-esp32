@@ -27,6 +27,8 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
 
     portfolio = service.get_portfolio(context=context)
     assert portfolio.screen == "portfolio"
+    assert "holdings" in portfolio.payload
+    assert portfolio.payload["mode_label"] == "Paper"
 
     draft = service.create_action_draft("buy", {}, context=context)
     assert draft.action == "trade.market_draft"
@@ -38,10 +40,14 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert result.screen and result.screen.screen == "result"
     assert result.data["execution"]["status"] == "confirmed_draft"
     portfolio_after_trade = service.get_portfolio(context=context)
-    assert portfolio_after_trade.payload["items"][0]["symbol"] == "BONK"
+    holding = portfolio_after_trade.payload["holdings"][0]
+    assert holding["symbol"] == "BONK"
+    assert holding["value_usd"]
+    assert holding["balance_raw"]
     orders = service.get_orders(context=context)
+    assert orders.screen == "feed"
     assert orders.payload["mode"] == "orders"
-    assert orders.payload["items"][0]["symbol"] == "BONK"
+    assert orders.payload["tokens"][0]["symbol"] == "BONK"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
 

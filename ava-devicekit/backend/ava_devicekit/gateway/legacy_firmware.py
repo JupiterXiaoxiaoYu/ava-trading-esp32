@@ -159,8 +159,16 @@ def _device_message_from_key_action(msg: dict[str, Any]) -> dict[str, Any]:
 def _message_context(msg: dict[str, Any]) -> dict[str, Any]:
     context = msg.get("context") if isinstance(msg.get("context"), dict) else {}
     selection = msg.get("selection") if isinstance(msg.get("selection"), dict) else None
-    if selection and not context.get("selected"):
-        context = {**context, "selected": selection}
+    token = context.get("token") if isinstance(context.get("token"), dict) else None
+    if selection:
+        selected = selection.get("selected") if isinstance(selection.get("selected"), dict) else selection.get("token") if isinstance(selection.get("token"), dict) else selection
+        if isinstance(selected, dict) and selection.get("cursor") is not None and selected.get("cursor") is None:
+            selected = {**selected, "cursor": selection.get("cursor")}
+        context = {**selection, **context}
+        if not context.get("selected"):
+            context = {**context, "selected": selected}
+    if token and not context.get("selected"):
+        context = {**context, "selected": token}
     return {"context": context} if context else {}
 
 

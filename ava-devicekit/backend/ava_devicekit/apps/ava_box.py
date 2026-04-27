@@ -211,18 +211,11 @@ class AvaBoxApp:
         return result
 
     def _ingest_context(self, payload: dict[str, Any]) -> None:
-        selected_data = payload.get("selected") if isinstance(payload.get("selected"), dict) else {}
+        selected_data = payload.get("selected") if isinstance(payload.get("selected"), dict) else payload.get("token") if isinstance(payload.get("token"), dict) else {}
         incoming_state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
-        selected = None
-        if selected_data:
-            selected = Selection(
-                token_id=str(selected_data.get("token_id") or ""),
-                addr=str(selected_data.get("addr") or ""),
-                chain=str(selected_data.get("chain") or self.manifest.chain),
-                symbol=str(selected_data.get("symbol") or ""),
-                cursor=_optional_int(selected_data.get("cursor")),
-                source=str(selected_data.get("source") or ""),
-            )
+        selected = Selection.from_dict(selected_data)
+        if selected and selected.cursor is None:
+            selected.cursor = _optional_int(payload.get("cursor"))
         self.context = AppContext(
             app_id=self.manifest.app_id,
             chain=str(payload.get("chain") or self.manifest.chain),
@@ -233,7 +226,7 @@ class AvaBoxApp:
             state={
                 **self.context.state,
                 **incoming_state,
-                **{k: v for k, v in payload.items() if k not in {"selected", "visible_rows", "state"}},
+                **{k: v for k, v in payload.items() if k not in {"selected", "token", "visible_rows", "state"}},
             },
         )
 
@@ -243,6 +236,8 @@ class AvaBoxApp:
         rows = []
         if isinstance(screen.payload.get("tokens"), list):
             rows = screen.payload["tokens"]
+        elif isinstance(screen.payload.get("holdings"), list):
+            rows = screen.payload["holdings"]
         elif isinstance(screen.payload.get("items"), list):
             rows = screen.payload["items"]
         self.context.visible_rows = rows

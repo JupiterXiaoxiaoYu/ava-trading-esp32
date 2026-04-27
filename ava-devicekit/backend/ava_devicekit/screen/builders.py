@@ -11,8 +11,32 @@ def spotlight(payload: dict, *, context: AppContext | None = None) -> ScreenPayl
     return ScreenPayload("spotlight", payload, context)
 
 
-def portfolio(rows: list[dict], *, chain: str = "solana", context: AppContext | None = None) -> ScreenPayload:
-    return ScreenPayload("portfolio", {"items": rows, "chain": chain}, context)
+def portfolio(
+    rows: list[dict],
+    *,
+    chain: str = "solana",
+    total_usd: str = "$0",
+    pnl: str = "$0",
+    pnl_pct: str = "0.00%",
+    mode_label: str = "Portfolio",
+    chain_label: str = "SOL",
+    pnl_reason: str = "Paper positions",
+    context: AppContext | None = None,
+) -> ScreenPayload:
+    return ScreenPayload(
+        "portfolio",
+        {
+            "holdings": rows,
+            "chain": chain,
+            "total_usd": total_usd,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "mode_label": mode_label,
+            "chain_label": chain_label,
+            "pnl_reason": pnl_reason,
+        },
+        context,
+    )
 
 
 def confirm(payload: dict, *, context: AppContext | None = None, limit: bool = False) -> ScreenPayload:

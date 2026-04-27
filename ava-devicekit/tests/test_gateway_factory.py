@@ -104,6 +104,43 @@ def test_ui_emitted_key_actions_are_routed_without_unknown_action(tmp_path):
         data = reply.get("data", {})
         assert not (reply.get("screen") == "notify" and data.get("title") == "Unknown action"), message
 
+
+def test_portfolio_payload_matches_device_screen_contract(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "buy", **token})
+    session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+
+    portfolio = session.handle({"type": "key_action", "action": "portfolio"})
+    data = portfolio["data"]
+    assert portfolio["screen"] == "portfolio"
+    assert isinstance(data["holdings"], list)
+    assert {"total_usd", "pnl", "pnl_pct", "mode_label", "chain_label"} <= set(data)
+    required = {"symbol", "avg_cost_usd", "value_usd", "pnl", "pnl_pct", "pnl_positive", "addr", "chain", "contract_tail", "source_tag", "balance_raw"}
+    assert required <= set(data["holdings"][0])
+
+
+def test_legacy_screen_context_token_is_treated_as_selected():
+    session = create_device_session(mock=True)
+    reply = session.handle(
+        {
+            "type": "listen_detect",
+            "text": "buy",
+            "context": {
+                "screen": "feed",
+                "cursor": 0,
+                "token": {
+                    "addr": "So11111111111111111111111111111111111111112",
+                    "chain": "solana",
+                    "symbol": "SOL",
+                },
+            },
+        }
+    )
+    assert reply["screen"] == "confirm"
+    assert reply["action_draft"]["summary"]["symbol"] == "SOL"
+
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 

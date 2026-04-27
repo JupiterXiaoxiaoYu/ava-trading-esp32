@@ -19,13 +19,25 @@ class Selection:
     def from_dict(cls, data: JsonDict | None) -> "Selection | None":
         if not isinstance(data, dict):
             return None
+        if isinstance(data.get("token"), dict):
+            token_data = dict(data["token"])
+            if "cursor" not in token_data and data.get("cursor") is not None:
+                token_data["cursor"] = data.get("cursor")
+            if "source" not in token_data and data.get("source") is not None:
+                token_data["source"] = data.get("source")
+            data = token_data
+        chain = str(data.get("chain") or "solana")
+        addr = str(data.get("addr") or data.get("token_id") or "")
+        token_id = str(data.get("token_id") or "")
+        if not token_id and addr:
+            token_id = addr if addr.endswith(f"-{chain}") else f"{addr}-{chain}"
         return cls(
-            token_id=str(data.get("token_id") or ""),
-            addr=str(data.get("addr") or ""),
-            chain=str(data.get("chain") or "solana"),
+            token_id=token_id,
+            addr=addr.replace(f"-{chain}", "") if addr.endswith(f"-{chain}") else addr,
+            chain=chain,
             symbol=str(data.get("symbol") or ""),
             cursor=_optional_int(data.get("cursor")),
-            source=str(data.get("source") or ""),
+            source=str(data.get("source") or data.get("source_tag") or ""),
         )
 
     def to_dict(self) -> JsonDict:
@@ -51,9 +63,9 @@ class AppContext:
             chain=str(data.get("chain") or default_chain),
             screen=str(data.get("screen") or ""),
             cursor=_optional_int(data.get("cursor")),
-            selected=Selection.from_dict(data.get("selected")),
+            selected=Selection.from_dict(data.get("selected") if isinstance(data.get("selected"), dict) else data.get("token")),
             visible_rows=data.get("visible_rows") if isinstance(data.get("visible_rows"), list) else [],
-            state={k: v for k, v in data.items() if k not in {"app_id", "chain", "screen", "cursor", "selected", "visible_rows"}},
+            state={k: v for k, v in data.items() if k not in {"app_id", "chain", "screen", "cursor", "selected", "token", "visible_rows"}},
         )
 
     def to_dict(self) -> JsonDict:

@@ -64,6 +64,32 @@ def test_legacy_firmware_listen_detect_preserves_selection_context():
     assert replies[-1]["type"] == "tts"
     assert replies[-1]["state"] == "stop"
 
+
+def test_legacy_firmware_listen_detect_accepts_screen_selection_shape():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    replies = conn.handle_text(
+        json.dumps(
+            {
+                "type": "listen",
+                "state": "detect",
+                "text": "buy",
+                "selection": {
+                    "screen": "feed",
+                    "cursor": 2,
+                    "token": {
+                        "addr": "So11111111111111111111111111111111111111112",
+                        "chain": "solana",
+                        "symbol": "SOL",
+                    },
+                },
+            }
+        )
+    )
+    display = next(item for item in replies if item.get("type") == "display")
+    assert display["screen"] == "confirm"
+    assert display["action_draft"]["summary"]["symbol"] == "SOL"
+    assert display["action_draft"]["summary"]["token_id"] == "So11111111111111111111111111111111111111112-solana"
+
 import asyncio
 
 from ava_devicekit.providers.asr.base import ASRResult
