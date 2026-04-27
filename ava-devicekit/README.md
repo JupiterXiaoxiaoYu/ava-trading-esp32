@@ -83,6 +83,32 @@ ESP32 input / voice
 | `POST` | `/ava/ota/` | Compatibility OTA response containing `websocket`, `server_time`, and optional firmware update |
 | `GET` | `/ava/ota/download/{filename}` | Safe firmware binary download from the configured bin directory |
 
+
+## Production Components Added
+
+| Area | Framework Or App | Current Implementation |
+|---|---|---|
+| ASR audio chain | Framework provider boundary | Qwen realtime PCM16 session/event transport in `providers/asr/qwen_realtime.py`; OPUS-to-PCM is an explicit `AudioDecoder` board/deployment hook |
+| TTS provider | Framework provider boundary | Mock TTS for tests plus OpenAI-compatible HTTP TTS in `providers/tts/openai_compatible.py` |
+| LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider through `providers/registry.py` |
+| Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
+| Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE Solana transaction construction provider in `apps/ava_box_skills/execution.py` for external wallet signing |
+| Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps` |
+| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `run-http`, and `run-legacy-ws` |
+| UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
+
+## Documentation
+
+| Doc | Purpose |
+|---|---|
+| `docs/framework-vs-avabox.md` | Strict boundary between DeviceKit framework and Ava Box app logic |
+| `docs/getting-started.md` | Local install, offline run, runtime provider config, admin APIs |
+| `docs/build-your-first-app.md` | Create and structure a new hardware app |
+| `docs/port-a-board.md` | Port ESP32 boards without baking hardware assumptions into core |
+| `docs/provider-setup.md` | ASR, LLM, TTS, market stream, and trade provider setup |
+| `docs/production-deploy.md` | Gateway deployment, proxy/heartbeat, OTA, wallet safety |
+| `docs/package-release.md` | CLI/package release and versioning notes |
+
 ## Existing Firmware Compatibility
 
 The current production firmware can be moved over incrementally by pointing its OTA URL at the DeviceKit HTTP gateway and its WebSocket URL at the compatibility gateway:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import os
+import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from ava_devicekit.providers.asr.base import ASRResult
 
@@ -64,11 +66,42 @@ class QwenRealtimeASRProvider:
             "audio": base64.b64encode(audio).decode("ascii"),
         }
 
+    def create_session(self, transport: RealtimeTransport) -> "QwenRealtimeASRSession":
+        return QwenRealtimeASRSession(self, transport)
+
     async def transcribe_pcm16(self, audio: bytes, *, sample_rate: int = 16000, language: str = "zh") -> ASRResult:
-        raise RuntimeError(
-            "Live Qwen realtime ASR transport is deployment-owned. Use url(), headers(), "
-            "session_update_event(), and audio_append_event() to wire the WebSocket client."
-        )
+        if sample_rate != self.config.sample_rate or language != self.config.language:
+            self.config = QwenRealtimeASRConfig(
+                api_key_env=self.config.api_key_env,
+                model=self.config.model,
+                base_url=self.config.base_url,
+                language=language,
+                sample_rate=sample_rate,
+                vad_threshold=self.config.vad_threshold,
+                silence_duration_ms=self.config.silence_duration_ms,
+            )
+        return await asyncio.to_thread(self._transcribe_pcm16_blocking, audio)
+
+    def _transcribe_pcm16_blocking(self, audio: bytes) -> ASRResult:
+        try:
+            import websocket
+        except ImportError as exc:  # pragma: no cover - optional dependency boundary
+            raise RuntimeError("Install websocket-client to use Qwen realtime ASR transport") from exc
+        ws = websocket.create_connection(self.url(), header=self.headers(), timeout=30)
+        transport = WebSocketClientTransport(ws)
+        session = self.create_session(transport)
+        try:
+            session.start()
+            session.append(audio)
+            session.commit()
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                result = session.receive_transcript(timeout=1)
+                if result and result.text:
+                    return result
+        finally:
+            session.close()
+        return ASRResult(text="", language=self.config.language)
 
     def parse_transcript_event(self, message: str | dict[str, Any]) -> ASRResult | None:
         data = json.loads(message) if isinstance(message, str) else message
@@ -93,3 +126,68 @@ def _find_text(value: Any) -> str:
             if found:
                 return found
     return ""
+
+
+class RealtimeTransport(Protocol):
+    def send(self, payload: str) -> None:
+        raise NotImplementedError
+
+    def recv(self, timeout: float | None = None) -> str | bytes:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        raise NotImplementedError
+
+
+class WebSocketClientTransport:
+    def __init__(self, ws: Any):
+        self.ws = ws
+
+    def send(self, payload: str) -> None:
+        self.ws.send(payload)
+
+    def recv(self, timeout: float | None = None) -> str | bytes:
+        if timeout is not None and hasattr(self.ws, "settimeout"):
+            self.ws.settimeout(timeout)
+        return self.ws.recv()
+
+    def close(self) -> None:
+        self.ws.close()
+
+
+class QwenRealtimeASRSession:
+    """Stateful PCM16 streaming session for Qwen realtime ASR."""
+
+    def __init__(self, provider: QwenRealtimeASRProvider, transport: RealtimeTransport):
+        self.provider = provider
+        self.transport = transport
+        self.started = False
+        self._seq = 0
+
+    def start(self) -> None:
+        self._send(self.provider.session_update_event(event_id=self._event_id("session")))
+        self.started = True
+
+    def append(self, audio: bytes) -> None:
+        if not self.started:
+            self.start()
+        self._send(self.provider.audio_append_event(audio, event_id=self._event_id("audio")))
+
+    def commit(self) -> None:
+        self._send({"event_id": self._event_id("commit"), "type": "input_audio_buffer.commit"})
+
+    def receive_transcript(self, *, timeout: float | None = None) -> ASRResult | None:
+        raw = self.transport.recv(timeout)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        return self.provider.parse_transcript_event(raw)
+
+    def close(self) -> None:
+        self.transport.close()
+
+    def _send(self, event: dict[str, Any]) -> None:
+        self.transport.send(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+
+    def _event_id(self, prefix: str) -> str:
+        self._seq += 1
+        return f"{prefix}_{int(time.time() * 1000)}_{self._seq}"

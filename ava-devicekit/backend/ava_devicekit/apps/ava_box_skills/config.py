@@ -13,3 +13,5 @@ class AvaBoxSkillConfig:
     default_buy_sol: Decimal = Decimal("0.1")
     default_slippage_bps: int = 100
     execution_mode: str = "paper"
+    execution_base_url: str = "https://bot-api.ave.ai"
+    execution_api_key_env: str = "AVE_API_KEY"

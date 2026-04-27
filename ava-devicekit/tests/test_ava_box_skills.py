@@ -42,3 +42,39 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     orders = service.get_orders(context=context)
     assert orders.payload["mode"] == "orders"
     assert orders.payload["items"][0]["symbol"] == "BONK"
+
+from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
+
+
+def test_ave_solana_trade_provider_builds_external_signing_payload(monkeypatch):
+    payload = build_create_solana_tx_payload(
+        {"action": "trade.limit_draft", "token_id": "So111-solana", "symbol": "SOL", "limit_price": "100"},
+        {"amount_sol": "0.1", "request_id": "r1", "wallet": "wallet1"},
+    )
+    assert payload["type"] == "limit"
+    assert payload["side"] == "buy"
+    assert payload["wallet"] == "wallet1"
+
+    monkeypatch.setenv("TEST_AVE_KEY", "secret")
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"ok":true,"tx":"unsigned"}'
+
+    def fake_urlopen(req, timeout=0):
+        captured["url"] = req.full_url
+        captured["body"] = req.data.decode()
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = AveSolanaTradeProvider(AveSolanaTradeConfig(base_url="https://trade.example", api_key_env="TEST_AVE_KEY"))
+    response = provider.create_solana_tx(payload)
+    assert captured["url"].endswith("/v1/thirdParty/chainWallet/createSolanaTx")
+    assert response["tx"] == "unsigned"

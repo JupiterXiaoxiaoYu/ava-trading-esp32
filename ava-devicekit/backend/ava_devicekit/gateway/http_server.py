@@ -37,6 +37,18 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
             if path == "/device/outbox":
                 self._send_json({"items": session.outbox, "count": len(session.outbox)})
                 return
+            if path == "/admin/capabilities":
+                self._send_json(_load_capabilities())
+                return
+            if path == "/admin":
+                self._send_bytes(_admin_page().encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path == "/admin/runtime":
+                self._send_json(settings.sanitized_dict())
+                return
+            if path == "/admin/apps":
+                self._send_json({"active": session.app.manifest.to_dict(), "items": [session.app.manifest.to_dict()]})
+                return
             if path == "/ava/ota/":
                 host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]
                 message = f"OTA OK. WebSocket: {settings.websocket_endpoint(host_hint)}"
@@ -107,6 +119,42 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
             self._send_bytes(data, "application/octet-stream")
 
     return DeviceKitHandler
+
+
+def _load_capabilities() -> dict:
+    path = Path(__file__).resolve().parents[3] / "userland" / "capabilities.json"
+    if not path.exists():
+        return {"capabilities": []}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _admin_page() -> str:
+    return """<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ava DeviceKit Admin</title>
+<style>
+body{margin:0;background:#101418;color:#edf2f7;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+main{max-width:960px;margin:0 auto;padding:32px}
+h1{font-size:28px;margin:0 0 8px}
+p{color:#a8b3c2}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:24px 0}
+a{display:block;padding:18px;border:1px solid #2d3748;border-radius:14px;color:#edf2f7;text-decoration:none;background:#151c24}
+a:hover{border-color:#64d2ff}
+code{color:#64d2ff}
+</style>
+<main>
+<h1>Ava DeviceKit Admin</h1>
+<p>Deployment inspection surface. Secret values are never returned by these endpoints.</p>
+<div class="grid">
+<a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
+<a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
+<a href="/admin/apps">Apps<br><code>/admin/apps</code></a>
+<a href="/device/state">Device State<br><code>/device/state</code></a>
+</div>
+</main>
+"""
 
 
 def run_http_gateway(

@@ -10,6 +10,7 @@ from typing import Any
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.providers.pipeline import VoicePipeline
+from ava_devicekit.providers.registry import create_voice_pipeline
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
@@ -153,7 +154,7 @@ async def run_legacy_firmware_gateway(
             mock=mock,
             skill_store_path=skill_store_path,
         )
-        await LegacyFirmwareConnection(session).open(ws)
+        await LegacyFirmwareConnection(session, voice_pipeline=create_voice_pipeline(settings)).open(ws)
 
     async with websockets.serve(
         handler,

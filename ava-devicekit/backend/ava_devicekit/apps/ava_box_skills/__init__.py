@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig
+from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.apps.ava_box_skills.portfolio import PortfolioSkill
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
@@ -24,7 +25,7 @@ class AvaBoxSkillService:
         self.store = JsonStore(self.config.store_path)
         self.watchlist = WatchlistSkill(self.store)
         self.portfolio = PortfolioSkill(self.store)
-        self.executor = PaperExecutionProvider(self.store) if self.config.execution_mode == "paper" else None
+        self.executor = self._create_executor()
         self.trading = TradingSkill(self.config, self.executor)
 
     def get_portfolio(self, *, context: AppContext | None = None) -> ScreenPayload:
@@ -48,5 +49,18 @@ class AvaBoxSkillService:
     def cancel_action(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
         return self.trading.cancel(request_id, context=context)
 
+    def _create_executor(self):
+        mode = self.config.execution_mode.lower()
+        if mode == "paper":
+            return PaperExecutionProvider(self.store)
+        if mode in {"ave_solana", "real", "wallet"}:
+            return AveSolanaTradeProvider(
+                AveSolanaTradeConfig(
+                    base_url=self.config.execution_base_url,
+                    api_key_env=self.config.execution_api_key_env,
+                )
+            )
+        return None
 
-__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService"]
+
+__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveSolanaTradeConfig", "AveSolanaTradeProvider"]

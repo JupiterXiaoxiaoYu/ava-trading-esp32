@@ -48,3 +48,20 @@ def test_http_gateway_mock_flow():
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_http_gateway_admin_endpoints():
+    def factory() -> DeviceSession:
+        return create_device_session(mock=True)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(factory))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        assert "core_capabilities" in _get(base_url, "/admin/capabilities")
+        assert "providers" in _get(base_url, "/admin/runtime")
+        assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)

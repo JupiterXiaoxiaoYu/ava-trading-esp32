@@ -5,10 +5,27 @@ description = "Full-stack ESP32 framework for Solana AI hardware apps."
 requires-python = ">=3.11"
 dependencies = []
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+ava-devicekit = "ava_devicekit.cli:main"
+
+
 [project.optional-dependencies]
-websocket = ["websockets>=12"]
+websocket = ["websockets>=12", "websocket-client>=1.7"]
 dev = ["jsonschema>=4", "pytest>=8"]
 
 [tool.pytest.ini_options]
 pythonpath = ["backend"]
 testpaths = ["tests"]
+
+[tool.setuptools]
+package-dir = {"" = "backend"}
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.setuptools.package-data]
+ava_devicekit = []

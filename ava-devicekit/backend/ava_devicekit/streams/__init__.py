@@ -1,4 +1,12 @@
 from ava_devicekit.streams.base import MarketStreamAdapter, MarketStreamEvent, StreamSubscription
+from ava_devicekit.streams.ave_data_wss import AveDataWSSAdapter, AveDataWSSConfig
 from ava_devicekit.streams.mock import MockMarketStreamAdapter
 
-__all__ = ["MarketStreamAdapter", "MarketStreamEvent", "MockMarketStreamAdapter", "StreamSubscription"]
+__all__ = [
+    "AveDataWSSAdapter",
+    "AveDataWSSConfig",
+    "MarketStreamAdapter",
+    "MarketStreamEvent",
+    "MockMarketStreamAdapter",
+    "StreamSubscription",
+]

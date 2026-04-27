@@ -7,5 +7,29 @@
   "firmware_bin_dir": "data/bin",
   "timezone_offset_hours": 8,
   "websocket_ping_interval": 30,
-  "websocket_ping_timeout": 10
+  "websocket_ping_timeout": 10,
+  "providers": {
+    "asr": {
+      "provider": "qwen",
+      "base_url": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+      "model": "qwen3-asr-flash-realtime",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "language": "zh",
+      "sample_rate": 16000
+    },
+    "llm": {
+      "provider": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "tts": {
+      "provider": "openai-compatible",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini-tts",
+      "voice": "alloy",
+      "format": "opus",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  }
 }
