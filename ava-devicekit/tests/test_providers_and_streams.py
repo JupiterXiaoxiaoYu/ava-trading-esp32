@@ -236,6 +236,38 @@ def test_openai_compatible_llm_uses_runtime_options(monkeypatch):
     assert '"max_tokens": 500' in captured["body"]
     assert '"top_p": 1' in captured["body"]
     assert '"frequency_penalty": 0' in captured["body"]
+    assert "enable_thinking" not in captured["body"]
+
+
+def test_dashscope_qwen3_non_streaming_llm_disables_thinking(monkeypatch):
+    monkeypatch.setenv("TEST_LLM_KEY", "secret")
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    def fake_urlopen(req, timeout=0):
+        captured["body"] = req.data.decode()
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    provider = OpenAICompatibleLLMProvider(
+        OpenAICompatibleLLMConfig(
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            api_key_env="TEST_LLM_KEY",
+            model="qwen3-235b-a22b",
+        )
+    )
+    result = provider.complete([LLMMessage("user", "hello")])
+    assert result.text == "ok"
+    assert '"enable_thinking": false' in captured["body"]
 
 
 def test_ave_data_wss_builds_frames_and_parses_price_events():

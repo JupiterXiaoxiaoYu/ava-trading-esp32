@@ -18,6 +18,7 @@ class OpenAICompatibleLLMConfig:
     max_tokens: int | None = None
     top_p: float | None = None
     frequency_penalty: float | None = None
+    enable_thinking: bool | None = None
 
 
 class OpenAICompatibleLLMProvider:
@@ -41,6 +42,11 @@ class OpenAICompatibleLLMProvider:
             payload["top_p"] = self.config.top_p
         if self.config.frequency_penalty is not None:
             payload["frequency_penalty"] = self.config.frequency_penalty
+        enable_thinking = self.config.enable_thinking
+        if enable_thinking is None and "dashscope" in self.config.base_url and self.config.model.startswith("qwen3"):
+            enable_thinking = False
+        if enable_thinking is not None:
+            payload["enable_thinking"] = enable_thinking
         req = urllib.request.Request(
             self.config.base_url.rstrip("/") + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
