@@ -113,6 +113,27 @@
       "path": "reference_apps/ava_box/ui/",
       "user_action": "replace_or_extend",
       "description": "Ava Box product LVGL screens live outside DeviceKit core and consume shared screen payload contracts."
+    },
+    {
+      "id": "runtime_manager",
+      "name": "Runtime Manager",
+      "path": "backend/ava_devicekit/gateway/runtime_manager.py",
+      "user_action": "configure",
+      "description": "Keeps independent app sessions, outboxes, and event logs by device id."
+    },
+    {
+      "id": "admin_auth",
+      "name": "Admin And Device Auth",
+      "path": "backend/ava_devicekit/gateway/http_server.py",
+      "user_action": "configure",
+      "description": "Optional bearer-token protection using AVA_DEVICEKIT_ADMIN_TOKEN and AVA_DEVICEKIT_DEVICE_TOKEN."
+    },
+    {
+      "id": "board_port_sdk",
+      "name": "Board Port SDK Template",
+      "path": "userland/hardware_port/templates/",
+      "user_action": "copy_or_generate",
+      "description": "C template for JSON transport, binary audio, display rendering, audio playback, buttons, and cursor context."
     }
   ],
   "extension_points": [
@@ -205,6 +226,13 @@
       "template": "userland/adapter/market_stream_adapter_template.py",
       "user_action": "implement_or_configure",
       "description": "Streams price/kline updates into app payloads."
+    },
+    {
+      "id": "board_port",
+      "interface": "userland/hardware_port/templates/board_port.h",
+      "template": "userland/hardware_port/templates/",
+      "user_action": "implement",
+      "description": "Map a concrete ESP32 board to DeviceKit transport, input, audio, and display callbacks."
     }
   ],
   "reference_implementations": [

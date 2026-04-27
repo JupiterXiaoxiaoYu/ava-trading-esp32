@@ -98,6 +98,9 @@ class LegacyFirmwareConnection:
         if state == "start":
             self.audio.reset()
             return [{"type": "tts", "state": "stop", "session_id": self.session_id}]
+        if state == "partial":
+            text = str(msg.get("text") or "")
+            return [{"type": "stt", "state": "partial", "text": text, "session_id": self.session_id}] if text else []
         if state == "stop":
             if not allow_async_asr:
                 return []

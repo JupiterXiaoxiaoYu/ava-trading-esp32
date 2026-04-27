@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -62,6 +63,44 @@ def test_http_gateway_admin_endpoints():
         assert "core_capabilities" in _get(base_url, "/admin/capabilities")
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def _get_status(base_url: str, path: str, headers: dict | None = None) -> tuple[int, dict]:
+    req = urllib.request.Request(base_url + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode())
+
+
+def test_http_gateway_admin_auth_and_multi_device(monkeypatch):
+    monkeypatch.setenv("AVA_DEVICEKIT_ADMIN_TOKEN", "admin-secret")
+
+    def factory() -> DeviceSession:
+        return create_device_session(mock=True)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(factory))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, body = _get_status(base_url, "/admin/runtime")
+        assert status == 401
+        assert body["error"] == "unauthorized"
+        status, body = _get_status(base_url, "/admin/runtime", {"Authorization": "Bearer admin-secret"})
+        assert status == 200
+        assert body["admin_token_env"] == "AVA_DEVICEKIT_ADMIN_TOKEN"
+        assert _post(base_url, "/device/boot", {})["screen"] == "feed"
+        req = urllib.request.Request(base_url + "/device/boot", data=b"{}", headers={"X-Ava-Device-Id": "device-b", "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert json.loads(resp.read().decode())["screen"] == "feed"
+        status, body = _get_status(base_url, "/admin/devices", {"Authorization": "Bearer admin-secret"})
+        assert status == 200
+        assert body["count"] == 2
     finally:
         server.shutdown()
         thread.join(timeout=5)

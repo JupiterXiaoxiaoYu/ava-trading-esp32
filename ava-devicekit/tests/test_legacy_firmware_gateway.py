@@ -81,3 +81,9 @@ def test_legacy_firmware_tts_audio_frame_is_sent():
     audio = next(item for item in replies if item.get("state") == "audio")
     assert audio["content_type"] == "audio/opus"
     assert audio["audio"]
+
+
+def test_legacy_firmware_partial_transcript_frame():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    replies = conn.handle_text(json.dumps({"type": "listen", "state": "partial", "text": "buy sol"}))
+    assert replies == [{"type": "stt", "state": "partial", "text": "buy sol", "session_id": conn.session_id}]

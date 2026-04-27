@@ -13,3 +13,13 @@ DeviceKit core is ESP32-hardware-agnostic. A board port maps physical hardware i
 | OTA | Use `/ava/ota/` and `/ava/ota/download/{filename}` |
 
 The Scratch Arcade port is a reference port, not a framework requirement.
+
+
+## Generate A Board Port
+
+```bash
+cd ava-devicekit
+PYTHONPATH=backend python3 -m ava_devicekit.cli init-board ../my-esp32-board-port
+```
+
+The generated C template defines the required board callbacks for JSON transport, binary audio transport, screen rendering, audio playback, buttons, cursor selection, and listen start/stop.

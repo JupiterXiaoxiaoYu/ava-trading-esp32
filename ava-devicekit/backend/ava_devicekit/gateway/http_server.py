@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from ava_devicekit.gateway.factory import create_device_session
+from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.ota.firmware import build_ota_response, resolve_firmware_download
 from ava_devicekit.runtime.settings import RuntimeSettings
@@ -17,8 +19,8 @@ SessionFactory = Callable[[], DeviceSession]
 
 
 def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSettings | None = None):
-    session = session_factory()
     settings = runtime_settings or RuntimeSettings.load()
+    manager = RuntimeManager(lambda device_id: session_factory())
 
     class DeviceKitHandler(BaseHTTPRequestHandler):
         server_version = "AvaDeviceKitHTTP/0.1"
@@ -29,25 +31,60 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
                 self._send_json({"ok": True, "service": "ava-devicekit"})
                 return
             if path == "/manifest":
-                self._send_json(session.app.manifest.to_dict())
+                self._send_json(self._session().app.manifest.to_dict())
                 return
             if path == "/device/state":
-                self._send_json(session.snapshot())
+                if not self._authorized_device():
+                    return
+                self._send_json(manager.state(self._device_id()))
                 return
             if path == "/device/outbox":
-                self._send_json({"items": session.outbox, "count": len(session.outbox)})
+                if not self._authorized_device():
+                    return
+                self._send_json(manager.outbox(self._device_id()))
                 return
             if path == "/admin/capabilities":
+                if not self._authorized_admin():
+                    return
                 self._send_json(_load_capabilities())
                 return
             if path == "/admin":
+                if not self._authorized_admin():
+                    return
                 self._send_bytes(_admin_page().encode("utf-8"), "text/html; charset=utf-8")
                 return
             if path == "/admin/runtime":
+                if not self._authorized_admin():
+                    return
                 self._send_json(settings.sanitized_dict())
                 return
             if path == "/admin/apps":
-                self._send_json({"active": session.app.manifest.to_dict(), "items": [session.app.manifest.to_dict()]})
+                if not self._authorized_admin():
+                    return
+                active = self._session().app.manifest.to_dict()
+                self._send_json({"active": active, "items": [active]})
+                return
+            if path == "/admin/devices":
+                if not self._authorized_admin():
+                    return
+                self._send_json({"items": manager.list_devices(), "count": len(manager.sessions)})
+                return
+            if path == "/admin/events":
+                if not self._authorized_admin():
+                    return
+                self._send_json(manager.event_log(limit=200))
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/state"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                self._send_json(manager.state(device_id))
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/outbox"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                self._send_json(manager.outbox(device_id))
                 return
             if path == "/ava/ota/":
                 host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]
@@ -67,13 +104,32 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             path = urlparse(self.path).path
             if path == "/device/boot":
-                self._send_json(session.boot())
+                if not self._authorized_device():
+                    return
+                self._send_json(manager.boot(self._device_id()))
                 return
             if path == "/device/message":
+                if not self._authorized_device():
+                    return
                 try:
                     body = self._read_json()
-                    self._send_json(session.handle(body))
+                    self._send_json(manager.handle(self._device_id(), body))
                 except Exception as exc:  # pragma: no cover - defensive server boundary
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/boot"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                self._send_json(manager.boot(device_id))
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/message"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(manager.handle(device_id, self._read_json()))
+                except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             if path == "/ava/ota/":
@@ -101,6 +157,29 @@ def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSetti
             if length <= 0:
                 return {}
             return json.loads(self.rfile.read(length).decode("utf-8"))
+
+        def _session(self) -> DeviceSession:
+            return manager.get(self._device_id())
+
+        def _device_id(self) -> str:
+            return normalize_device_id(self.headers.get("X-Ava-Device-Id") or "default")
+
+        def _authorized_admin(self) -> bool:
+            return self._authorized(settings.admin_token_env)
+
+        def _authorized_device(self) -> bool:
+            return self._authorized(settings.device_token_env)
+
+        def _authorized(self, token_env: str) -> bool:
+            expected = os.environ.get(token_env, "")
+            if not expected:
+                return True
+            supplied = self.headers.get("Authorization", "")
+            token = supplied.removeprefix("Bearer ").strip()
+            if token == expected:
+                return True
+            self._send_json({"ok": False, "error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+            return False
 
         def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -151,6 +230,8 @@ code{color:#64d2ff}
 <a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
 <a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
 <a href="/admin/apps">Apps<br><code>/admin/apps</code></a>
+<a href="/admin/devices">Devices<br><code>/admin/devices</code></a>
+<a href="/admin/events">Events<br><code>/admin/events</code></a>
 <a href="/device/state">Device State<br><code>/device/state</code></a>
 </div>
 </main>

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ava_devicekit.gateway.factory import create_device_session
+from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id
 
 
 async def run_websocket_gateway(
@@ -29,17 +30,23 @@ async def run_websocket_gateway(
     except ImportError as exc:
         raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the gateway") from exc
 
-    async def handler(ws: Any) -> None:
-        session = create_device_session(
+    manager = RuntimeManager(
+        lambda device_id: create_device_session(
             app_id=app_id,
             manifest_path=manifest_path,
             adapter=adapter,
             mock=mock,
             skill_store_path=skill_store_path,
         )
-        await ws.send(json.dumps(session.boot()))
+    )
+
+    async def handler(ws: Any) -> None:
+        device_id = normalize_device_id(getattr(ws, "request_headers", {}).get("X-Ava-Device-Id") if hasattr(ws, "request_headers") else "")
+        await ws.send(json.dumps(manager.boot(device_id)))
         async for raw in ws:
-            payload = session.handle_json(raw)
+            msg = json.loads(raw)
+            device_id = normalize_device_id(msg.get("device_id") or msg.get("device") or device_id)
+            payload = manager.handle(device_id, msg)
             await ws.send(json.dumps(payload))
 
     async with websockets.serve(handler, host, port):

@@ -26,6 +26,10 @@ def main(argv: list[str] | None = None) -> None:
     init_app.add_argument("path")
     init_app.add_argument("--force", action="store_true")
 
+    init_board = sub.add_parser("init-board", help="Create a starter ESP32 board port from userland templates")
+    init_board.add_argument("path")
+    init_board.add_argument("--force", action="store_true")
+
     http = sub.add_parser("run-http", help="Run the HTTP gateway")
     _add_runtime_args(http, default_port=8788)
 
@@ -41,6 +45,9 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "init-app":
         _init_app(Path(args.path), force=args.force)
+        return
+    if args.command == "init-board":
+        _init_board(Path(args.path), force=args.force)
         return
     if args.command == "run-http":
         settings = RuntimeSettings.load(args.config)
@@ -72,6 +79,16 @@ def _init_app(path: Path, *, force: bool = False) -> None:
     shutil.copy2(USERLAND / "app" / "app_template.py", path / "app.py")
     shutil.copy2(USERLAND / "runtime.example.json", path / "runtime.example.json")
     (path / "README.md").write_text("# DeviceKit App\n\nStart from `manifest.json`, `app.py`, and `runtime.example.json`.\n", encoding="utf-8")
+    _print_json({"ok": True, "path": str(path)})
+
+
+def _init_board(path: Path, *, force: bool = False) -> None:
+    if path.exists() and any(path.iterdir()) and not force:
+        raise SystemExit(f"target exists and is not empty: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+    for src in (USERLAND / "hardware_port" / "templates").iterdir():
+        if src.is_file():
+            shutil.copy2(src, path / src.name)
     _print_json({"ok": True, "path": str(path)})
 
 

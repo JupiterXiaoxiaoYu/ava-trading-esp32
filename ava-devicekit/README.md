@@ -94,8 +94,8 @@ ESP32 input / voice
 | LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider plus custom LLM provider classes through `providers/registry.py` |
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE Solana transaction construction provider in `apps/ava_box_skills/execution.py` for external wallet signing |
-| Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps` |
-| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `run-http`, and `run-legacy-ws` |
+| Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, optional bearer auth |
+| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `run-http`, and `run-legacy-ws` |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
 
 ## Documentation
@@ -151,3 +151,7 @@ PYTHONPATH=backend python3 -m pytest tests
 ```
 
 Use `--adapter solana` for a real data adapter deployment and `--mock` for deterministic offline demos/tests.
+
+## Multi-Device Runtime
+
+HTTP device endpoints use `X-Ava-Device-Id` to keep independent sessions. Admin endpoints can inspect `/admin/devices` and `/admin/events`. Set `AVA_DEVICEKIT_ADMIN_TOKEN` and `AVA_DEVICEKIT_DEVICE_TOKEN` to enable bearer-token protection.
