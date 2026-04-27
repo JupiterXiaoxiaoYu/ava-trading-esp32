@@ -32,7 +32,7 @@ Framework users should start in `userland/`, not by editing core files. That dir
 | Add live market updates | `userland/adapter/market_stream_adapter_template.py` | `MarketStreamAdapter` implementation |
 | Add AI providers | `userland/provider/` | ASR, LLM, TTS provider implementations |
 | Port a board | `userland/hardware_port/` | GPIO/input mapping, transport send, network events, audio/display hooks |
-| Build screens | `userland/ui/` | Screen vtables, LVGL/layout rendering, selection context JSON |
+| Build screens | `userland/ui/` | Screen contracts, screen vtables, LVGL/layout rendering, context snapshots |
 
 The machine-readable capability map is `userland/capabilities.json`.
 
@@ -63,6 +63,7 @@ Ava Box can run through DeviceKit without importing the legacy assistant backend
 ```text
 ESP32 input / voice
   -> DeviceMessage
+  -> ContextSnapshot / InputEvent when the device has page or hardware context
   -> AvaBoxApp
   -> ChainAdapter(SolanaAdapter)
   -> ScreenPayload or ActionDraft
@@ -97,6 +98,7 @@ ESP32 input / voice
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, optional bearer auth |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `run-http`, and `run-legacy-ws` |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
+| Generic page/input/context | Framework contract | Custom `ScreenContract`, `InputEvent`, and `ContextSnapshot` schemas let new pages and new hardware controls attach AI-readable state without changing core |
 
 ## Documentation
 
@@ -106,6 +108,7 @@ ESP32 input / voice
 | `docs/completion-status.md` | Current framework/app completion matrix and runtime assumptions |
 | `docs/getting-started.md` | Local install, offline run, runtime provider config, admin APIs |
 | `docs/build-your-first-app.md` | Create and structure a new hardware app |
+| `docs/generic-screen-input-context.md` | Add custom pages, hardware input, and AI-readable page context |
 | `docs/port-a-board.md` | Port ESP32 boards without baking hardware assumptions into core |
 | `docs/provider-setup.md` | ASR, LLM, TTS, market stream, and trade provider setup |
 | `docs/production-deploy.md` | Gateway deployment, proxy/heartbeat, OTA, wallet safety |

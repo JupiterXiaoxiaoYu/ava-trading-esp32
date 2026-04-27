@@ -101,3 +101,45 @@ def test_device_message_flattens_payload_object():
 
     msg = DeviceMessage.from_dict({"type": "key_action", "action": "buy", "payload": {"amount_sol": "0.1"}})
     assert msg.payload == {"amount_sol": "0.1"}
+
+
+def test_generic_contracts_parse_context_and_input_events():
+    from ava_devicekit.core.contracts import ContextSnapshot, InputEvent, ScreenContract
+    from ava_devicekit.core.types import DeviceMessage
+
+    contract = ScreenContract.from_dict({"screen_id": "sensor_panel", "actions": ["sensor.refresh"]})
+    assert contract is not None
+    assert contract.screen_id == "sensor_panel"
+    assert contract.actions == ["sensor.refresh"]
+
+    snapshot = ContextSnapshot.from_dict(
+        {
+            "screen": "sensor_panel",
+            "cursor": 1,
+            "token": {"addr": "Device111", "chain": "solana", "symbol": "DEV"},
+            "focused_component": "row:1",
+            "page_data": {"temperature": 24},
+        }
+    )
+    assert snapshot is not None
+    assert snapshot.selected is not None
+    assert snapshot.selected.token_id == "Device111-solana"
+    assert snapshot.focused_component == "row:1"
+
+    event = InputEvent.from_dict(
+        {
+            "type": "input_event",
+            "source": "joystick",
+            "kind": "move",
+            "code": "right",
+            "semantic_action": "feed_next",
+            "context": snapshot.to_dict(),
+        }
+    )
+    assert event is not None
+    assert event.semantic_action == "feed_next"
+    assert event.context and event.context.screen == "sensor_panel"
+
+    msg = DeviceMessage.from_dict(event.to_dict() | {"type": "input_event"})
+    assert msg.type == "input_event"
+    assert msg.context is not None

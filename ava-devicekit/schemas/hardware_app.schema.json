@@ -3,47 +3,137 @@
   "$id": "https://ava-devicekit.dev/schemas/hardware_app.schema.json",
   "title": "Ava DeviceKit Hardware App Manifest",
   "type": "object",
-  "required": ["app_id", "name", "chain", "device", "screens", "actions", "adapters", "safety"],
+  "required": [
+    "app_id",
+    "name",
+    "chain",
+    "device",
+    "screens",
+    "actions",
+    "adapters",
+    "safety"
+  ],
   "properties": {
-    "schema": { "type": "string" },
-    "app_id": { "type": "string" },
-    "name": { "type": "string" },
-    "description": { "type": "string" },
-    "chain": { "type": "string" },
+    "schema": {
+      "type": "string"
+    },
+    "app_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "chain": {
+      "type": "string"
+    },
     "device": {
       "type": "object",
-      "required": ["target", "display", "inputs", "outputs"],
+      "required": [
+        "target",
+        "display",
+        "inputs",
+        "outputs"
+      ],
       "properties": {
-        "target": { "type": "string" },
-        "reference_board": { "type": "string" },
-        "display": { "type": "string" },
-        "inputs": { "type": "array", "items": { "type": "string" } },
-        "outputs": { "type": "array", "items": { "type": "string" } }
+        "target": {
+          "type": "string"
+        },
+        "reference_board": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": true
     },
     "adapters": {
       "type": "object",
-      "required": ["chain"],
+      "required": [
+        "chain"
+      ],
       "properties": {
-        "chain": { "type": "string" },
-        "model": { "type": "string" },
-        "transport": { "type": "string" }
+        "chain": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     },
-    "models": { "type": "object", "additionalProperties": true },
-    "screens": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-    "actions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "models": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "screens": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
     "safety": {
       "type": "object",
-      "required": ["custody_mode", "requires_physical_confirmation", "primary_asset_keys_on_esp32"],
+      "required": [
+        "custody_mode",
+        "requires_physical_confirmation",
+        "primary_asset_keys_on_esp32"
+      ],
       "properties": {
-        "custody_mode": { "type": "string" },
-        "primary_asset_keys_on_esp32": { "type": "boolean" },
-        "requires_physical_confirmation": { "type": "array", "items": { "type": "string" } }
+        "custody_mode": {
+          "type": "string"
+        },
+        "primary_asset_keys_on_esp32": {
+          "type": "boolean"
+        },
+        "requires_physical_confirmation": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": true
+    },
+    "screen_contracts": {
+      "type": "array",
+      "items": {
+        "$ref": "screen_contract.schema.json"
+      },
+      "description": "Optional explicit screen payload/context/action contracts."
+    },
+    "input_events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional hardware-agnostic input event names emitted by this app or board port."
     }
   },
   "additionalProperties": true

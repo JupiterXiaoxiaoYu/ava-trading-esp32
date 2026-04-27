@@ -141,6 +141,30 @@ def test_legacy_screen_context_token_is_treated_as_selected():
     assert reply["screen"] == "confirm"
     assert reply["action_draft"]["summary"]["symbol"] == "SOL"
 
+
+def test_generic_input_event_routes_semantic_action_with_context():
+    session = create_device_session(mock=True)
+    reply = session.handle(
+        {
+            "type": "input_event",
+            "source": "joystick",
+            "kind": "press",
+            "code": "a",
+            "semantic_action": "buy",
+            "context": {
+                "screen": "spotlight",
+                "selected": {
+                    "token_id": "So11111111111111111111111111111111111111112-solana",
+                    "addr": "So11111111111111111111111111111111111111112",
+                    "chain": "solana",
+                    "symbol": "SOL",
+                },
+            },
+        }
+    )
+    assert reply["screen"] == "confirm"
+    assert reply["action_draft"]["summary"]["symbol"] == "SOL"
+
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 

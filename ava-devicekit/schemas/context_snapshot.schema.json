@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/context_snapshot.schema.json",
+  "title": "Ava DeviceKit Context Snapshot",
+  "type": "object",
+  "required": ["screen"],
+  "properties": {
+    "screen": { "type": "string", "minLength": 1 },
+    "cursor": { "type": ["integer", "null"] },
+    "selected": { "type": "object", "additionalProperties": true },
+    "token": { "type": "object", "additionalProperties": true },
+    "visible_rows": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "focused_component": { "type": "string" },
+    "page_data": { "type": "object", "additionalProperties": true },
+    "state": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

@@ -24,6 +24,27 @@
       "description": "Defines display payloads that firmware or simulator screens can render."
     },
     {
+      "id": "input_events",
+      "name": "Hardware-Agnostic Input Events",
+      "path": "schemas/input_event.schema.json",
+      "user_action": "emit_or_route",
+      "description": "Represents buttons, joystick, touch, encoder, and other hardware interactions with optional semantic actions."
+    },
+    {
+      "id": "context_snapshots",
+      "name": "Context Snapshot Contract",
+      "path": "schemas/context_snapshot.schema.json",
+      "user_action": "emit",
+      "description": "Lets pages expose screen, cursor, selected item, visible rows, focused component, and page data to AI and deterministic routing."
+    },
+    {
+      "id": "screen_contracts",
+      "name": "Generic Screen Contracts",
+      "path": "schemas/screen_contract.schema.json",
+      "user_action": "declare",
+      "description": "Declares custom page payload schemas, AI context schemas, and accepted app actions."
+    },
+    {
       "id": "action_drafts",
       "name": "Action Draft Contract",
       "path": "schemas/action_draft.schema.json",
@@ -183,6 +204,7 @@
       "template": "userland/hardware_port/",
       "developer_implements": [
         "GPIO/input mapping",
+        "InputEvent emission",
         "transport send",
         "network events",
         "audio hooks",
@@ -194,9 +216,10 @@
       "interface": "shared_ui/include/ava_devicekit_ui.h",
       "template": "userland/ui/",
       "developer_implements": [
+        "screen contracts",
         "screen vtables",
         "LVGL/layout rendering",
-        "selection context JSON"
+        "context snapshot JSON"
       ]
     },
     {
@@ -233,6 +256,13 @@
       "template": "userland/hardware_port/templates/",
       "user_action": "implement",
       "description": "Map a concrete ESP32 board to DeviceKit transport, input, audio, and display callbacks."
+    },
+    {
+      "id": "input_event_mapper",
+      "interface": "shared_ui/include/ava_devicekit_ui.h::ava_dk_input_event_t",
+      "template": "userland/hardware_port/",
+      "user_action": "implement",
+      "description": "Map concrete hardware controls to generic InputEvent frames and optional app-level semantic actions."
     }
   ],
   "reference_implementations": [

@@ -3,17 +3,32 @@
   "$id": "https://ava-devicekit.dev/schemas/screen_payload.schema.json",
   "title": "Ava DeviceKit Screen Payload",
   "type": "object",
-  "required": ["type", "screen", "data"],
+  "required": [
+    "type",
+    "screen",
+    "data"
+  ],
   "properties": {
-    "type": { "const": "display" },
+    "type": {
+      "const": "display"
+    },
     "screen": {
       "type": "string",
-      "enum": ["feed", "browse", "spotlight", "portfolio", "confirm", "limit_confirm", "result", "notify", "disambiguation"]
+      "minLength": 1,
+      "description": "Screen id declared by the app manifest or registered as a custom screen."
     },
-    "data": { "type": "object" },
-    "context": { "type": "object" },
-    "action_draft": { "type": "object" },
-    "action_result": { "type": "object" }
+    "data": {
+      "type": "object"
+    },
+    "context": {
+      "type": "object"
+    },
+    "action_draft": {
+      "type": "object"
+    },
+    "action_result": {
+      "type": "object"
+    }
   },
   "additionalProperties": true
 }

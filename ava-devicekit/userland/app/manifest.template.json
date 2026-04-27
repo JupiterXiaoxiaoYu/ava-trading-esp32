@@ -8,8 +8,14 @@
     "target": "esp32s3",
     "reference_board": "my_board",
     "display": "320x240",
-    "inputs": ["buttons", "microphone"],
-    "outputs": ["display", "speaker"]
+    "inputs": [
+      "buttons",
+      "microphone"
+    ],
+    "outputs": [
+      "display",
+      "speaker"
+    ]
   },
   "adapters": {
     "chain": "solana",
@@ -21,11 +27,63 @@
     "llm": "openai-compatible",
     "tts": "deployment-configured"
   },
-  "screens": ["feed", "detail", "confirm", "result", "notify"],
-  "actions": ["item.feed", "item.detail", "action.confirm", "action.cancel"],
+  "screens": [
+    "feed",
+    "detail",
+    "confirm",
+    "result",
+    "notify",
+    "sensor_panel"
+  ],
+  "actions": [
+    "item.feed",
+    "item.detail",
+    "action.confirm",
+    "action.cancel"
+  ],
   "safety": {
     "custody_mode": "external_wallet_or_backend_draft",
     "primary_asset_keys_on_esp32": false,
-    "requires_physical_confirmation": ["payment.send", "trade.market_draft"]
-  }
+    "requires_physical_confirmation": [
+      "payment.send",
+      "trade.market_draft"
+    ]
+  },
+  "input_events": [
+    "button.press",
+    "joystick.move",
+    "touch.tap",
+    "encoder.rotate"
+  ],
+  "screen_contracts": [
+    {
+      "screen_id": "sensor_panel",
+      "description": "Example custom page. Replace with your app page.",
+      "payload_schema": {
+        "type": "object",
+        "required": [
+          "title",
+          "items"
+        ]
+      },
+      "context_schema": {
+        "type": "object",
+        "required": [
+          "screen"
+        ],
+        "properties": {
+          "selected": {
+            "type": "object"
+          },
+          "visible_rows": {
+            "type": "array"
+          }
+        }
+      },
+      "actions": [
+        "sensor.refresh",
+        "item.detail"
+      ]
+    }
+  ]
 }

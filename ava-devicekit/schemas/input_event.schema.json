@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/input_event.schema.json",
+  "title": "Ava DeviceKit Input Event",
+  "type": "object",
+  "required": ["type", "source", "kind"],
+  "properties": {
+    "type": { "const": "input_event" },
+    "source": { "type": "string", "description": "Hardware origin such as joystick, button, touch, encoder, microphone." },
+    "kind": { "type": "string", "description": "Physical event kind such as press, release, move, tap, rotate." },
+    "code": { "type": "string" },
+    "value": { "type": ["number", "string", "boolean", "null"] },
+    "x": { "type": ["integer", "null"] },
+    "y": { "type": ["integer", "null"] },
+    "semantic_action": { "type": "string", "description": "Optional app-level action such as feed_next or confirm." },
+    "context": { "$ref": "context_snapshot.schema.json" }
+  },
+  "additionalProperties": true
+}

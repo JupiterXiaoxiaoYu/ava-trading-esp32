@@ -5,7 +5,9 @@
 
 static int g_feed_show = 0;
 static int g_confirm_show = 0;
+static int g_custom_show = 0;
 static int g_feed_key = 0;
+static int g_custom_key = 0;
 static int g_cancel_timers = 0;
 static char g_sent[1024];
 
@@ -25,6 +27,18 @@ static void key_feed(ava_dk_key_t key, void *user)
 {
     (void)user;
     if (key == AVA_DK_KEY_A) g_feed_key++;
+}
+
+static void show_custom(const char *json, void *user)
+{
+    (void)user;
+    if (json && strstr(json, "sensor")) g_custom_show++;
+}
+
+static void key_custom(ava_dk_key_t key, void *user)
+{
+    (void)user;
+    if (key == AVA_DK_KEY_RIGHT) g_custom_key++;
 }
 
 static int selection_context(char *out, size_t out_n, void *user)
@@ -64,6 +78,12 @@ int main(void)
     ava_dk_ui_set_transport(&rt, send_json, NULL);
     ava_dk_ui_register_screen(&rt, AVA_DK_SCREEN_FEED, (ava_dk_screen_vtable_t){show_feed, key_feed, selection_context, cancel_timers, NULL});
     ava_dk_ui_register_screen(&rt, AVA_DK_SCREEN_CONFIRM, (ava_dk_screen_vtable_t){show_confirm, NULL, NULL, cancel_timers, NULL});
+    failures += expect(
+        ava_dk_ui_register_custom_screen(
+            &rt,
+            (ava_dk_screen_contract_t){"sensor_panel", "Sensor demo", "{}", "{\"selected\":{}}", "sensor.refresh"},
+            (ava_dk_screen_vtable_t){show_custom, key_custom, selection_context, cancel_timers, NULL}) == 1,
+        "custom screen registered");
 
     failures += expect(ava_dk_ui_screen_from_name("spotlight") == AVA_DK_SCREEN_SPOTLIGHT, "screen mapping");
     failures += expect(ava_dk_ui_handle_display_json(&rt, "{\"type\":\"display\",\"screen\":\"feed\",\"data\":{\"tokens\":[{\"symbol\":\"BONK\"}]}}") == 1, "feed display handled");
@@ -75,8 +95,21 @@ int main(void)
     failures += expect(ava_dk_ui_handle_display_json(&rt, "{\"type\":\"display\",\"screen\":\"confirm\",\"data\":{\"trade_id\":\"t1\"}}") == 1, "confirm display handled");
     failures += expect(g_confirm_show == 1 && ava_dk_ui_current_screen(&rt) == AVA_DK_SCREEN_CONFIRM, "confirm current");
     failures += expect(g_cancel_timers > 0, "transition cancels timers");
+    failures += expect(ava_dk_ui_handle_display_json(&rt, "{\"type\":\"display\",\"screen\":\"sensor_panel\",\"data\":{\"title\":\"sensor\"}}") == 1, "custom display handled");
+    failures += expect(g_custom_show == 1 && strcmp(ava_dk_ui_current_screen_name(&rt), "sensor_panel") == 0, "custom current name");
+    failures += expect(ava_dk_ui_key_press(&rt, AVA_DK_KEY_RIGHT) == 1 && g_custom_key == 1, "custom key routed");
     failures += expect(ava_dk_ui_build_key_action_json("buy", "\"token_id\":\"abc-solana\"", msg, sizeof(msg)) == 1 && strstr(msg, "token_id") != NULL, "build key action");
     failures += expect(ava_dk_ui_build_listen_detect_json("hello Ava", "{\"screen\":\"feed\"}", msg, sizeof(msg)) == 1 && strstr(msg, "hello Ava") != NULL, "build listen detect");
+    failures += expect(
+        ava_dk_ui_build_input_event_json(
+            &(ava_dk_input_event_t){"joystick", "move", "right", "feed_next", 1, 1, 0},
+            "{\"screen\":\"feed\"}",
+            msg,
+            sizeof(msg)) == 1 &&
+            strstr(msg, "\"type\":\"input_event\"") != NULL &&
+            strstr(msg, "\"semantic_action\":\"feed_next\"") != NULL &&
+            strstr(msg, "\"context\":{\"screen\":\"feed\"}") != NULL,
+        "build input event");
 
     return failures ? 1 : 0;
 }

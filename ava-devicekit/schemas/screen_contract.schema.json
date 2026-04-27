@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/screen_contract.schema.json",
+  "title": "Ava DeviceKit Screen Contract",
+  "type": "object",
+  "required": ["screen_id"],
+  "properties": {
+    "screen_id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "payload_schema": { "type": "object", "additionalProperties": true },
+    "context_schema": { "type": "object", "additionalProperties": true },
+    "actions": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

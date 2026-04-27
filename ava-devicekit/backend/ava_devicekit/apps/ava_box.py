@@ -8,6 +8,7 @@ from ava_devicekit.adapters.base import ChainAdapter
 from ava_devicekit.adapters.solana import SolanaAdapter
 from ava_devicekit.apps.ava_box_skills import AvaBoxSkillService
 from ava_devicekit.core.manifest import HardwareAppManifest
+from ava_devicekit.core.contracts import InputEvent
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, DeviceMessage, ScreenPayload, Selection
 from ava_devicekit.screen import builders
 from ava_devicekit.streams.base import MarketStreamEvent
@@ -56,6 +57,11 @@ class AvaBoxApp:
         if msg.type == "screen_context":
             self._ingest_context(msg.payload)
             return builders.notify("Context", "updated", level="info", context=self.context)
+        if msg.type == "input_event":
+            payload = dict(msg.payload)
+            if msg.action and "semantic_action" not in payload:
+                payload["semantic_action"] = msg.action
+            return self._route_input_event(payload, msg.context)
         if msg.type == "confirm":
             return self._confirm(msg)
         if msg.type == "cancel":
@@ -67,6 +73,15 @@ class AvaBoxApp:
         if msg.type == "key_action":
             return self._route_key(msg.action, msg.payload)
         return builders.notify("Unsupported", msg.type, level="warn", context=self.context)
+
+    def _route_input_event(self, payload: dict[str, Any], context: AppContext | None = None) -> ScreenPayload | ActionDraft | ActionResult:
+        event = InputEvent.from_dict({"payload": payload, "context": context.to_dict() if context else None})
+        if event and event.context:
+            self._ingest_context(event.context.to_dict())
+        action = event.semantic_action if event else ""
+        if action:
+            return self._route_key(action, {**payload, "input_source": event.source if event else "", "input_kind": event.kind if event else ""})
+        return builders.notify("Input", "Event received", level="info", context=self.context)
 
     def _route_key(self, action: str, payload: dict[str, Any]) -> ScreenPayload | ActionDraft | ActionResult:
         action = str(action or "").strip().lower()

@@ -26,3 +26,18 @@ Keep these concerns separate:
 | Physical confirmation requirements | `ActionDraft` + app confirmation handler |
 | Board buttons, joystick, touch, microphone | Board port |
 | Screen rendering | App UI layer consuming screen payloads |
+
+## Add A Custom Page
+
+| Step | Output |
+|---|---|
+| Declare page | Add the page id to `manifest.json.screens`. |
+| Declare contract | Add a `screen_contracts[]` entry with payload schema, context schema, and accepted actions. |
+| Render page | Register an `ava_dk_screen_vtable_t` with `ava_dk_ui_register_custom_screen()`. |
+| Expose AI context | Implement `selection_context_json()` and return a `ContextSnapshot` with `screen`, `cursor`, `selected`, `visible_rows`, and useful `page_data`. |
+| Handle input | Emit `input_event` for joystick/touch/encoder/buttons, or emit direct `key_action` for fixed semantic actions. |
+| Route backend | In `HardwareApp.handle()`, route `input_event.semantic_action` and `listen_detect` using the normalized context. |
+
+The important rule is that the device must send the current page snapshot with
+voice and meaningful input. That is what allows AI to answer questions about the
+current page and lets deterministic actions avoid stale server-side selection.

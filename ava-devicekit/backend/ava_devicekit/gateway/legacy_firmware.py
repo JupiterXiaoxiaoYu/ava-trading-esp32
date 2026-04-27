@@ -69,6 +69,8 @@ class LegacyFirmwareConnection:
             return [{"type": "pong", "session_id": self.session_id}]
         if msg_type == "key_action":
             return [self.session.handle(_device_message_from_key_action(msg))]
+        if msg_type == "input_event":
+            return [self.session.handle({"type": "input_event", **_message_context(msg), **{k: v for k, v in msg.items() if k not in {"type", "context", "selection"}}})]
         if msg_type == "listen":
             return await self._handle_listen(msg, allow_async_asr=allow_async_asr)
         if msg_type == "confirm":
