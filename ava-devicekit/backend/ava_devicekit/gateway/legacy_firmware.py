@@ -64,7 +64,7 @@ class LegacyFirmwareConnection:
             return [_system_error("invalid_json")]
         msg_type = str(msg.get("type") or "")
         if msg_type == "hello":
-            return [self._hello(msg)]
+            return self._hello(msg)
         if msg_type == "ping":
             return [{"type": "pong", "session_id": self.session_id}]
         if msg_type == "key_action":
@@ -79,19 +79,27 @@ class LegacyFirmwareConnection:
             return [self.session.handle({"type": "signed_tx", **_message_context(msg), **{k: v for k, v in msg.items() if k not in {"type", "context"}}})]
         return [_system_error(f"unsupported:{msg_type or 'empty'}")]
 
-    def _hello(self, msg: dict[str, Any]) -> dict[str, Any]:
+    def _hello(self, msg: dict[str, Any]) -> list[dict[str, Any]]:
         audio_params = msg.get("audio_params")
         if isinstance(audio_params, dict):
             self.audio_params.update(audio_params)
             self.audio.configure(self.audio_params)
-        boot = self.session.boot()
-        return {
+        boot_error = ""
+        try:
+            boot = self.session.boot()
+            boot_screen = str(boot.get("screen") or "")
+        except Exception as exc:
+            boot = _display_notify("Ava Box", f"Boot failed: {exc}", level="error")
+            boot_error = str(exc)
+            boot_screen = str(boot.get("screen") or "notify")
+        hello = {
             "type": "hello",
             "transport": "websocket",
             "session_id": self.session_id,
             "audio_params": self.audio_params,
-            "devicekit": {"app_id": self.session.app.manifest.app_id, "boot_screen": boot.get("screen")},
+            "devicekit": {"app_id": self.session.app.manifest.app_id, "boot_screen": boot_screen, **({"boot_error": boot_error} if boot_error else {})},
         }
+        return [hello, boot]
 
     async def _handle_listen(self, msg: dict[str, Any], *, allow_async_asr: bool) -> list[dict[str, Any]]:
         state = str(msg.get("state") or "")
@@ -152,6 +160,10 @@ def _message_context(msg: dict[str, Any]) -> dict[str, Any]:
 
 def _system_error(message: str) -> dict[str, Any]:
     return {"type": "system", "command": "error", "message": message}
+
+
+def _display_notify(title: str, body: str, *, level: str = "error") -> dict[str, Any]:
+    return {"type": "display", "screen": "notify", "data": {"level": level, "title": title, "body": body}}
 
 
 def _spoken_summary(payload: dict[str, Any]) -> str:

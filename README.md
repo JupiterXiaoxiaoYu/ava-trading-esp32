@@ -52,7 +52,7 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 | `firmware/` | ESP32 firmware runtime, board ports, audio pipeline, OTA, protocols, and device integration |
 | `server/` | Backend stack, management services, action gateway, AI routing/tool logic, deployment docs, and tests |
 | `shared/` | Shared LVGL screens compiled into both firmware and simulator |
-| `simulator/` | Desktop validation harness for shared UI and mock interaction flows |
+| `simulator/` | Desktop validation harness for DeviceKit UI and live gateway interaction flows |
 | `docs/` | Current architecture and product/reference documents |
 | `config/` | Repo-owned shared assets and small configuration artifacts |
 | `data/` | Local runtime data placeholder for non-committed state |
@@ -94,7 +94,7 @@ Key coupling points:
 | `firmware/main/ave_transport_idf.cc` | Bridges device events into the shared screen/runtime layer |
 | `ava-devicekit/backend/ava_devicekit/adapters/base.py` | Adapter interface for chains/helpers |
 | `ava-devicekit/backend/ava_devicekit/adapters/solana.py` | Clean Solana market, watchlist, portfolio, and action draft adapter |
-| `simulator/` | Layout, navigation, mock scene, and regression validation before flashing hardware |
+| `simulator/` | Layout, navigation, gateway, and regression validation before flashing hardware |
 
 ## Safety Position
 

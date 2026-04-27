@@ -11,9 +11,22 @@ def test_legacy_firmware_hello_and_key_action_flow():
     hello = conn.handle_text(json.dumps({"type": "hello", "transport": "websocket", "audio_params": {"sample_rate": 16000}}))
     assert hello[0]["type"] == "hello"
     assert hello[0]["transport"] == "websocket"
+    assert hello[1]["type"] == "display"
+    assert hello[1]["screen"] == "feed"
 
     detail = conn.handle_text(json.dumps({"type": "key_action", "action": "watch"}))
     assert detail[0]["screen"] == "spotlight"
+
+
+def test_legacy_firmware_hello_reports_boot_config_error(monkeypatch):
+    monkeypatch.delenv("AVE_API_KEY", raising=False)
+    conn = LegacyFirmwareConnection(create_device_session())
+    hello = conn.handle_text(json.dumps({"type": "hello", "transport": "websocket"}))
+    assert hello[0]["type"] == "hello"
+    assert hello[0]["devicekit"]["boot_screen"] == "notify"
+    assert "AVE_API_KEY" in hello[0]["devicekit"]["boot_error"]
+    assert hello[1]["type"] == "display"
+    assert hello[1]["screen"] == "notify"
 
 
 def test_legacy_firmware_listen_detect_preserves_selection_context():

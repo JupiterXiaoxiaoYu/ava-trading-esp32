@@ -58,8 +58,11 @@ class SolanaDataClient:
             raise RuntimeError(f"Solana data API {exc.code}: {body}") from exc
 
     def _headers(self) -> dict[str, str]:
+        api_key = os.environ.get(self.config.api_key_env, "")
+        if not api_key:
+            raise RuntimeError(f"missing required environment variable: {self.config.api_key_env}")
         return {
-            "X-API-KEY": os.environ.get(self.config.api_key_env, ""),
+            "X-API-KEY": api_key,
             "Content-Type": "application/json",
         }
 

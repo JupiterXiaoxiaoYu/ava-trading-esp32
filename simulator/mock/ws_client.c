@@ -212,7 +212,7 @@ static void *_recv_thread(void *arg)
         int fd = ws_connect();
         if (fd < 0) {
             if (s_running)
-                printf("[AVE ws] Server offline — mock scenes available (P key)\n");
+                printf("[AVE ws] Server offline — start DeviceKit gateway on 127.0.0.1:8787\n");
             for (int i = 0; i < 3 && s_running; i++) sleep(1);
             continue;
         }
@@ -317,7 +317,7 @@ void ws_client_send_text(const char *text)
         ws_send_frame(fd, msg, strlen(msg));
         printf("[AVE ws] sent: \"%s\"\n", text);
     } else {
-        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --mock\n");
+        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --config userland/runtime.example.json\n");
     }
 }
 
@@ -333,7 +333,7 @@ void ws_client_send_json(const char *json)
         ws_send_frame(fd, json, strlen(json));
         printf("[AVE ws] sent JSON: %.80s\n", json);
     } else {
-        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --mock\n");
+        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --config userland/runtime.example.json\n");
     }
 }
 

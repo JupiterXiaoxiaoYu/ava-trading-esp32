@@ -42,7 +42,8 @@ def default_adapter_registry() -> AdapterRegistry:
 
 
 def _solana_config_from_kwargs(kwargs: dict[str, Any]) -> SolanaAdapterConfig:
+    defaults = SolanaAdapterConfig()
     return SolanaAdapterConfig(
-        data_base=str(kwargs.get("data_base") or SolanaAdapterConfig.data_base),
-        api_key_env=str(kwargs.get("api_key_env") or SolanaAdapterConfig.api_key_env),
+        data_base=str(kwargs.get("data_base") or defaults.data_base),
+        api_key_env=str(kwargs.get("api_key_env") or defaults.api_key_env),
     )

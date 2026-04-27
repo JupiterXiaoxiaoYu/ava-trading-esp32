@@ -117,8 +117,8 @@ The current production firmware can be moved over incrementally by pointing its 
 
 ```bash
 cd ava-devicekit
-PYTHONPATH=backend python3 -m ava_devicekit.gateway.dev_server --host 0.0.0.0 --port 8788 --mock --config runtime.local.json
-PYTHONPATH=backend python3 -m ava_devicekit.gateway.legacy_firmware --host 0.0.0.0 --port 8787 --mock --config runtime.local.json
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 0.0.0.0 --port 8788 --config runtime.local.json
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
 ```
 
 Example runtime config:
@@ -145,12 +145,12 @@ Before migrating more code from the parent repo, review `docs/legacy-capability-
 ```bash
 cd ava-devicekit
 PYTHONPATH=backend python3 examples/demo_flow.py
-PYTHONPATH=backend python3 -m ava_devicekit.gateway.dev_server --host 127.0.0.1 --port 8788 --mock
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 127.0.0.1 --port 8788 --config userland/runtime.example.json
 PYTHONPATH=backend python3 examples/mock_device_client.py --base-url http://127.0.0.1:8788
 PYTHONPATH=backend python3 -m pytest tests
 ```
 
-Use `--adapter solana` for a real data adapter deployment and `--mock` for deterministic offline demos/tests.
+The production path uses `--adapter solana` or the manifest default. Offline fixtures are reserved for tests and must not be used for Ava Box runs.
 
 ## Multi-Device Runtime
 

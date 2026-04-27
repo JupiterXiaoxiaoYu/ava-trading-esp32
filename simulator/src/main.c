@@ -8,8 +8,8 @@
  *  - Same button key codes (arrow keys + literal A/B/X/Y map to hardware keys)
  *
  * Simulator extras (not in firmware):
- *  - Mock JSON scenes loaded from mock/mock_scenes/ (offline fallback)
- *  - P key cycles mock scenes
+ *  - Optional offline scene fixtures when AVA_SIM_ENABLE_FIXTURES=1
+ *  - P key cycles fixture scenes only when fixtures are enabled
  *  - Type text commands in the terminal to bypass ASR and send directly to LLM
  */
 
@@ -69,9 +69,12 @@ int main(int argc, char **argv)
     /* Initialize LVGL screen manager (same code as firmware) */
     ave_sm_init(lv_display_get_default());
 
-    /* Load mock scenes for offline testing (P key cycles them).
-     * When the server sends a real display message it will override these. */
-    ave_sm_mock_start();
+    int fixtures_enabled = 0;
+    const char *fixtures_env = getenv("AVA_SIM_ENABLE_FIXTURES");
+    if (fixtures_env && strcmp(fixtures_env, "1") == 0) {
+        fixtures_enabled = 1;
+        ave_sm_mock_start();
+    }
 
     /* Connect to DeviceKit gateway — identical flow to the ESP32 firmware.
      * Display messages are queued and applied in the main loop below. */
@@ -91,7 +94,7 @@ int main(int argc, char **argv)
      *   A          → AVE_KEY_A       (A button)
      *   B          → AVE_KEY_B       (B button)
      *   F1         → FN/PTT          (voice listen / AI entry)
-     *   P          → next mock scene (simulator only)
+     *   P          → next fixture scene when AVA_SIM_ENABLE_FIXTURES=1
      */
     int prev_left = 0, prev_right = 0, prev_up = 0, prev_down = 0;
     int prev_x = 0, prev_y = 0, prev_a = 0, prev_b = 0, prev_p = 0;
@@ -122,7 +125,7 @@ int main(int argc, char **argv)
         if (cur_y     && !prev_y)     ave_sm_key_press(ave_sim_map_scancode_to_ave_key(SDL_SCANCODE_Y));
         if (cur_a     && !prev_a)     ave_sm_key_press(ave_sim_map_scancode_to_ave_key(SDL_SCANCODE_A));
         if (cur_b     && !prev_b)     ave_sm_key_press(ave_sim_map_scancode_to_ave_key(SDL_SCANCODE_B));
-        if (cur_p     && !prev_p && ave_sim_is_mock_scene_scancode(SDL_SCANCODE_P)) {
+        if (fixtures_enabled && cur_p && !prev_p && ave_sim_is_mock_scene_scancode(SDL_SCANCODE_P)) {
             ave_sm_mock_next_scene();
         }
         if (ave_sim_is_fn_ptt_scancode(SDL_SCANCODE_F1)) {
