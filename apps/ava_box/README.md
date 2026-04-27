@@ -1,6 +1,8 @@
 # Ava Box Reference App
 
-Ava Box is the first reference app for Ava DeviceKit. It demonstrates how an ESP32-S3 handheld can become a Solana AI hardware terminal with screen-grounded voice interaction and physical confirmation.
+Ava Box is the first reference app for Ava DeviceKit. It demonstrates how an
+ESP32-S3 handheld can become a Solana AI hardware terminal with screen-grounded
+voice interaction and physical confirmation.
 
 ## Reference Device
 
@@ -26,12 +28,16 @@ Ava Box is the first reference app for Ava DeviceKit. It demonstrates how an ESP
 
 | Contract | Implementation |
 |---|---|
-| Manifest | `devicekit/manifests/ava_box.solana.json` |
-| Screen payloads | `shared/ave_screens/` |
-| Action gateway | `server/main/xiaozhi-server/plugins_func/functions/ave_tools.py` |
-| Shared helper boundary | `server/main/xiaozhi-server/plugins_func/functions/ava_devicekit.py` |
-| Device runtime bridge | `firmware/main/ave_transport_idf.cc` |
+| Manifest | `ava-devicekit/apps/ava_box/manifest.json` |
+| App routing | `ava-devicekit/backend/ava_devicekit/apps/ava_box.py` |
+| App skills | `ava-devicekit/backend/ava_devicekit/apps/ava_box_skills/` |
+| Chain data | `ava-devicekit/backend/ava_devicekit/adapters/solana.py` |
+| Device gateway | `ava-devicekit/backend/ava_devicekit/gateway/` |
+| Firmware runtime boundary | `ava-devicekit/firmware/` |
+| Shared UI runtime | `ava-devicekit/shared_ui/` |
 
 ## Safety Position
 
-Ava Box is a physical confirmation surface. The app can display Solana action drafts and require button confirmation before execution. It does not require storing a primary user asset key on the ESP32.
+Ava Box is a physical confirmation surface. The app can display Solana action
+drafts and require button confirmation before execution. It does not require
+storing a primary user asset key on the ESP32.

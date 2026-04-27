@@ -36,3 +36,9 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     result = service.confirm_action(draft.request_id, context=context)
     assert result.ok is True
     assert result.screen and result.screen.screen == "result"
+    assert result.data["execution"]["status"] == "confirmed_draft"
+    portfolio_after_trade = service.get_portfolio(context=context)
+    assert portfolio_after_trade.payload["items"][0]["symbol"] == "BONK"
+    orders = service.get_orders(context=context)
+    assert orders.payload["mode"] == "orders"
+    assert orders.payload["items"][0]["symbol"] == "BONK"

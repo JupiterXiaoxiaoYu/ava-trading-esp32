@@ -36,6 +36,9 @@ Ava Box can run through DeviceKit without importing the legacy assistant backend
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
 | legacy firmware compatibility shim | `gateway/legacy_firmware.py` accepts existing firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
 | OTA/settings runtime | `runtime/settings.py` and `ota/` emit the existing firmware OTA contract without importing legacy server code |
+| Model providers | `providers/` defines ASR, LLM, TTS, and voice fallback boundaries |
+| Market streams | `streams/` defines live/polling market update boundaries |
+| Scratch Arcade port | `firmware/ports/scratch_arcade/` maps the reference hardware buttons, OTA path, and WebSocket path |
 
 ## Minimal Flow
 

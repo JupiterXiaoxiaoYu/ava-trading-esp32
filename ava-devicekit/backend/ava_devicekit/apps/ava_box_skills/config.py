@@ -12,3 +12,4 @@ class AvaBoxSkillConfig:
     store_path: str = DEFAULT_STORE
     default_buy_sol: Decimal = Decimal("0.1")
     default_slippage_bps: int = 100
+    execution_mode: str = "paper"

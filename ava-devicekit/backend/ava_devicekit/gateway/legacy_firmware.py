@@ -9,6 +9,7 @@ from typing import Any
 
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
+from ava_devicekit.providers.pipeline import VoicePipeline
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
@@ -20,8 +21,9 @@ class LegacyFirmwareConnection:
     wire shape while routing app behavior through Ava DeviceKit.
     """
 
-    def __init__(self, session: DeviceSession):
+    def __init__(self, session: DeviceSession, voice_pipeline: VoicePipeline | None = None):
         self.session = session
+        self.voice_pipeline = voice_pipeline or VoicePipeline()
         self.session_id = uuid.uuid4().hex
         self.audio_params = {"format": "opus", "sample_rate": 16000, "channels": 1, "frame_duration": 60}
 
@@ -74,10 +76,14 @@ class LegacyFirmwareConnection:
         if state == "detect":
             text = str(msg.get("text") or "")
             result = self.session.handle({"type": "listen_detect", "text": text, **_message_context(msg)})
+            spoken = _spoken_summary(result)
+            if _is_model_fallback(result):
+                reply = self.voice_pipeline.reply(text, context=self.session.app.context)
+                spoken = reply.text
             return [
                 {"type": "stt", "text": text, "session_id": self.session_id},
                 result,
-                {"type": "tts", "state": "sentence_start", "text": _spoken_summary(result), "session_id": self.session_id},
+                {"type": "tts", "state": "sentence_start", "text": spoken, "session_id": self.session_id},
                 {"type": "tts", "state": "stop", "session_id": self.session_id},
             ]
         return []
@@ -114,6 +120,11 @@ def _spoken_summary(payload: dict[str, Any]) -> str:
     if screen == "notify":
         return str(data.get("body") or data.get("title") or "OK")
     return "OK"
+
+
+def _is_model_fallback(payload: dict[str, Any]) -> bool:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    return payload.get("screen") == "notify" and "model fallback" in str(data.get("body") or "").lower()
 
 
 async def run_legacy_firmware_gateway(

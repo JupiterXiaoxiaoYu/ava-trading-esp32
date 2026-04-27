@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig
+from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.apps.ava_box_skills.portfolio import PortfolioSkill
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
 from ava_devicekit.apps.ava_box_skills.watchlist import WatchlistSkill
@@ -23,10 +24,14 @@ class AvaBoxSkillService:
         self.store = JsonStore(self.config.store_path)
         self.watchlist = WatchlistSkill(self.store)
         self.portfolio = PortfolioSkill(self.store)
-        self.trading = TradingSkill(self.config)
+        self.executor = PaperExecutionProvider(self.store) if self.config.execution_mode == "paper" else None
+        self.trading = TradingSkill(self.config, self.executor)
 
     def get_portfolio(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.portfolio.open(context=context)
+
+    def get_orders(self, *, context: AppContext | None = None) -> ScreenPayload:
+        return self.portfolio.orders(context=context)
 
     def get_watchlist(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.watchlist.open(context=context)

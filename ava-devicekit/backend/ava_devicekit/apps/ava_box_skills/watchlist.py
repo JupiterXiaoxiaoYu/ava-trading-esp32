@@ -44,4 +44,4 @@ def token_identity(token: dict[str, Any]) -> dict[str, Any]:
 
 
 def _state(store: JsonStore) -> dict[str, Any]:
-    return store.read({"watchlist": [], "paper_positions": []})
+    return store.read({"watchlist": [], "paper_positions": [], "paper_orders": []})

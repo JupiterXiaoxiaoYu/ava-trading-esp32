@@ -65,7 +65,7 @@ This document is the review checklist before migrating more legacy runtime code 
 | Capability | Legacy source | Proposed decision | DeviceKit target | Notes to confirm |
 |---|---|---|---|---|
 | `plugins_func` registration | `plugins_func/register.py`, registered tool descriptors | `drop` | none | Replace with app actions and adapters |
-| Ava market tools | `plugins_func/functions/ave_tools.py` | `replace` | `SolanaAdapter` for basic chain data; `AvaBoxSkillService` / `apps/ava_box_skills/` for app trading/watchlist/portfolio | Keep framework adapter thin; app owns server skill behavior |
+| Ava market behavior | older market tool implementation | `replace` | `SolanaAdapter` for basic chain data; `AvaBoxSkillService` / `apps/ava_box_skills/` for app trading/watchlist/portfolio | Keep framework adapter thin; app owns server skill behavior |
 | Wallet skill tools | `ave_skill_tools.py` | `replace` | `WalletAdapter` / `PortfolioProvider` | Keep wallet capability, replace tool shape |
 | Paper store | `ave_paper_store.py` | `keep` | `storage/paper_store.py` | Useful for safe demos and hackathon flow |
 | Watchlist store | `ave_watchlist_store.py` | `keep` | `storage/watchlist_store.py` | Keep local JSON store first |

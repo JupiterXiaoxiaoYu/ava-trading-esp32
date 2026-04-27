@@ -93,6 +93,8 @@ class AvaBoxApp:
             return draft
         if action == "portfolio":
             return self._remember_screen(self.skills.get_portfolio(context=self.context))
+        if action in {"orders", "paper_orders"}:
+            return self._remember_screen(self.skills.get_orders(context=self.context))
         if action == "search":
             return self._remember_screen(self.chain_adapter.search_tokens(str(payload.get("keyword") or payload.get("query") or ""), context=self.context))
         if action == "watchlist":
@@ -108,6 +110,8 @@ class AvaBoxApp:
             return builders.notify("Voice", "empty command", level="warn", context=self.context)
         if any(word in normalized for word in ("portfolio", "持仓", "组合")):
             return self._remember_screen(self.skills.get_portfolio(context=self.context))
+        if any(word in normalized for word in ("orders", "订单")):
+            return self._remember_screen(self.skills.get_orders(context=self.context))
         if any(word in normalized for word in ("watchlist", "观察", "收藏列表")):
             return self._remember_screen(self.skills.get_watchlist(context=self.context))
         if any(word in normalized for word in ("search", "find", "搜索", "查找")):

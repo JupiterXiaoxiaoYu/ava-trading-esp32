@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig, SOLANA
+from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext
 from ava_devicekit.screen import builders
 
@@ -17,8 +18,9 @@ class PendingDraft:
 
 
 class TradingSkill:
-    def __init__(self, config: AvaBoxSkillConfig):
+    def __init__(self, config: AvaBoxSkillConfig, executor: PaperExecutionProvider | None = None):
         self.config = config
+        self.executor = executor
         self.pending: dict[str, PendingDraft] = {}
 
     def create_draft(self, action: str, params: dict[str, Any], *, context: AppContext | None = None) -> ActionDraft:
@@ -69,7 +71,7 @@ class TradingSkill:
             request_id=request_id,
             screen=builders.confirm(screen_payload, context=context, limit=is_limit),
         )
-        self.pending[request_id] = PendingDraft(draft=draft, params={**params, "token_id": token_id})
+        self.pending[request_id] = PendingDraft(draft=draft, params={**params, "token_id": token_id, "request_id": request_id})
         return draft
 
     def confirm(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
@@ -78,8 +80,10 @@ class TradingSkill:
             screen = builders.result("No pending action", "The draft expired or was already handled.", ok=False, context=context)
             return ActionResult(False, "pending action not found", screen=screen)
         summary = pending.draft.summary
-        screen = builders.result("Action confirmed", f"{summary.get('action')} {summary.get('symbol')} confirmed as draft.", ok=True, context=context)
-        return ActionResult(True, "confirmed", screen=screen, data=summary)
+        execution = self.executor.execute(summary, pending.params) if self.executor else {}
+        body = f"{summary.get('action')} {summary.get('symbol')} confirmed as {self.config.execution_mode} draft."
+        screen = builders.result("Action confirmed", body, ok=True, context=context)
+        return ActionResult(True, "confirmed", screen=screen, data={**summary, "execution": execution})
 
     def cancel(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
         self.pending.pop(request_id, None)
