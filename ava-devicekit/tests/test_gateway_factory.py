@@ -188,6 +188,27 @@ def test_voice_can_add_selected_token_to_watchlist(tmp_path):
     watchlist = session.handle({"type": "key_action", "action": "watchlist"})
     assert watchlist["data"]["tokens"][0]["symbol"] == "SOL"
 
+
+def test_voice_introduce_selected_token_uses_model_fallback():
+    session = create_device_session(mock=True)
+    reply = session.handle(
+        {
+            "type": "listen_detect",
+            "text": "介绍一下这个币",
+            "context": {
+                "screen": "spotlight",
+                "selected": {
+                    "token_id": "So11111111111111111111111111111111111111112-solana",
+                    "addr": "So11111111111111111111111111111111111111112",
+                    "chain": "solana",
+                    "symbol": "SOL",
+                },
+            },
+        }
+    )
+    assert reply["screen"] == "notify"
+    assert reply["data"]["body"] == "Command routed to model fallback"
+
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 

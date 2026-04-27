@@ -206,7 +206,7 @@ class AvaBoxApp:
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
-        if any(word in normalized for word in ("detail", "介绍", "详情")):
+        if any(word in normalized for word in ("detail", "详情", "打开详情", "进入详情")):
             return self._remember_screen(self.chain_adapter.get_token_detail(self._selected_token_id(), context=self.context))
         return builders.notify("Ava", "Command routed to model fallback", level="info", context=self.context)
 
