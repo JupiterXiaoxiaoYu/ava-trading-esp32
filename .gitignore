@@ -39,3 +39,6 @@ Thumbs.db
 firmware/managed_components/
 firmware/releases/
 server/data/
+
+# DeviceKit local runtime state
+data/ava_box_app_state.json
