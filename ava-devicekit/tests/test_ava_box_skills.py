@@ -78,3 +78,20 @@ def test_ave_solana_trade_provider_builds_external_signing_payload(monkeypatch):
     response = provider.create_solana_tx(payload)
     assert captured["url"].endswith("/v1/thirdParty/chainWallet/createSolanaTx")
     assert response["tx"] == "unsigned"
+
+from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
+
+
+class _SignedExecutor:
+    def execute(self, summary, params):
+        return {"status": "transaction_created", "request_id": params["request_id"]}
+
+    def send_signed_solana_tx(self, request_id, signed_tx):
+        return {"ok": True, "request_id": request_id, "signed_tx": signed_tx}
+
+
+def test_trading_skill_submits_signed_transaction_with_external_executor():
+    skill = TradingSkill(AvaBoxSkillConfig(execution_mode="ave_solana"), _SignedExecutor())
+    result = skill.submit_signed("r1", "signed-payload")
+    assert result.ok is True
+    assert result.data["response"]["signed_tx"] == "signed-payload"

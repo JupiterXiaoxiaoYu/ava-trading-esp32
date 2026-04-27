@@ -32,6 +32,8 @@ class RuntimeSettings:
     timezone_offset_hours: int = DEFAULT_TIMEZONE_OFFSET_HOURS
     websocket_ping_interval: int = DEFAULT_WEBSOCKET_PING_INTERVAL
     websocket_ping_timeout: int = DEFAULT_WEBSOCKET_PING_TIMEOUT
+    audio_decoder_class: str = ""
+    audio_decoder_options: dict[str, Any] = field(default_factory=dict)
     asr_provider: str = "disabled"
     asr_base_url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
     asr_model: str = "qwen3-asr-flash-realtime"
@@ -62,6 +64,7 @@ class RuntimeSettings:
         data = data or {}
         server = data.get("server") if isinstance(data.get("server"), dict) else {}
         providers = data.get("providers") if isinstance(data.get("providers"), dict) else {}
+        audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
         asr = providers.get("asr") if isinstance(providers.get("asr"), dict) else {}
         llm = providers.get("llm") if isinstance(providers.get("llm"), dict) else {}
         tts = providers.get("tts") if isinstance(providers.get("tts"), dict) else {}
@@ -75,6 +78,8 @@ class RuntimeSettings:
             timezone_offset_hours=int(data.get("timezone_offset_hours") or server.get("timezone_offset") or DEFAULT_TIMEZONE_OFFSET_HOURS),
             websocket_ping_interval=int(data.get("websocket_ping_interval") or data.get("websocket_transport_ping_interval") or DEFAULT_WEBSOCKET_PING_INTERVAL),
             websocket_ping_timeout=int(data.get("websocket_ping_timeout") or data.get("websocket_transport_ping_timeout") or DEFAULT_WEBSOCKET_PING_TIMEOUT),
+            audio_decoder_class=str(data.get("audio_decoder_class") or audio.get("decoder_class") or audio.get("decoder") or ""),
+            audio_decoder_options=_provider_options(audio),
             asr_provider=str(data.get("asr_provider") or asr.get("provider") or "disabled"),
             asr_base_url=str(data.get("asr_base_url") or asr.get("base_url") or "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"),
             asr_model=str(data.get("asr_model") or asr.get("model") or "qwen3-asr-flash-realtime"),
@@ -135,6 +140,7 @@ class RuntimeSettings:
                 "llm": {"provider": self.llm_provider, "class": self.llm_class, "model": self.llm_model, "base_url": self.llm_base_url, "api_key_env": self.llm_api_key_env, "options": _sanitize_options(self.llm_options)},
                 "tts": {"provider": self.tts_provider, "class": self.tts_class, "model": self.tts_model, "base_url": self.tts_base_url, "api_key_env": self.tts_api_key_env, "voice": self.tts_voice, "options": _sanitize_options(self.tts_options)},
             },
+            "audio": {"decoder_class": self.audio_decoder_class, "options": _sanitize_options(self.audio_decoder_options)},
         }
 
     def __post_init__(self) -> None:
@@ -144,11 +150,13 @@ class RuntimeSettings:
             self.llm_options = {}
         if self.tts_options is None:
             self.tts_options = {}
+        if self.audio_decoder_options is None:
+            self.audio_decoder_options = {}
 
 
 def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
     options = data.get("options") if isinstance(data.get("options"), dict) else {}
-    reserved = {"provider", "class", "class_path", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format"}
+    reserved = {"provider", "class", "class_path", "decoder", "decoder_class", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format"}
     inline = {k: v for k, v in data.items() if k not in reserved}
     return {**inline, **options}
 

@@ -13,6 +13,7 @@ Ava DeviceKit is the clean framework boundary for ESP32-based Solana AI hardware
 | `examples/` | Runnable local examples and payload fixtures |
 | `firmware/` | Target boundary for clean ESP32 runtime integration |
 | `shared_ui/` | Target boundary for portable LVGL screen runtime |
+| `reference_apps/ava_box/` | Ava Box app-level UI package and product-specific reference assets |
 | `userland/` | Developer-facing configuration templates, capability list, and extension templates |
 
 ## Boundary
@@ -102,6 +103,7 @@ ESP32 input / voice
 | Doc | Purpose |
 |---|---|
 | `docs/framework-vs-avabox.md` | Strict boundary between DeviceKit framework and Ava Box app logic |
+| `docs/completion-status.md` | Current framework/app completion matrix and runtime assumptions |
 | `docs/getting-started.md` | Local install, offline run, runtime provider config, admin APIs |
 | `docs/build-your-first-app.md` | Create and structure a new hardware app |
 | `docs/port-a-board.md` | Port ESP32 boards without baking hardware assumptions into core |

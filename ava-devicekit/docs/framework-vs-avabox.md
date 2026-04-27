@@ -4,16 +4,16 @@ DeviceKit is the reusable framework. Ava Box is the first reference app built on
 
 | Capability | Layer | Implemented In | Notes |
 |---|---|---|---|
-| ASR provider contract and runtime wiring | Framework | `providers/asr`, `providers/registry.py`, `runtime/settings.py` | Qwen realtime provider supports PCM16 session events and optional live transport. OPUS decode remains a deployment/firmware audio hook. |
+| ASR provider contract and runtime wiring | Framework | `providers/asr`, `providers/registry.py`, `runtime/settings.py` | Qwen realtime and OpenAI-compatible ASR providers are selectable. The gateway buffers binary audio, decodes through `AudioDecoder`, and routes ASR transcript into app commands. |
 | TTS provider contract and OpenAI-compatible TTS | Framework | `providers/tts` | Mock remains default for tests; real HTTP TTS is config-driven. |
 | LLM fallback production config | Framework | `providers/llm`, `providers/registry.py`, `providers/pipeline.py` | Deterministic app routing happens before LLM fallback. |
 | Generic gateway, admin, OTA, app session | Framework | `gateway`, `ota`, `runtime` | `/admin/*` endpoints expose capabilities, sanitized runtime, and app manifests. |
 | CLI, package, templates, docs | Framework | `cli.py`, `pyproject.toml`, `userland`, `docs` | Used by app developers and board-port developers. |
 | Chain data adapter interface | Framework | `adapters/base.py` | Limited to feed, search, token detail. |
 | Solana data adapter | Reference adapter | `adapters/solana.py` | Swappable implementation of the generic chain adapter. |
-| Live AVE market WSS | Ava Box/reference integration | `streams/ave_data_wss.py` | Kept out of core app/session contracts. |
+| Live AVE market WSS | Ava Box/reference integration | `streams/ave_data_wss.py` | Kept out of core app/session contracts; runtime can subscribe, cache, and apply price/kline events to Ava Box screens. |
 | Watchlist, portfolio, trading skills | Ava Box app | `apps/ava_box_skills` | Product behavior owned by Ava Box, not DeviceKit core. |
-| Real wallet/trade transaction construction | Ava Box app | `apps/ava_box_skills/execution.py` | ESP32 is the physical confirmation surface; signing/custody stays external. |
+| Real wallet/trade transaction construction | Ava Box app | `apps/ava_box_skills/execution.py` | ESP32 is the physical confirmation surface; transaction creation and signed transaction submission are app-level provider calls, while signing/custody stays external. |
 | Ava Box LVGL screens | Ava Box app/UI userland | `shared_ui/screens` contracts plus app screen C files | Framework owns portable screen contracts; product screens render product payloads. |
 | Scratch Arcade buttons/joystick | Reference board port | `firmware/ports/scratch_arcade` | Core firmware runtime does not mandate input hardware. |
 | Dashboard/app builder | Framework minimum, product extension later | `gateway/http_server.py`, future web UI | Current implementation exposes admin APIs; a full web dashboard can consume them. |

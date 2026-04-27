@@ -2,7 +2,7 @@
 
 ## Services
 
-Run the HTTP gateway and WebSocket gateway behind a reverse proxy:
+Run the HTTP gateway and WebSocket gateway behind a reverse proxy. The WebSocket gateway handles text commands, binary audio buffering, ASR routing, and optional TTS audio frames:
 
 ```bash
 PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 0.0.0.0 --port 8788 --config runtime.local.json

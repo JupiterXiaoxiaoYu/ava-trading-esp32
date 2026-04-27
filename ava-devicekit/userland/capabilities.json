@@ -92,6 +92,27 @@
       "path": "backend/ava_devicekit/cli.py",
       "user_action": "use",
       "description": "Runs gateways, validates config, prints capabilities, and creates app templates."
+    },
+    {
+      "id": "audio_gateway",
+      "name": "Audio Gateway",
+      "path": "backend/ava_devicekit/gateway/audio.py",
+      "user_action": "configure",
+      "description": "Buffers firmware binary audio, decodes to PCM16 through AudioDecoder, and feeds ASR on listen stop."
+    },
+    {
+      "id": "market_stream_runtime",
+      "name": "Market Stream Runtime",
+      "path": "backend/ava_devicekit/streams/runtime.py",
+      "user_action": "use",
+      "description": "Applies stream events to an app session without hardcoding a market data vendor."
+    },
+    {
+      "id": "reference_app_ui",
+      "name": "Reference App UI Package",
+      "path": "reference_apps/ava_box/ui/",
+      "user_action": "replace_or_extend",
+      "description": "Ava Box product LVGL screens live outside DeviceKit core and consume shared screen payload contracts."
     }
   ],
   "extension_points": [

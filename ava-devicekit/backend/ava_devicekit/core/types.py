@@ -65,7 +65,7 @@ class AppContext:
 
 @dataclass(slots=True)
 class DeviceMessage:
-    type: Literal["key_action", "listen_detect", "screen_context", "confirm", "cancel", "heartbeat"]
+    type: Literal["key_action", "listen_detect", "screen_context", "confirm", "cancel", "signed_tx", "heartbeat"]
     app_id: str = "ava_box"
     action: str = ""
     text: str = ""
@@ -75,7 +75,7 @@ class DeviceMessage:
     @classmethod
     def from_dict(cls, data: JsonDict) -> "DeviceMessage":
         msg_type = str(data.get("type") or "heartbeat")
-        if msg_type not in {"key_action", "listen_detect", "screen_context", "confirm", "cancel", "heartbeat"}:
+        if msg_type not in {"key_action", "listen_detect", "screen_context", "confirm", "cancel", "signed_tx", "heartbeat"}:
             msg_type = "heartbeat"
         app_id = str(data.get("app_id") or data.get("app") or "ava_box")
         payload = dict(data.get("payload")) if isinstance(data.get("payload"), dict) else {}

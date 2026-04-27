@@ -10,6 +10,7 @@ from ava_devicekit.apps.ava_box_skills import AvaBoxSkillService
 from ava_devicekit.core.manifest import HardwareAppManifest
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, DeviceMessage, ScreenPayload, Selection
 from ava_devicekit.screen import builders
+from ava_devicekit.streams.base import MarketStreamEvent
 
 DEFAULT_MANIFEST = Path(__file__).resolve().parents[3] / "apps" / "ava_box" / "manifest.json"
 
@@ -59,6 +60,8 @@ class AvaBoxApp:
             return self._confirm(msg)
         if msg.type == "cancel":
             return self._cancel(msg)
+        if msg.type == "signed_tx":
+            return self._submit_signed(msg)
         if msg.type == "listen_detect":
             return self._route_voice(msg.text or str(msg.payload.get("text") or ""))
         if msg.type == "key_action":
@@ -145,6 +148,13 @@ class AvaBoxApp:
             self._remember_screen(result.screen)
         return result
 
+    def _submit_signed(self, msg: DeviceMessage) -> ActionResult:
+        request_id = str(msg.payload.get("request_id") or msg.payload.get("trade_id") or (self.last_draft.request_id if self.last_draft else ""))
+        result = self.skills.submit_signed_action(request_id, str(msg.payload.get("signed_tx") or ""), context=self.context)
+        if result.screen:
+            self._remember_screen(result.screen)
+        return result
+
     def _ingest_context(self, payload: dict[str, Any]) -> None:
         selected_data = payload.get("selected") if isinstance(payload.get("selected"), dict) else {}
         incoming_state = payload.get("state") if isinstance(payload.get("state"), dict) else {}
@@ -211,9 +221,71 @@ class AvaBoxApp:
     def _selected_symbol(self) -> str:
         return self.context.selected.symbol if self.context.selected else "TOKEN"
 
+    def apply_market_events(self, events: list[MarketStreamEvent]) -> ScreenPayload | None:
+        """Apply live market updates to the current screen payload.
+
+        Live streams are app-level behavior: the framework provides stream
+        contracts, while Ava Box decides how price/kline data modifies feed and
+        spotlight screens.
+        """
+
+        if not self.last_screen:
+            return None
+        changed = False
+        payload = dict(self.last_screen.payload)
+        if self.last_screen.screen == "feed":
+            rows = [dict(row) for row in payload.get("tokens", []) if isinstance(row, dict)]
+            changed = _apply_events_to_rows(rows, events)
+            if changed:
+                payload["tokens"] = rows
+        elif self.last_screen.screen == "spotlight":
+            token_id = str(payload.get("token_id") or "")
+            for event in events:
+                if event.token_id == token_id and event.channel == "price":
+                    _apply_price(payload, event.data)
+                    changed = True
+                if event.token_id == token_id and event.channel == "kline":
+                    points = event.data.get("points") or event.data.get("chart")
+                    if isinstance(points, list):
+                        payload["chart"] = points
+                        changed = True
+        if not changed:
+            return None
+        return self._remember_screen(ScreenPayload(self.last_screen.screen, payload, context=self.context))
+
 
 def _optional_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _apply_events_to_rows(rows: list[dict[str, Any]], events: list[MarketStreamEvent]) -> bool:
+    by_token = {event.token_id: event for event in events if event.channel == "price"}
+    changed = False
+    for row in rows:
+        event = by_token.get(str(row.get("token_id") or ""))
+        if event:
+            _apply_price(row, event.data)
+            changed = True
+    return changed
+
+
+def _apply_price(target: dict[str, Any], data: dict[str, Any]) -> None:
+    price = data.get("price") or data.get("current_price_usd") or data.get("price_usd")
+    change = data.get("change_24h") or data.get("token_price_change_24h") or data.get("price_change_24h")
+    if price not in (None, ""):
+        target["price_raw"] = _optional_float(price)
+        target["price"] = str(price) if str(price).startswith("$") else f"${price}"
+    if change not in (None, ""):
+        value = _optional_float(change)
+        target["change_24h"] = str(change) if str(change).endswith("%") else f"{value:+.2f}%"
+        target["change_positive"] = value >= 0
+
+
+def _optional_float(value: Any) -> float:
+    try:
+        return float(str(value).replace("$", "").replace("%", ""))
+    except (TypeError, ValueError):
+        return 0.0

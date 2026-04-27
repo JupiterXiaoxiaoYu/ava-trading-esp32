@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 from ava_devicekit.streams.base import MarketStreamEvent, StreamSubscription
 
@@ -26,13 +26,16 @@ class AveDataWSSAdapter:
 
     config: AveDataWSSConfig = field(default_factory=AveDataWSSConfig)
     subscriptions: list[StreamSubscription] = field(default_factory=list)
+    cached_events: list[MarketStreamEvent] = field(default_factory=list)
     name: str = "ave-data-wss"
 
     def subscribe(self, subscription: StreamSubscription) -> None:
         self.subscriptions.append(subscription)
 
     def snapshot(self) -> list[MarketStreamEvent]:
-        return []
+        events = list(self.cached_events)
+        self.cached_events.clear()
+        return events
 
     def headers(self) -> dict[str, str]:
         api_key = os.environ.get(self.config.api_key_env, "")
@@ -48,6 +51,39 @@ class AveDataWSSAdapter:
     def parse_message(self, message: str | dict[str, Any]) -> list[MarketStreamEvent]:
         data = json.loads(message) if isinstance(message, str) else message
         return parse_ave_wss_message(data)
+
+    def handle_message(self, message: str | dict[str, Any]) -> list[MarketStreamEvent]:
+        events = self.parse_message(message)
+        self.cached_events.extend(events)
+        self.cached_events = self.cached_events[-500:]
+        return events
+
+    async def run_forever(
+        self,
+        on_events: Callable[[list[MarketStreamEvent]], Awaitable[None] | None],
+        *,
+        reconnect_delay_sec: float = 3.0,
+    ) -> None:
+        try:
+            import websockets
+        except ImportError as exc:  # pragma: no cover - optional dependency boundary
+            raise RuntimeError("Install websockets or ava-devicekit[websocket] to use AVE live WSS") from exc
+
+        request_id = 1
+        while True:
+            try:
+                async with websockets.connect(self.config.url, additional_headers=self.headers() or None) as ws:
+                    for sub in self.subscriptions:
+                        await ws.send(self.subscribe_frame(sub, request_id=request_id))
+                        request_id += 1
+                    async for raw in ws:
+                        events = self.handle_message(raw)
+                        if events:
+                            result = on_events(events)
+                            if hasattr(result, "__await__"):
+                                await result  # type: ignore[misc]
+            except Exception:
+                await _sleep(reconnect_delay_sec)
 
 
 def parse_ave_wss_message(data: dict[str, Any]) -> list[MarketStreamEvent]:
@@ -79,3 +115,9 @@ def parse_ave_wss_message(data: dict[str, Any]) -> list[MarketStreamEvent]:
         if token_id:
             events.append(MarketStreamEvent(str(data.get("type") or data.get("channel")), token_id, dict(data)))
     return events
+
+
+async def _sleep(seconds: float) -> None:
+    import asyncio
+
+    await asyncio.sleep(max(0.1, seconds))

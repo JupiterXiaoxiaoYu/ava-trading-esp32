@@ -90,6 +90,15 @@ class TradingSkill:
         screen = builders.result("Action cancelled", "No transaction was executed.", ok=True, context=context)
         return ActionResult(True, "cancelled", screen=screen)
 
+    def submit_signed(self, request_id: str, signed_tx: str, *, context: AppContext | None = None) -> ActionResult:
+        sender = getattr(self.executor, "send_signed_solana_tx", None)
+        if not callable(sender):
+            screen = builders.result("Signing unsupported", "The active execution provider does not submit signed transactions.", ok=False, context=context)
+            return ActionResult(False, "signed transaction submission unsupported", screen=screen)
+        response = sender(request_id, signed_tx)
+        screen = builders.result("Transaction submitted", "Signed transaction was submitted to the execution provider.", ok=True, context=context)
+        return ActionResult(True, "submitted", screen=screen, data={"request_id": request_id, "response": response})
+
 
 def normalize_action(action: str) -> str:
     value = str(action or "").strip().lower()

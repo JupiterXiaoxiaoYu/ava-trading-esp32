@@ -49,6 +49,9 @@ class AvaBoxSkillService:
     def cancel_action(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
         return self.trading.cancel(request_id, context=context)
 
+    def submit_signed_action(self, request_id: str, signed_tx: str, *, context: AppContext | None = None) -> ActionResult:
+        return self.trading.submit_signed(request_id, signed_tx, context=context)
+
     def _create_executor(self):
         mode = self.config.execution_mode.lower()
         if mode == "paper":

@@ -26,6 +26,9 @@ class DeviceSession:
         result = self.app.handle(message)
         return self._emit(result)
 
+    def emit(self, result: ScreenPayload | ActionDraft | ActionResult) -> dict[str, Any]:
+        return self._emit(result)
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "app_id": self.app.manifest.app_id,

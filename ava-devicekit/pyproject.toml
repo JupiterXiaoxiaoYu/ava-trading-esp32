@@ -14,6 +14,7 @@ ava-devicekit = "ava_devicekit.cli:main"
 
 
 [project.optional-dependencies]
+audio = ["opuslib>=3"]
 websocket = ["websockets>=12", "websocket-client>=1.7"]
 dev = ["jsonschema>=4", "pytest>=8"]
 

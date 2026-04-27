@@ -114,9 +114,10 @@ def test_ave_data_wss_builds_frames_and_parses_price_events():
     frame = adapter.subscribe_frame(StreamSubscription("price", ["So111-solana"]), request_id=7)
     assert '"method":"subscribe"' in frame
     assert 'So111-solana' in frame
-    events = adapter.parse_message({"result": {"prices": [{"token_id": "So111-solana", "price": "100"}]}})
+    events = adapter.handle_message({"result": {"prices": [{"token_id": "So111-solana", "price": "100"}]}})
     assert events[0].channel == "price"
     assert events[0].data["price"] == "100"
+    assert adapter.snapshot()[0].token_id == "So111-solana"
 
 
 def test_audio_decoder_boundary_accepts_pcm16_only():
@@ -170,3 +171,19 @@ def test_openai_compatible_asr_posts_wav_transcription(monkeypatch):
     assert b"RIFF" in captured["body"]
     assert "multipart/form-data" in captured["content_type"]
     assert result.text == "hello"
+
+from ava_devicekit.gateway.factory import create_device_session
+from ava_devicekit.streams.base import MarketStreamEvent
+from ava_devicekit.streams.runtime import MarketStreamRuntime
+
+
+def test_market_stream_runtime_updates_current_feed_screen():
+    session = create_device_session(mock=True)
+    session.boot()
+    selected = session.app.context.selected
+    assert selected and selected.token_id
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(session, [MarketStreamEvent("price", selected.token_id, {"price": "999", "change_24h": "1.5"})])
+    assert emitted
+    assert emitted[0]["data"]["tokens"][0]["price"] == "$999"
+    assert emitted[0]["data"]["tokens"][0]["change_24h"] == "+1.50%"

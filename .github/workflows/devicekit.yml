@@ -1,0 +1,28 @@
+name: DeviceKit
+
+on:
+  push:
+    paths:
+      - 'ava-devicekit/**'
+      - '.github/workflows/devicekit.yml'
+  pull_request:
+    paths:
+      - 'ava-devicekit/**'
+      - '.github/workflows/devicekit.yml'
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install -e ava-devicekit[dev]
+      - name: Compile Python
+        run: python -m compileall -q ava-devicekit/backend ava-devicekit/examples ava-devicekit/tests
+      - name: Run tests
+        run: python -m pytest -q ava-devicekit/tests
+      - name: Validate example runtime config
+        run: ava-devicekit validate --config ava-devicekit/userland/runtime.example.json

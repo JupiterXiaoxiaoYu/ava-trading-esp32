@@ -10,7 +10,7 @@ Providers are configured in `RuntimeSettings` or `userland/runtime.example.json`
 | Market stream | `MarketStreamAdapter` | Mock, polling, AVE data WSS reference | `AVE_API_KEY` for AVE WSS |
 | Trade execution | App-level execution provider | Paper, AVE Solana transaction construction | `AVE_API_KEY` for real provider |
 
-ASR audio format is explicit: Qwen realtime provider accepts PCM16. If firmware captures OPUS, the board port or deployment transport must provide an `AudioDecoder` that returns PCM16 before passing chunks into the provider session.
+ASR audio format is explicit: the existing-firmware gateway buffers binary audio between `listen:start` and `listen:stop`, runs it through the configured `AudioDecoder`, calls ASR, and routes the transcript into the app. Qwen realtime and OpenAI-compatible ASR expect PCM16 after decoding. If firmware captures OPUS, set `audio.decoder_class` to `ava_devicekit.providers.asr.audio.OpusLibDecoder` with `opuslib` installed, or to another deployment-provided decoder that returns PCM16.
 
 
 ## Provider Selection In Runtime Config

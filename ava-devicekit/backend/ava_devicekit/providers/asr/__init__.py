@@ -1,4 +1,4 @@
-from ava_devicekit.providers.asr.audio import AudioDecoder, AudioFrame, OpusDecoderPlaceholder, Pcm16PassthroughDecoder
+from ava_devicekit.providers.asr.audio import AudioDecoder, AudioFrame, OpusDecoderPlaceholder, OpusLibDecoder, Pcm16PassthroughDecoder
 from ava_devicekit.providers.asr.base import ASRProvider, ASRResult
 from ava_devicekit.providers.asr.openai_compatible import OpenAICompatibleASRConfig, OpenAICompatibleASRProvider
 from ava_devicekit.providers.asr.qwen_realtime import QwenRealtimeASRConfig, QwenRealtimeASRProvider, QwenRealtimeASRSession
@@ -11,6 +11,7 @@ __all__ = [
     "OpenAICompatibleASRConfig",
     "OpenAICompatibleASRProvider",
     "OpusDecoderPlaceholder",
+    "OpusLibDecoder",
     "Pcm16PassthroughDecoder",
     "QwenRealtimeASRConfig",
     "QwenRealtimeASRProvider",

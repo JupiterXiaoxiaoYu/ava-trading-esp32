@@ -31,5 +31,9 @@
       "format": "opus",
       "api_key_env": "OPENAI_API_KEY"
     }
+  },
+  "audio": {
+    "decoder_class": "",
+    "options": {}
   }
 }
