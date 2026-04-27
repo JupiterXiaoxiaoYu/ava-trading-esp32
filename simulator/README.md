@@ -12,7 +12,7 @@ Use it together with:
 
 - [`../README.md`](../README.md) - monorepo entry point
 - [`../shared/README.md`](../shared/README.md) - why the shared UI layer exists
-- [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - the actual Ava Box pages compiled into this simulator
+- [`../ava-devicekit/reference_apps/ava_box/ui/README.md`](../ava-devicekit/reference_apps/ava_box/ui/README.md) - the actual Ava Box pages compiled into this simulator
 - [`../docs/README.md`](../docs/README.md) - current Ava Box product/reference notes
 
 The upstream LVGL simulator instructions below still apply, but Ava Box contributors should think of this folder primarily as the fastest way to validate UI and navigation changes before flashing hardware.

@@ -72,8 +72,9 @@ target_include_directories(lvgl PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS
 set(MAIN_SOURCES src/mouse_cursor_icon.c src/hal/hal.c src/sim_keymap.c mock/ws_client.c)
 set(MAIN_LIBS lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES})
 
-# ── AVE Xiaozhi shared screens ─────────────────────────────────────────────
-add_subdirectory(${CMAKE_SOURCE_DIR}/../shared/ave_screens
+# -- Ava Box DeviceKit reference UI screens -------------------------------
+set(AVA_BOX_UI_DIR ${CMAKE_SOURCE_DIR}/../ava-devicekit/reference_apps/ava_box/ui)
+add_subdirectory(${AVA_BOX_UI_DIR}
                  ${CMAKE_BINARY_DIR}/shared_ave_screens)
 list(APPEND MAIN_LIBS shared_ave_screens)
 add_compile_definitions(LV_SIMULATOR=1)
@@ -84,7 +85,7 @@ target_include_directories(shared_ave_screens PRIVATE
     ${PROJECT_SOURCE_DIR}/mock
 )
 # Include shared headers
-include_directories(${CMAKE_SOURCE_DIR}/../shared/ave_screens)
+include_directories(${AVA_BOX_UI_DIR})
 
 # Create the main executable, depending on the FreeRTOS option
 if(USE_FREERTOS)
@@ -170,7 +171,7 @@ target_include_directories(verify_simulator_keymap PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/mock
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${AVA_BOX_UI_DIR}
     ${SDL2_INCLUDE_DIRS}
 )
 target_link_libraries(verify_simulator_keymap
@@ -188,7 +189,7 @@ target_include_directories(verify_screenshot_feed PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/mock
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${AVA_BOX_UI_DIR}
     ${SDL2_INCLUDE_DIRS}
 )
 target_link_libraries(verify_screenshot_feed
@@ -202,15 +203,15 @@ endif()
 
 add_executable(verify_p3_5_minimal
     mock/verify_p3_5_minimal.c
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_screen_manager.c
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_json_utils.c
+    ${AVA_BOX_UI_DIR}/ave_screen_manager.c
+    ${AVA_BOX_UI_DIR}/ave_json_utils.c
     mock/ave_screen_harness_support.c
 )
 target_include_directories(verify_p3_5_minimal PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/mock
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${AVA_BOX_UI_DIR}
     ${SDL2_INCLUDE_DIRS}
 )
 if(NOT MSVC)
@@ -219,12 +220,12 @@ endif()
 
 add_executable(verify_price_fmt
     mock/verify_price_fmt.c
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_price_fmt.c
+    ${AVA_BOX_UI_DIR}/ave_price_fmt.c
 )
 target_include_directories(verify_price_fmt PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/mock
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${AVA_BOX_UI_DIR}
 )
 if(NOT MSVC)
     target_link_libraries(verify_price_fmt m)
@@ -232,13 +233,13 @@ endif()
 
 add_executable(verify_misans_font
     mock/verify_misans_font.c
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens/ave_font_provider.c
+    ${AVA_BOX_UI_DIR}/ave_font_provider.c
 )
 target_compile_definitions(verify_misans_font PRIVATE LV_CONF_INCLUDE_SIMPLE LV_SIMULATOR=1)
 target_include_directories(verify_misans_font PRIVATE
     ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/mock
-    ${CMAKE_SOURCE_DIR}/../shared/ave_screens
+    ${AVA_BOX_UI_DIR}
 )
 target_link_libraries(verify_misans_font
     lvgl

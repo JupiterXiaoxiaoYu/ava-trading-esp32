@@ -90,7 +90,7 @@ This document is the review checklist before migrating more legacy runtime code 
 
 | Capability | Legacy source | Proposed decision | DeviceKit target | Notes to confirm |
 |---|---|---|---|---|
-| LVGL feed/spotlight/etc pages | `shared/ave_screens/screen_*.c` | `keep` | `shared_ui` screen vtables | Wrap pages behind `ava_dk_screen_vtable_t` |
+| LVGL feed/spotlight/etc pages | `ava-devicekit/reference_apps/ava_box/ui/screen_*.c` | `keep` | `shared_ui` screen vtables | Treat the Ava Box UI package as the migrated reference implementation and expose only DeviceKit screen contracts to new apps. |
 | Legacy screen manager | `ave_screen_manager.*` | `replace` | `ava_devicekit_ui.*` | New public API already added |
 | JSON helpers | `ave_json_utils.*` | `keep` | `shared_ui/json` | Keep small C helpers, rename to DeviceKit |
 | Font provider | `ave_font_provider.*` | `keep` | `shared_ui/font_provider` | Needed for simulator/hardware visual consistency |

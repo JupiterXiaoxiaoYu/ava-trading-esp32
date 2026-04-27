@@ -196,7 +196,7 @@ class RuntimeSettings:
 
 def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
     options = data.get("options") if isinstance(data.get("options"), dict) else {}
-    reserved = {"provider", "class", "class_path", "decoder", "decoder_class", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format"}
+    reserved = {"provider", "class", "class_path", "decoder", "decoder_class", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format", "options"}
     inline = {k: v for k, v in data.items() if k not in reserved}
     return {**inline, **options}
 

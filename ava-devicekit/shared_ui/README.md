@@ -50,4 +50,4 @@ Physical key
 
 ## Migration From Legacy Screens
 
-The current production LVGL implementation remains in repo-level `shared/ave_screens/`. Migration should wrap each existing screen with an `ava_dk_screen_vtable_t` implementation instead of exposing legacy manager APIs to new apps.
+The production Ava Box LVGL implementation now lives in `ava-devicekit/reference_apps/ava_box/ui/`. New apps should depend on DeviceKit screen contracts and vtables rather than repo-level legacy screen-manager APIs.

@@ -1,6 +1,6 @@
 /**
  * @file ws_client.c
- * @brief Minimal WebSocket client for AVE Xiaozhi simulator.
+ * @brief Minimal WebSocket client for Ava Box simulator.
  *
  * Design:
  *  - Background recv thread: connects, does HTTP upgrade, receives frames.
@@ -26,13 +26,13 @@
 
 /* ── Server coordinates ──────────────────────────────────────────────────── */
 #define WS_HOST "127.0.0.1"
-#define WS_PORT 8000
-#define WS_PATH "/xiaozhi/v1/?device-id=ave-sim&client-id=sim-001"
+#define WS_PORT 8787
+#define WS_PATH "/ava/v1/?device-id=ave-sim&client-id=sim-001"
 
-/* Same hello as the ESP32 firmware sends */
+/* Simulator hello for the DeviceKit legacy-compatible gateway. */
 #define HELLO_MSG \
     "{\"type\":\"hello\",\"version\":3,\"transport\":\"websocket\"," \
-    "\"audio_params\":{\"format\":\"opus\",\"sample_rate\":16000," \
+    "\"audio_params\":{\"format\":\"pcm16\",\"sample_rate\":16000," \
     "\"channels\":1,\"frame_duration\":60}}"
 
 /* ── Thread-safe display-message queue ───────────────────────────────────── */
@@ -317,7 +317,7 @@ void ws_client_send_text(const char *text)
         ws_send_frame(fd, msg, strlen(msg));
         printf("[AVE ws] sent: \"%s\"\n", text);
     } else {
-        printf("[AVE ws] not connected — start server: cd server && python app.py\n");
+        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --mock\n");
     }
 }
 
@@ -333,7 +333,7 @@ void ws_client_send_json(const char *json)
         ws_send_frame(fd, json, strlen(json));
         printf("[AVE ws] sent JSON: %.80s\n", json);
     } else {
-        printf("[AVE ws] not connected — start server: cd server && python app.py\n");
+        printf("[AVE ws] not connected — start server: cd ava-devicekit && PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --mock\n");
     }
 }
 

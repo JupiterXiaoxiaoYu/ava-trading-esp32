@@ -1,10 +1,10 @@
 /**
  * @file main.c
- * AVE Xiaozhi PC simulator entry point.
+ * Ava Box PC simulator entry point.
  *
  * Mirrors the ESP32 firmware:
- *  - Same LVGL screens via shared/ave_screens
- *  - Same WebSocket protocol to the xiaozhi server
+ *  - Same LVGL screens via ava-devicekit/reference_apps/ava_box/ui
+ *  - Same WebSocket protocol to the DeviceKit gateway
  *  - Same button key codes (arrow keys + literal A/B/X/Y map to hardware keys)
  *
  * Simulator extras (not in firmware):
@@ -73,7 +73,7 @@ int main(int argc, char **argv)
      * When the server sends a real display message it will override these. */
     ave_sm_mock_start();
 
-    /* Connect to xiaozhi server — identical flow to the ESP32 firmware.
+    /* Connect to DeviceKit gateway — identical flow to the ESP32 firmware.
      * Display messages are queued and applied in the main loop below. */
     ws_client_start();
 

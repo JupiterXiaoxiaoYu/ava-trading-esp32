@@ -21,7 +21,7 @@ For Ava Box contributors, the most important navigation paths are:
 - [`../README.md`](../README.md) - monorepo entry point
 - [`main/README.md`](main/README.md) - ESP32 runtime internals and board integration map
 - [`../shared/README.md`](../shared/README.md) - shared cross-target Ava Box UI layer
-- [`../shared/ave_screens/README.md`](../shared/ave_screens/README.md) - screen implementations used by both device and simulator
+- [`../ava-devicekit/reference_apps/ava_box/ui/README.md`](../ava-devicekit/reference_apps/ava_box/ui/README.md) - screen implementations used by both device and simulator
 - [`../simulator/README.md`](../simulator/README.md) - desktop validation path before flashing hardware
 
 The currently active Ava Box hardware work in this repo centers on the Scratch Arcade style ESP32-S3 build, while the rest of this directory preserves the broader upstream firmware capabilities.

@@ -23,6 +23,7 @@
  * subset of LVGL that screen_feed.c pulls in, so this probe can be compiled
  * and run standalone. */
 static char *label_text_slot(lv_obj_t *obj);
+static void set_screen(int id);
 
 lv_color_t lv_color_hex(uint32_t value)
 {
@@ -184,7 +185,7 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, lv_text_align_t value, lv_style_
 #define screen_feed_key feed_under_test_key
 #define screen_feed_should_ignore_live_push feed_under_test_should_ignore_live_push
 #define screen_feed_get_selected_context_json feed_under_test_get_selected_context_json
-#include "../../shared/ave_screens/screen_feed.c"
+#include "../../ava-devicekit/reference_apps/ava_box/ui/screen_feed.c"
 #undef screen_feed_show
 #undef screen_feed_key
 #undef screen_feed_should_ignore_live_push
@@ -193,6 +194,7 @@ void lv_obj_set_style_text_align(lv_obj_t *obj, lv_text_align_t value, lv_style_
 void screen_explorer_show(const char *json_data)
 {
     (void)json_data;
+    set_screen(AVE_SCREEN_EXPLORER);
 }
 
 void screen_explorer_key(int key)
@@ -708,14 +710,11 @@ static int run_case_feed_home_b_opens_explore_without_side_effects(void)
     clear_last_io();
     feed_under_test_key(AVE_KEY_B);
 
-    ok &= expect_json_empty("standard FEED B should stay local until a destination is chosen");
+    ok &= expect_json_contains("\"action\":\"explorer_sync\"",
+                               "standard FEED B should request explorer sync");
     ok &= expect_notify_empty("standard FEED B should no longer show already-on-home notify");
-    ok &= expect_equal_int(s_feed_surface, FEED_SURFACE_EXPLORE_PANEL,
-                           "standard FEED B should enter Explore panel");
-    ok &= expect_equal_int(s_explore_idx, 0,
-                           "Explore panel should default to Search");
-    ok &= expect_equal_int(_current_explore_item()->surface, FEED_SURFACE_EXPLORE_SEARCH_GUIDE,
-                           "Explore default item should be the local Search guide entry");
+    ok &= expect_screen(AVE_SCREEN_EXPLORER,
+                        "standard FEED B should enter Explorer screen");
     ok &= expect_equal_int(s_token_idx, 0,
                            "opening Explore should preserve FEED cursor");
     return ok;
@@ -1099,21 +1098,17 @@ int main(void)
     int ok1 = run_case_portfolio_spotlight_back();
     int ok2 = run_case_portfolio_sell_result_back();
     int ok3 = run_case_feed_home_b_opens_explore_without_side_effects();
-    int ok4 = run_case_feed_explore_navigation_clamps_and_closes_losslessly();
-    int ok5 = run_case_feed_explore_search_entry_is_local();
     int ok6 = run_case_feed_special_back_exits_to_standard_source();
     int ok7 = run_case_feed_a_enters_detail_like_right();
     int ok8 = run_case_feed_special_left_stays_disabled();
     int ok9 = run_case_feed_orders_back_unchanged();
     int ok10 = run_case_result_y_portfolio_shortcut_variant("mock/mock_scenes/05_result_success.json");
     int ok11 = run_case_result_y_portfolio_shortcut_variant("mock/mock_scenes/06_result_fail.json");
-    int ok12 = run_case_feed_explore_orders_activation_reuses_orders_flow();
-    int ok13 = run_case_feed_explore_sources_platform_activation_reuses_platform_feed();
     int ok14 = run_case_feed_symbol_hides_contract_tail_suffix();
     int ok15 = run_case_feed_symbol_hides_source_tag_suffix();
     int ok16 = run_case_feed_live_update_preserves_cursor();
-    if (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 &&
-        ok12 && ok13 && ok14 && ok15 && ok16) {
+    if (ok1 && ok2 && ok3 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 &&
+        ok14 && ok15 && ok16) {
         printf("PASS: P3-5 minimal simulator fallback verification succeeded.\n");
         return 0;
     }

@@ -1,8 +1,8 @@
 /**
  * @file ws_client.h
- * @brief WebSocket client for AVE Xiaozhi simulator.
+ * @brief WebSocket client for Ava Box simulator.
  *
- * Mirrors the hardware ESP32 WebSocket connection to the xiaozhi server.
+ * Mirrors the hardware ESP32 WebSocket connection to the DeviceKit gateway.
  * Receives {"type":"display",...} messages and routes them to the screen
  * manager — identical to what the firmware does over its WSS connection.
  *

@@ -25,7 +25,7 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 | Layer | Role | Current code |
 |---|---|---|
 | Device Runtime | ESP32 firmware boundary, device messages, transport, future clean board ports | `ava-devicekit/firmware/`, legacy reference in `firmware/` |
-| Screen Contracts | Framework screen payload schema and portable LVGL target | `ava-devicekit/schemas/`, `ava-devicekit/shared_ui/`, legacy reference in `shared/ave_screens/` |
+| Screen Contracts | Framework screen payload schema and portable LVGL target | `ava-devicekit/schemas/`, `ava-devicekit/shared_ui/`, reference UI in `ava-devicekit/reference_apps/ava_box/ui/` |
 | Solana Action Gateway | Clean `ChainAdapter` plus Solana feed/search/detail/watchlist/draft implementation | `ava-devicekit/backend/ava_devicekit/adapters/solana.py` |
 | AI Router | Vendor-neutral model routing policy and app-level deterministic routing | `ava-devicekit/backend/ava_devicekit/model/`, `ava-devicekit/backend/ava_devicekit/apps/ava_box.py` |
 | DeviceKit Contracts | Clean manifests, schemas, examples, safety model, reference app metadata | `ava-devicekit/` |
@@ -66,10 +66,10 @@ Ava is the product IP and on-device operator persona for Ava hardware apps: voic
 | Review Ava Box as reference app | [`ava-devicekit/apps/ava_box/manifest.json`](ava-devicekit/apps/ava_box/manifest.json), [`ava-devicekit/backend/ava_devicekit/apps/ava_box.py`](ava-devicekit/backend/ava_devicekit/apps/ava_box.py) |
 | Bring up ESP32 runtime | [`firmware/README.md`](firmware/README.md), [`firmware/main/README.md`](firmware/main/README.md) |
 | Work on Solana backend behavior | [`server/README_en.md`](server/README_en.md), [`server/main/README_en.md`](server/main/README_en.md) |
-| Preview pages on desktop | [`simulator/README.md`](simulator/README.md), [`shared/ave_screens/README.md`](shared/ave_screens/README.md) |
+| Preview pages on desktop | [`simulator/README.md`](simulator/README.md), [`ava-devicekit/reference_apps/ava_box/ui/README.md`](ava-devicekit/reference_apps/ava_box/ui/README.md) |
 | Understand shared UI contracts | [`shared/README.md`](shared/README.md) |
 | Read architecture notes | [`docs/README.md`](docs/README.md), [`docs/architecture/xiaozhi-extraction.md`](docs/architecture/xiaozhi-extraction.md) |
-| Confirm legacy capability decisions | [`ava-devicekit/docs/xiaozhi-capability-inventory.md`](ava-devicekit/docs/xiaozhi-capability-inventory.md) |
+| Confirm legacy capability decisions | [`ava-devicekit/docs/legacy-capability-inventory.md`](ava-devicekit/docs/legacy-capability-inventory.md) |
 
 ## Architecture At A Glance
 
@@ -79,7 +79,7 @@ voice + physical input
   -> ava-devicekit/backend (AvaBoxApp, session gateway, model router)
   -> ChainAdapter(SolanaAdapter first, future adapters later)
   -> ScreenPayload / ActionDraft contracts
-       -> current LVGL reference in shared/ave_screens
+       -> current LVGL reference in ava-devicekit/reference_apps/ava_box/ui
        -> future clean runtime in ava-devicekit/shared_ui
 ```
 
@@ -89,7 +89,7 @@ Key coupling points:
 |---|---|
 | `ava-devicekit/apps/ava_box/manifest.json` | Reference app identity, device capabilities, adapters, actions, screens, and safety policy |
 | `ava-devicekit/schemas/` | Stable framework contracts for hardware app, action draft, and screen payloads |
-| `shared/ave_screens/` | Single source of truth for the current Ava Box screen layer |
+| `ava-devicekit/reference_apps/ava_box/ui/` | Single source of truth for the current Ava Box screen layer used by simulator and firmware |
 | `firmware/main/boards/scratch-arcade/` | Active Scratch Arcade ESP32-S3 hardware target |
 | `firmware/main/ave_transport_idf.cc` | Bridges device events into the shared screen/runtime layer |
 | `ava-devicekit/backend/ava_devicekit/adapters/base.py` | Adapter interface for chains/helpers |

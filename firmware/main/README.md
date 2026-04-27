@@ -46,7 +46,7 @@ Firmware-packaged locales, fonts, and other user-facing assets.
 
 ## How this folder fits into AVE
 
-- Receives backend and user events, then forwards Ava Box display data into [`../../shared/ave_screens/README.md`](../../shared/ave_screens/README.md)
+- Receives backend and user events, then forwards Ava Box display data into [`../../ava-devicekit/reference_apps/ava_box/ui/README.md`](../../ava-devicekit/reference_apps/ava_box/ui/README.md)
 - Hosts the board-level code needed to run the shared screens on real hardware
 - Owns hardware concerns that the simulator does not: I/O, power, transport, wake word, and peripherals
 
