@@ -60,6 +60,7 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     history = service.get_history(context=context)
     assert history.payload["source_label"] == "PAPER HISTORY"
     assert history.payload["tokens"][0]["symbol"] == "BONK"
+    assert history.payload["tokens"][0]["volume_24h"] == "MARKET"
 
     limit = service.create_action_draft("limit", {"limit_price": "0.00001"}, context=context)
     limit_result = service.confirm_action(limit.request_id, context=context)
@@ -69,6 +70,7 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert orders.payload["tokens"][0]["symbol"] == "BONK"
     assert orders.payload["tokens"][0]["change_24h"] == "paper_open"
     assert orders.payload["tokens"][0]["price"] == "0.00001"
+    assert orders.payload["tokens"][0]["volume_24h"] == "LIMIT"
     assert service.get_portfolio(context=context).payload["pnl_reason"] == "Cash: 0.8 SOL"
     filled = service.fill_paper_limits({"Bonk111111111111111111111111111111111111111-solana": "0.000009"})
     assert len(filled) == 1
@@ -76,6 +78,7 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert filled[0]["fill_price_usd"] == "0.000009"
     assert service.get_orders(context=context).payload["tokens"][0]["symbol"] == "ORDERS"
     assert service.get_history(context=context).payload["tokens"][0]["change_24h"] == "paper_filled"
+    assert service.get_history(context=context).payload["tokens"][0]["volume_24h"] == "LIMIT"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
@@ -344,12 +347,16 @@ def test_skill_service_separates_paper_and_real_order_sources(monkeypatch, tmp_p
 
     assert paper.payload["source_label"] == "PAPER ORDERS"
     assert paper.payload["tokens"][0]["symbol"] == "SOL"
+    assert paper.payload["tokens"][0]["volume_24h"] == "LIMIT"
     assert paper_history.payload["source_label"] == "PAPER HISTORY"
     assert paper_history.payload["tokens"][0]["change_24h"] == "paper_filled"
+    assert paper_history.payload["tokens"][0]["volume_24h"] == "MARKET"
     assert real.payload["source_label"] == "REAL ORDERS"
     assert real.payload["tokens"][0]["symbol"] == "REAL"
+    assert real.payload["tokens"][0]["volume_24h"] == "LIMIT"
     assert real_history.payload["source_label"] == "REAL HISTORY"
     assert real_history.payload["tokens"][0]["symbol"] == "REAL"
+    assert real_history.payload["tokens"][0]["volume_24h"] == "LIMIT"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, build_proxy_wallet_order_payload
 

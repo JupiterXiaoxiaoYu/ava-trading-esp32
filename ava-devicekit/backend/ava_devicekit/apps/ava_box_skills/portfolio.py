@@ -132,10 +132,20 @@ def _order_row(row: dict[str, Any]) -> dict[str, Any]:
         "price": str(row.get("limit_price") or row.get("amount") or "--"),
         "change_24h": str(row.get("status") or row.get("action") or "draft"),
         "change_positive": str(row.get("status") or "").lower() not in {"failed", "cancelled"},
+        "volume_24h": _order_type_label(row),
+        "market_cap": "",
         "source": "orders",
         "source_tag": "order",
         "contract_tail": _contract_tail(addr),
     }
+
+
+def _order_type_label(row: dict[str, Any]) -> str:
+    action = str(row.get("action") or "").lower()
+    order_type = str(row.get("type") or row.get("order_type") or row.get("orderType") or "").lower()
+    if "limit" in action or order_type == "limit":
+        return "LIMIT"
+    return "MARKET"
 
 
 def _is_open_limit_order(row: dict[str, Any]) -> bool:

@@ -156,9 +156,18 @@ def _real_order_row(row: dict[str, Any]) -> dict[str, Any]:
         "price": price,
         "change_24h": status or "real",
         "change_positive": status.lower() not in {"failed", "cancelled", "canceled", "rejected"},
+        "volume_24h": _real_order_type_label(row),
+        "market_cap": "",
         "source": "real_orders",
         "source_tag": "real",
     }
+
+
+def _real_order_type_label(row: dict[str, Any]) -> str:
+    raw = str(row.get("type") or row.get("orderType") or row.get("txType") or row.get("order_type") or "").lower()
+    if "market" in raw or "swap" in raw:
+        return "MARKET"
+    return "LIMIT"
 
 
 def _empty_order_row(symbol: str, message: str) -> dict[str, Any]:
