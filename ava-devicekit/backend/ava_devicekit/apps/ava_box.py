@@ -456,10 +456,11 @@ def _as_browse(screen: ScreenPayload, *, mode: str, source_label: str) -> Screen
     rows = payload.get("tokens")
     if not isinstance(rows, list):
         rows = payload.get("items") if isinstance(payload.get("items"), list) else []
+    browse_rows = [_with_browse_headline(row, mode=mode) for row in rows if isinstance(row, dict)]
     return ScreenPayload(
         "browse",
         {
-            "tokens": rows,
+            "tokens": browse_rows,
             "chain": payload.get("chain") or "solana",
             "mode": mode,
             "source_label": source_label,
@@ -467,3 +468,19 @@ def _as_browse(screen: ScreenPayload, *, mode: str, source_label: str) -> Screen
         },
         screen.context,
     )
+
+
+def _with_browse_headline(row: dict[str, Any], *, mode: str) -> dict[str, Any]:
+    out = dict(row)
+    if out.get("headline") or out.get("signal_summary"):
+        return out
+    if mode == "signals":
+        source = str(out.get("source_tag") or out.get("source") or "Solana").strip()
+        risk = str(out.get("risk_level") or "").strip()
+        if risk and risk not in {"UNKNOWN", "N/A", "--"}:
+            out["headline"] = f"{source} signal · Risk {risk}"
+        else:
+            out["headline"] = f"{source} signal"
+    elif mode == "watchlist":
+        out["headline"] = str(out.get("source_tag") or out.get("source") or "Saved token")
+    return out
