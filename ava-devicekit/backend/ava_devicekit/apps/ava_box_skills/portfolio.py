@@ -16,12 +16,11 @@ class PortfolioSkill:
 
     def open(self, *, context: AppContext | None = None) -> ScreenPayload:
         state = _state(self.store)
-        rows = [_portfolio_row(row) for row in state.get("paper_positions", []) if isinstance(row, dict)]
-        if not rows:
-            rows = [_portfolio_row({"symbol": "EMPTY", "chain": SOLANA, "value": "$0", "pnl": "$0", "source": "paper"})]
+        cash_sol = _sol_label(state.get("paper_cash_sol", DEFAULT_PAPER_CASH_SOL))
+        rows = [_platform_sol_row(cash_sol)]
+        rows.extend(_portfolio_row(row) for row in state.get("paper_positions", []) if isinstance(row, dict))
         pnl = _sum_money(row.get("pnl") for row in rows)
         starting_sol = _sol_label(state.get("paper_starting_sol", DEFAULT_PAPER_CASH_SOL))
-        cash_sol = _sol_label(state.get("paper_cash_sol", DEFAULT_PAPER_CASH_SOL))
         return builders.portfolio(
             rows,
             chain=SOLANA,
@@ -71,6 +70,25 @@ def _portfolio_row(row: dict[str, Any]) -> dict[str, Any]:
         "balance_raw": str(row.get("balance_raw") or row.get("amount_raw") or row.get("amount") or "0"),
         "last_price_usd": str(row.get("last_price_usd") or row.get("price_usd") or ""),
         "cost_basis_usd": str(row.get("cost_basis_usd") or ""),
+    }
+
+
+def _platform_sol_row(cash_sol: str) -> dict[str, Any]:
+    return {
+        "symbol": "SOL",
+        "chain": SOLANA,
+        "addr": "",
+        "token_id": "",
+        "avg_cost_usd": "",
+        "value_usd": cash_sol,
+        "pnl": "--",
+        "pnl_pct": "",
+        "pnl_positive": None,
+        "contract_tail": "",
+        "source_tag": "native",
+        "balance_raw": "",
+        "last_price_usd": "",
+        "cost_basis_usd": "",
     }
 
 

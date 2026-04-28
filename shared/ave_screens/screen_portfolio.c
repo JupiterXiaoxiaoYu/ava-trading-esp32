@@ -4,7 +4,7 @@
  *
  * Layout (320×240 landscape):
  *   y=  0..22   top bar: "PORTFOLIO  $1,247  +4.1%"
- *   y= 22..38   header row (Symbol / Avg / Value / P&L)
+ *   y= 22..38   header row (Symbol / Value / P&L)
  *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
  *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL  [Y] CHAIN
@@ -34,13 +34,11 @@
 #define BOTTOM_Y      217
 
 #define COL_SYM_X     6
-#define COL_SYM_W     74
-#define COL_AVG_X     84
-#define COL_AVG_W     72
-#define COL_VAL_X     162
-#define COL_VAL_W     72
-#define COL_PNL_X     240
-#define COL_PNL_W     74
+#define COL_SYM_W     116
+#define COL_VAL_X     134
+#define COL_VAL_W     82
+#define COL_PNL_X     224
+#define COL_PNL_W     90
 #define COL_TEXT_Y    2
 #define ROW_TEXT_Y    7
 
@@ -90,10 +88,9 @@ void screen_portfolio_cancel_back_timer(void)
     }
 }
 
-/* Row containers and labels [row][col]:  0=symbol, 1=avg, 2=value, 3=pnl */
+/* Row containers and labels [row][col]: 0=symbol, 1=value, 2=pnl */
 static lv_obj_t *s_row_bg[VISIBLE_ROWS];
 static lv_obj_t *s_row_sym[VISIBLE_ROWS];
-static lv_obj_t *s_row_avg[VISIBLE_ROWS];
 static lv_obj_t *s_row_val[VISIBLE_ROWS];
 static lv_obj_t *s_row_pnl[VISIBLE_ROWS];
 
@@ -175,7 +172,11 @@ static void _set_portfolio_title(const char *mode_label, const char *chain_label
     if (!s_lbl_title) return;
 
     if (chain_label && chain_label[0] && _chain_hex(chain_label)) {
-        snprintf(title_buf, sizeof(title_buf), "%s %s", base_title, chain_label);
+        if (strcmp(chain_label, "SOL") == 0 || strcmp(chain_label, "solana") == 0) {
+            snprintf(title_buf, sizeof(title_buf), "#9945FF SOL# %s", base_title);
+        } else {
+            snprintf(title_buf, sizeof(title_buf), "%s %s", base_title, chain_label);
+        }
         lv_label_set_text(s_lbl_title, title_buf);
         return;
     }
@@ -391,10 +392,18 @@ static int _source_tag_is_displayable(const char *src)
     /* Execution mode belongs in the portfolio title, not after each symbol. */
     if (strcmp(normalized, "paper") == 0 ||
         strcmp(normalized, "local") == 0 ||
-        strcmp(normalized, "mock") == 0) {
+        strcmp(normalized, "mock") == 0 ||
+        strcmp(normalized, "native") == 0 ||
+        strcmp(normalized, "cash") == 0) {
         return 0;
     }
     return normalized[0] != '\0';
+}
+
+static int _is_platform_sol(const holding_t *h)
+{
+    return h && strcmp(h->symbol, "SOL") == 0 &&
+           (strcmp(h->chain, "solana") == 0 || strcmp(h->chain, "SOL") == 0);
 }
 
 static void _compact_upper_tag(const char *src, char *out, size_t out_n, int max_chars)
@@ -476,7 +485,6 @@ static void _refresh_rows(void) {
         if (idx < s_holding_count) {
             holding_t *h = &s_holdings[idx];
             char sym_buf[64];
-            char avg_buf[24];
             char source_tag[8];
             _compact_upper_tag(h->source_tag, source_tag, sizeof(source_tag), 4);
             if (source_tag[0]) {
@@ -486,22 +494,19 @@ static void _refresh_rows(void) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s", h->symbol);
             }
             lv_label_set_text(s_row_sym[i], sym_buf);
-            ave_fmt_price_text(avg_buf, sizeof(avg_buf), h->avg_cost_usd[0] ? h->avg_cost_usd : "N/A");
-            lv_label_set_text(s_row_avg[i], avg_buf);
             lv_label_set_text(s_row_val[i], h->value_usd[0] ? h->value_usd : "--");
             lv_label_set_text(s_row_pnl[i], h->pnl[0] ? h->pnl : "N/A");
+            lv_obj_set_style_text_color(s_row_sym[i], _is_platform_sol(h) ? COLOR_SOL : COLOR_WHITE, 0);
             lv_color_t pnl_color;
             if      (h->pnl_positive == 1)  pnl_color = COLOR_GREEN;
             else if (h->pnl_positive == 0)  pnl_color = COLOR_RED;
             else                             pnl_color = COLOR_GRAY;
             lv_obj_set_style_text_color(s_row_pnl[i], pnl_color, 0);
             lv_obj_clear_flag(s_row_sym[i], LV_OBJ_FLAG_HIDDEN);
-            lv_obj_clear_flag(s_row_avg[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(s_row_val[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(s_row_pnl[i], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_label_set_text(s_row_sym[i], "");
-            lv_label_set_text(s_row_avg[i], "");
             lv_label_set_text(s_row_val[i], "");
             lv_label_set_text(s_row_pnl[i], "");
             lv_obj_set_style_bg_color(s_row_bg[i], (i % 2 == 0) ? COLOR_BG : COLOR_ROW_ALT, 0);
@@ -560,6 +565,7 @@ static void _build(void) {
     s_lbl_title = lv_label_create(top);
     lv_obj_align(s_lbl_title, LV_ALIGN_LEFT_MID, 6, 0);
     lv_label_set_text(s_lbl_title, "PORTFOLIO");
+    lv_label_set_recolor(s_lbl_title, true);
     lv_obj_set_style_text_color(s_lbl_title, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(s_lbl_title, &lv_font_montserrat_12, 0);
 
@@ -588,15 +594,6 @@ static void _build(void) {
     lv_obj_set_style_text_color(hdr_sym, COLOR_GRAY, 0);
     lv_obj_set_style_text_font(hdr_sym, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_align(hdr_sym, LV_TEXT_ALIGN_LEFT, 0);
-
-    lv_obj_t *hdr_avg = lv_label_create(hdr);
-    lv_obj_set_pos(hdr_avg, COL_AVG_X, COL_TEXT_Y);
-    lv_obj_set_width(hdr_avg, COL_AVG_W);
-    lv_label_set_long_mode(hdr_avg, LV_LABEL_LONG_CLIP);
-    lv_label_set_text(hdr_avg, "Avg");
-    lv_obj_set_style_text_color(hdr_avg, COLOR_GRAY, 0);
-    lv_obj_set_style_text_font(hdr_avg, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_align(hdr_avg, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_obj_t *hdr_val = lv_label_create(hdr);
     lv_obj_set_pos(hdr_val, COL_VAL_X, COL_TEXT_Y);
@@ -635,14 +632,6 @@ static void _build(void) {
         lv_obj_set_style_text_color(s_row_sym[i], COLOR_WHITE, 0);
         lv_obj_set_style_text_font(s_row_sym[i], ave_font_cjk_14(), 0);
         lv_obj_set_style_text_align(s_row_sym[i], LV_TEXT_ALIGN_LEFT, 0);
-
-        s_row_avg[i] = lv_label_create(s_row_bg[i]);
-        lv_obj_set_pos(s_row_avg[i], COL_AVG_X, ROW_TEXT_Y);
-        lv_obj_set_width(s_row_avg[i], COL_AVG_W);
-        lv_label_set_long_mode(s_row_avg[i], LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_color(s_row_avg[i], COLOR_WHITE, 0);
-        lv_obj_set_style_text_font(s_row_avg[i], &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_align(s_row_avg[i], LV_TEXT_ALIGN_RIGHT, 0);
 
         s_row_val[i] = lv_label_create(s_row_bg[i]);
         lv_obj_set_pos(s_row_val[i], COL_VAL_X, ROW_TEXT_Y);

@@ -45,7 +45,9 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert result.screen and result.screen.screen == "result"
     assert result.data["execution"]["status"] == "paper_filled"
     portfolio_after_trade = service.get_portfolio(context=context)
-    holding = portfolio_after_trade.payload["holdings"][0]
+    assert portfolio_after_trade.payload["holdings"][0]["symbol"] == "SOL"
+    assert portfolio_after_trade.payload["holdings"][0]["value_usd"] == "0.9 SOL"
+    holding = next(row for row in portfolio_after_trade.payload["holdings"] if row["symbol"] == "BONK")
     assert holding["symbol"] == "BONK"
     assert holding["value_usd"]
     assert holding["balance_raw"]

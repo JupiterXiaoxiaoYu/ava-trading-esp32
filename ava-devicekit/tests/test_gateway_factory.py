@@ -182,11 +182,15 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     assert {"total_usd", "pnl", "pnl_pct", "mode_label", "chain_label"} <= set(data)
     required = {"symbol", "avg_cost_usd", "value_usd", "pnl", "pnl_pct", "pnl_positive", "addr", "chain", "contract_tail", "source_tag", "balance_raw"}
     assert required <= set(data["holdings"][0])
-    assert data["holdings"][0]["avg_cost_usd"] == "$0.00002"
-    assert data["holdings"][0]["value_usd"] == "$15.00"
-    assert data["holdings"][0]["pnl"] == "$0"
+    assert data["holdings"][0]["symbol"] == "SOL"
+    assert data["holdings"][0]["source_tag"] == "native"
+    assert data["holdings"][0]["value_usd"] == "0.9 SOL"
+    token_holding = next(row for row in data["holdings"] if row["symbol"] == "BONK")
+    assert token_holding["avg_cost_usd"] == "$0.00002"
+    assert token_holding["value_usd"] == "$15.00"
+    assert token_holding["pnl"] == "$0"
 
-    sell_draft = session.handle({"type": "key_action", "action": "portfolio_sell", **data["holdings"][0]})
+    sell_draft = session.handle({"type": "key_action", "action": "portfolio_sell", **token_holding})
     assert sell_draft["screen"] == "confirm"
     assert sell_draft["data"]["action"] == "SELL"
     assert sell_draft["data"]["amount_native"] == "750K BONK"
@@ -227,7 +231,7 @@ def test_portfolio_sell_legacy_na_position_removes_and_returns_to_portfolio(tmp_
     )
     session = create_device_session(mock=True, skill_store_path=str(store_path))
     portfolio = session.handle({"type": "key_action", "action": "portfolio"})
-    holding = portfolio["data"]["holdings"][0]
+    holding = next(row for row in portfolio["data"]["holdings"] if row["symbol"] == "OLD")
     assert holding["avg_cost_usd"] == "N/A"
 
     draft = session.handle(
@@ -246,7 +250,8 @@ def test_portfolio_sell_legacy_na_position_removes_and_returns_to_portfolio(tmp_
 
     back = session.handle({"type": "key_action", "action": "back"})
     assert back["screen"] == "portfolio"
-    assert back["data"]["holdings"][0]["symbol"] == "EMPTY"
+    assert back["data"]["holdings"][0]["symbol"] == "SOL"
+    assert all(row["symbol"] != "OLD" for row in back["data"]["holdings"])
 
 
 def test_legacy_screen_context_token_is_treated_as_selected():
