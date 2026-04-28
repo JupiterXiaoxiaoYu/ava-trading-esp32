@@ -10,8 +10,8 @@
         "token_id": "order-001",
         "chain": "solana",
         "symbol": "BONK",
-        "price": "BUY 0.12",
-        "change_24h": "OPEN",
+        "price": "$N/A",
+        "change_24h": "N/A",
         "change_positive": 1,
         "volume_24h": "--",
         "market_cap": "--",
@@ -21,8 +21,8 @@
         "token_id": "order-002",
         "chain": "eth",
         "symbol": "WETH",
-        "price": "SELL 0.05",
-        "change_24h": "FILLED",
+        "price": "$N/A",
+        "change_24h": "N/A",
         "change_positive": 1,
         "volume_24h": "--",
         "market_cap": "--",
@@ -32,8 +32,8 @@
         "token_id": "order-003",
         "chain": "base",
         "symbol": "DEGEN",
-        "price": "BUY 0.80",
-        "change_24h": "CANCELED",
+        "price": "$N/A",
+        "change_24h": "N/A",
         "change_positive": 0,
         "volume_24h": "--",
         "market_cap": "--",
@@ -42,4 +42,3 @@
     ]
   }
 }
-

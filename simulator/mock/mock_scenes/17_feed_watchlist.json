@@ -10,22 +10,22 @@
         "token_id": "wl-001",
         "chain": "solana",
         "symbol": "KEEP",
-        "price": "$2.11",
-        "change_24h": "+0.9%",
+        "price": "$2.11e0",
+        "change_24h": "+9.00e-1%",
         "change_positive": 1,
-        "volume_24h": "$2.0M",
-        "market_cap": "$18M",
+        "volume_24h": "$2.00e6",
+        "market_cap": "$1.80e7",
         "source": "watchlist"
       },
       {
         "token_id": "wl-002",
         "chain": "eth",
         "symbol": "SAVE",
-        "price": "$0.88",
-        "change_24h": "▼ -1.5%",
+        "price": "$8.80e-1",
+        "change_24h": "N/A",
         "change_positive": 0,
-        "volume_24h": "$1.0M",
-        "market_cap": "$8M",
+        "volume_24h": "$1.00e6",
+        "market_cap": "$8.00e6",
         "source": "watchlist"
       }
     ]

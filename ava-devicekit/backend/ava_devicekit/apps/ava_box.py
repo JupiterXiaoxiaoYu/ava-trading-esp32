@@ -10,6 +10,7 @@ from ava_devicekit.apps.ava_box_skills import AvaBoxSkillService
 from ava_devicekit.core.manifest import HardwareAppManifest
 from ava_devicekit.core.contracts import InputEvent
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, DeviceMessage, ScreenPayload, Selection
+from ava_devicekit.formatting.numbers import format_money, format_percent, parse_number
 from ava_devicekit.screen import builders
 from ava_devicekit.streams.base import MarketStreamEvent
 
@@ -370,10 +371,10 @@ def _apply_price(target: dict[str, Any], data: dict[str, Any]) -> None:
     change = data.get("change_24h") or data.get("token_price_change_24h") or data.get("price_change_24h")
     if price not in (None, ""):
         target["price_raw"] = _optional_float(price)
-        target["price"] = str(price) if str(price).startswith("$") else f"${price}"
+        target["price"] = format_money(price)
     if change not in (None, ""):
         value = _optional_float(change)
-        target["change_24h"] = str(change) if str(change).endswith("%") else f"{value:+.2f}%"
+        target["change_24h"] = format_percent(value)
         target["change_positive"] = value >= 0
 
 
@@ -425,43 +426,18 @@ def _chart_payload(points: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _optional_float(value: Any) -> float:
-    try:
-        return float(str(value).replace("$", "").replace("%", ""))
-    except (TypeError, ValueError):
-        return 0.0
+    return parse_number(value)
 
 
 def _fmt_price(price: Any) -> str:
-    value = _optional_float(price)
-    if value <= 0:
-        return "$0"
-    if value >= 1000:
-        return f"${value:,.0f}"
-    if value >= 1:
-        return f"${value:.4f}"
-    if value >= 0.01:
-        return f"${value:.6f}"
-    import math
-
-    decimals = max(2, -math.floor(math.log10(abs(value))) + 3)
-    return f"${value:.{decimals}f}"
+    return format_money(price)
 
 
 def _fmt_y_label(price: Any) -> str:
     value = _optional_float(price)
     if value <= 0:
         return "--"
-    if value >= 1000:
-        return f"${value:,.0f}"
-    if value >= 1:
-        return f"${value:.2f}"
-    if value >= 0.001:
-        return f"${value:.4f}"
-    import math
-
-    exp = int(math.floor(math.log10(abs(value))))
-    mantissa = value / (10**exp)
-    return f"{mantissa:.2f}e{exp}"
+    return format_money(value)
 
 
 def _fmt_chart_time(ts: int) -> str:

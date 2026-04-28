@@ -40,6 +40,19 @@ The machine-readable capability map is `userland/capabilities.json`.
 
 `ChainAdapter` stays limited to basic chain data: feed, search, and token detail. Trading drafts, watchlists, portfolio composition, and skill routing live in the reference app layer (`apps/ava_box.py` plus `apps/ava_box_skills/`). This keeps future chain/helper adapters replaceable without turning the framework into an Ava Box trading server.
 
+## Numeric Display Policy
+
+Small hardware screens use one compact numeric format across prices, volumes, PnL, chart axes, holders, and percentage values:
+
+| Value Type | Rule | Example |
+|---|---|---|
+| Money / price | Three significant digits, scientific notation, currency sign preserved | `$1.23e-5`, `$9.99e2`, `-$7.96e-5` |
+| Percent | Three significant digits, scientific notation, percent sign preserved | `+1.50e0%`, `-6.87e0%` |
+| Counts | Three significant digits, scientific notation, no separators | `1.23e4` |
+| Zero | Rendered as plain zero with unit prefix/suffix if any | `$0`, `0`, `+0%` |
+
+Backend code should use `ava_devicekit.formatting.numbers`; C/LVGL code should use `ave_price_fmt`.
+
 ## Standalone Runtime
 
 Ava Box can run through DeviceKit without importing the legacy assistant backend. The gateway builds a session from a hardware app manifest, an adapter registry, and app-local skills:

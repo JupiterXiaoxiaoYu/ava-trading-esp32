@@ -10,9 +10,9 @@
     "interval": "60",
     "cursor": 1,
     "total": 3,
-    "price": "$0.00045184",
+    "price": "$4.52e-4",
     "price_raw": 0.00045184,
-    "change_24h": "▲ +1260.02%",
+    "change_24h": "N/A",
     "change_positive": 1,
     "chart": [
       0.00045184,
@@ -44,12 +44,12 @@
     "has_mint": false,
     "has_freeze": false,
     "risk_level": "CRITICAL",
-    "holders": 3466,
-    "liquidity": "$214.3K",
+    "holders": "3.47e3",
+    "liquidity": "$2.14e5",
     "contract": "0x2299f25A95A9539f25A95A9539f25A95A953C599",
     "is_watchlisted": true,
     "origin_hint": "From Signal Watchlist",
-    "market_cap": "$500K",
+    "market_cap": "$5.00e5",
     "top100_concentration": "12.3%"
   }
 }

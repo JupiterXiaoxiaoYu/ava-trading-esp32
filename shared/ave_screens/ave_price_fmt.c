@@ -8,27 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void _fmt_money_sci(char *buf, size_t n, double value);
+
 void ave_fmt_price(char *buf, size_t n, double price)
 {
-    if (price == 0.0) {
-        snprintf(buf, n, "$0");
-        return;
-    }
-    if (price < 0) price = -price;
-
-    if (price >= 1000.0) {
-        snprintf(buf, n, "$%.0f", price);
-    } else if (price >= 1.0) {
-        snprintf(buf, n, "$%.4f", price);
-    } else if (price >= 0.01) {
-        snprintf(buf, n, "$%.6f", price);
-    } else {
-        /* Find first significant digit position */
-        int mag = (int)floor(log10(price));  /* negative */
-        int decimals = -mag + 3;             /* e.g. 0.0000234 → mag=-5 → decimals=8 */
-        if (decimals > 12) decimals = 12;
-        snprintf(buf, n, "$%.*f", decimals, price);
-    }
+    _fmt_money_sci(buf, n, price);
 }
 
 static void _copy_price(char *buf, size_t n, const char *raw_price)
@@ -40,10 +24,51 @@ static void _copy_price(char *buf, size_t n, const char *raw_price)
 static void _trim_exp_zeros(char *buf)
 {
     char *e = strchr(buf, 'e');
-    if (!e || !e[1] || !e[2] || !e[3]) return;
-    if ((e[1] == '+' || e[1] == '-') && e[2] == '0') {
-        memmove(e + 2, e + 3, strlen(e + 3) + 1);
+    char *src;
+    char *dst;
+    if (!e || !e[1]) return;
+    if (e[1] == '+') {
+        memmove(e + 1, e + 2, strlen(e + 2) + 1);
     }
+    src = e + 1;
+    if (*src == '-') src++;
+    dst = src;
+    while (*src == '0' && src[1]) src++;
+    if (src != dst) {
+        memmove(dst, src, strlen(src) + 1);
+    }
+}
+
+static void _fmt_sci(char *buf, size_t n, double value)
+{
+    if (!buf || n == 0) return;
+    if (value == 0.0) {
+        snprintf(buf, n, "0");
+        return;
+    }
+    snprintf(buf, n, "%.2e", value);
+    _trim_exp_zeros(buf);
+}
+
+static void _fmt_money_sci(char *buf, size_t n, double value)
+{
+    char num[32] = {0};
+    if (!buf || n == 0) return;
+    if (value < 0) {
+        _fmt_sci(num, sizeof(num), -value);
+        snprintf(buf, n, "-$%s", num);
+    } else {
+        _fmt_sci(num, sizeof(num), value);
+        snprintf(buf, n, "$%s", num);
+    }
+}
+
+static const char *_numeric_start(const char *raw_price)
+{
+    if (!raw_price) return "";
+    if (raw_price[0] == '-' && raw_price[1] == '$') return raw_price + 2;
+    if (raw_price[0] == '$') return raw_price + 1;
+    return raw_price;
 }
 
 void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
@@ -57,11 +82,14 @@ void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
         return;
     }
 
-    price = strtod(raw_price[0] == '$' ? raw_price + 1 : raw_price, &end);
-    if (end == (raw_price[0] == '$' ? raw_price + 1 : raw_price)) {
+    int neg_money = raw_price[0] == '-' && raw_price[1] == '$';
+    const char *start = _numeric_start(raw_price);
+    price = strtod(start, &end);
+    if (end == start) {
         _copy_price(buf, n, raw_price);
         return;
     }
+    if (neg_money) price = -price;
 
     while (*end == ' ') end++;
     if (*end != '\0') {
@@ -69,35 +97,21 @@ void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
         return;
     }
 
-    if (price < 0) price = -price;
-    if (price == 0.0 || price >= 1e-4) {
-        _copy_price(buf, n, raw_price);
-        return;
-    }
-
-    snprintf(buf, n, "$%.2e", price);
-    _trim_exp_zeros(buf);
+    _fmt_money_sci(buf, n, price);
 }
 
 void ave_fmt_change(char *buf, size_t n, double pct)
 {
     const char *sign = (pct >= 0) ? "▲ +" : "▼ ";
     double abs_pct = pct < 0 ? -pct : pct;
-    snprintf(buf, n, "%s%.2f%%", sign, abs_pct);
+    char num[32] = {0};
+    _fmt_sci(num, sizeof(num), abs_pct);
+    snprintf(buf, n, "%s%s%%", sign, num);
 }
 
 void ave_fmt_volume(char *buf, size_t n, double value)
 {
-    if (value < 0) value = -value;
-    if (value >= 1e9) {
-        snprintf(buf, n, "$%.1fB", value / 1e9);
-    } else if (value >= 1e6) {
-        snprintf(buf, n, "$%.1fM", value / 1e6);
-    } else if (value >= 1e3) {
-        snprintf(buf, n, "$%.1fK", value / 1e3);
-    } else {
-        snprintf(buf, n, "$%.0f", value);
-    }
+    _fmt_money_sci(buf, n, value);
 }
 
 int16_t ave_price_to_chart(double price, double price_min, double price_max)

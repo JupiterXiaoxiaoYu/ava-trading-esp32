@@ -385,8 +385,8 @@ def test_market_stream_runtime_updates_current_feed_screen():
     runtime = MarketStreamRuntime(MockMarketStreamAdapter())
     emitted = runtime.apply_events(session, [MarketStreamEvent("price", selected.token_id, {"price": "999", "change_24h": "1.5"})])
     assert emitted
-    assert emitted[0]["data"]["tokens"][0]["price"] == "$999"
-    assert emitted[0]["data"]["tokens"][0]["change_24h"] == "+1.50%"
+    assert emitted[0]["data"]["tokens"][0]["price"] == "$9.99e2"
+    assert emitted[0]["data"]["tokens"][0]["change_24h"] == "+1.50e0%"
 
 
 def test_market_stream_runtime_updates_live_s1_spotlight_chart():

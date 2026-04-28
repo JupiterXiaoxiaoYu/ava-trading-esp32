@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import urllib.error
 import urllib.parse
@@ -12,6 +11,7 @@ from typing import Any
 
 from ava_devicekit.adapters.base import ChainAdapter
 from ava_devicekit.core.types import AppContext, ScreenPayload
+from ava_devicekit.formatting.numbers import format_count, format_money, format_percent, parse_number
 from ava_devicekit.screen import builders
 
 DATA_BASE = "https://data.ave-api.xyz/v2"
@@ -133,7 +133,7 @@ class SolanaAdapter(ChainAdapter):
             "price_raw": _safe_float(token.get("current_price_usd", token.get("price"))),
             "change_24h": _fmt_change(token.get("token_price_change_24h", token.get("price_change_24h"))),
             "change_positive": _safe_float(token.get("token_price_change_24h", token.get("price_change_24h"))) >= 0,
-            "holders": f"{int(token['holders']):,}" if token.get("holders") else "N/A",
+            "holders": format_count(token.get("holders")) if token.get("holders") else "N/A",
             "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
             "volume_24h": _fmt_volume(token.get("token_tx_volume_usd_24h", token.get("tx_volume_u_24h"))),
             "market_cap": _fmt_volume(token.get("market_cap", token.get("fdv"))),
@@ -283,49 +283,25 @@ def _risk_flags(resp: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fmt_price(price: Any) -> str:
-    value = _safe_float(price)
-    if value <= 0:
-        return "$0"
-    if value >= 1000:
-        return f"${value:,.0f}"
-    if value >= 1:
-        return f"${value:.4f}"
-    if value >= 0.01:
-        return f"${value:.6f}"
-    decimals = max(2, -math.floor(math.log10(abs(value))) + 3)
-    return f"${value:.{decimals}f}"
+    return format_money(price)
 
 
 def _fmt_change(pct: Any) -> str:
-    value = _safe_float(pct)
-    sign = "+" if value >= 0 else "-"
-    return f"{sign}{abs(value):.2f}%"
+    return format_percent(pct)
 
 
 def _fmt_volume(vol: Any) -> str:
     value = _safe_float(vol, default=-1)
     if value < 0:
         return "N/A"
-    if value >= 1_000_000:
-        return f"${value / 1_000_000:.1f}M"
-    if value >= 1_000:
-        return f"${value / 1_000:.1f}K"
-    return f"${value:.0f}"
+    return format_money(value)
 
 
 def _fmt_y_label(price: Any) -> str:
     value = _safe_float(price, default=-1)
     if value <= 0:
         return "N/A"
-    if value >= 1000:
-        return f"${value:,.0f}"
-    if value >= 1:
-        return f"${value:.2f}"
-    if value >= 0.001:
-        return f"${value:.4f}"
-    exp = int(math.floor(math.log10(abs(value))))
-    mantissa = value / (10 ** exp)
-    return f"{mantissa:.2f}e{exp}"
+    return format_money(value)
 
 
 def _fmt_chart_time(ts: int) -> str:
@@ -338,13 +314,7 @@ def _fmt_chart_time(ts: int) -> str:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        parsed = float(value)
-        if math.isfinite(parsed):
-            return parsed
-    except (TypeError, ValueError):
-        pass
-    return default
+    return parse_number(value, default=default)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:

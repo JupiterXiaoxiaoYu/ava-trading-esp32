@@ -3,7 +3,11 @@
 用法：python3 refresh_mock_data.py
 然后在模拟器里按 P 键查看最新数据
 """
-import json, os, time, urllib.request, urllib.parse, math
+import json, os, sys, time, urllib.request, urllib.parse, math
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(ROOT, "ava-devicekit", "backend"))
+from ava_devicekit.formatting.numbers import format_money, format_percent  # noqa: E402
 
 API_KEY = os.environ.get("AVE_API_KEY",
     "5vHBOFMQZFnXcu3eQs5YvcQDPHAlkn1OlkhNdIhhEho3VF4bUG58jK6Sl0AGMNsP")
@@ -23,30 +27,17 @@ def get(path, params=None):
 
 def fmt_price(p):
     if p is None: return "$?"
-    p = float(p)
-    if p == 0: return "$0"
-    if p >= 1: return f"${p:.2f}"
-    if p >= 0.01: return f"${p:.4f}"
-    # 极小价格：找第一个有效位
-    s = f"{p:.10f}".rstrip("0")
-    digits = len(s) - s.index(".") - 1
-    return f"${p:.{max(4, digits)}f}"
+    return format_money(p)
 
 
 def fmt_change(c):
     if c is None: return "0.00%"
-    c = float(c)
-    sign = "▲" if c >= 0 else "▼"
-    return f"{sign} {c:+.2f}%"
+    return format_percent(c)
 
 
 def fmt_vol(v):
     if v is None: return "$0"
-    v = float(v)
-    if v >= 1e9: return f"${v/1e9:.1f}B"
-    if v >= 1e6: return f"${v/1e6:.1f}M"
-    if v >= 1e3: return f"${v/1e3:.1f}K"
-    return f"${v:.0f}"
+    return format_money(v)
 
 
 def write(filename, data):

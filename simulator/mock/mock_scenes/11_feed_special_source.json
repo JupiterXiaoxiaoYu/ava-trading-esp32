@@ -9,22 +9,22 @@
         "token_id": "wl-token-01",
         "chain": "solana",
         "symbol": "NOVA",
-        "price": "$0.00091",
-        "change_24h": "▲ +8.88%",
+        "price": "$9.10e-4",
+        "change_24h": "N/A",
         "change_positive": 1,
-        "volume_24h": "$540K",
-        "market_cap": "$9.1M",
+        "volume_24h": "$5.40e5",
+        "market_cap": "$9.10e6",
         "source": "watchlist"
       },
       {
         "token_id": "wl-token-02",
         "chain": "bsc",
         "symbol": "QUARK",
-        "price": "$0.081",
-        "change_24h": "▼ -1.23%",
+        "price": "$8.10e-2",
+        "change_24h": "N/A",
         "change_positive": 0,
-        "volume_24h": "$120K",
-        "market_cap": "$1.1M",
+        "volume_24h": "$1.20e5",
+        "market_cap": "$1.10e6",
         "source": "watchlist"
       }
     ]

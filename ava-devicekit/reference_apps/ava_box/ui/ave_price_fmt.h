@@ -17,16 +17,15 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * Format a price as "$X.XXXXX" into buf.
- * Automatically picks appropriate decimal places.
- * price == 0  → "$0"
- * price >= 1  → "$1.2345"
- * price < 0.01 → finds first significant digit, adds 3 more decimals
+ * Format a price as three-significant-digit scientific notation.
+ * price == 0  -> "$0"
+ * price > 0   -> "$1.23e4"
+ * price < 0   -> "-$1.23e-4"
  */
 void ave_fmt_price(char *buf, size_t n, double price);
 
 /**
- * Compact an already formatted price string when it has too many leading zeros.
+ * Normalize an already formatted price string to scientific notation.
  * Example: "$0.00007956" -> "$7.96e-5"
  */
 void ave_fmt_price_text(char *buf, size_t n, const char *raw_price);
@@ -37,7 +36,7 @@ void ave_fmt_price_text(char *buf, size_t n, const char *raw_price);
 void ave_fmt_change(char *buf, size_t n, double pct);
 
 /**
- * Format a large number as "$1.2M" / "$890K" / "$123"
+ * Format a money/volume value as scientific notation.
  */
 void ave_fmt_volume(char *buf, size_t n, double value);
 

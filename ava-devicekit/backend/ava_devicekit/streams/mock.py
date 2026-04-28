@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ava_devicekit.streams.base import MarketStreamEvent, StreamSubscription
+from ava_devicekit.formatting.numbers import format_money
 
 
 class MockMarketStreamAdapter:
@@ -23,5 +24,5 @@ class MockMarketStreamAdapter:
         for sub in self.subscriptions:
             for token_id in sub.token_ids:
                 price = self.prices.get(token_id, 1.0)
-                events.append(MarketStreamEvent(sub.channel, token_id, {"price_raw": price, "price": f"${price:.6f}"}))
+                events.append(MarketStreamEvent(sub.channel, token_id, {"price_raw": price, "price": format_money(price)}))
         return events

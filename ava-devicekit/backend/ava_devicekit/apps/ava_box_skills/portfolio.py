@@ -4,6 +4,7 @@ from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import SOLANA
 from ava_devicekit.core.types import AppContext, ScreenPayload
+from ava_devicekit.formatting.numbers import format_money, format_percent, parse_number
 from ava_devicekit.screen import builders
 from ava_devicekit.storage.json_store import JsonStore
 
@@ -23,7 +24,7 @@ class PortfolioSkill:
             chain=SOLANA,
             total_usd=_money_label(total),
             pnl=_money_label(pnl),
-            pnl_pct="0.00%",
+            pnl_pct=format_percent(0),
             mode_label="Paper",
             chain_label="SOL",
             pnl_reason="Local paper execution",
@@ -86,12 +87,9 @@ def _sum_money(values: Any) -> float:
 
 
 def _money_value(value: Any) -> float:
-    try:
-        return float(str(value or "0").replace("$", "").replace(",", "").strip() or "0")
-    except ValueError:
-        return 0.0
+    return parse_number(value)
 
 
 def _money_label(value: float) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value):.2f}"
+    return format_money(value)

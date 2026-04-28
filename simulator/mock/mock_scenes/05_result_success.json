@@ -8,8 +8,8 @@
     "out_amount": "25000",
     "out_symbol": "stonks",
     "amount_usd": "$15.00",
-    "tp_price": "$0.0005648",
-    "sl_price": "$0.000384064",
+    "tp_price": "$5.65e-4",
+    "sl_price": "$3.84e-4",
     "tx_id": "3xK9mP..."
   }
 }
