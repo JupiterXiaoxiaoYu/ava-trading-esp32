@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -308,6 +309,18 @@ def make_handler(
             if path == "/customer/wallet/login":
                 try:
                     self._send_json(control_plane.login_customer_with_wallet(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/customer/demo-purchase":
+                if settings.production_mode and os.environ.get("AVA_DEVICEKIT_ENABLE_DEMO_CHECKOUT") != "1":
+                    self._send_json({"ok": False, "error": "demo_checkout_disabled"}, HTTPStatus.FORBIDDEN)
+                    return
+                try:
+                    result = control_plane.create_purchase(_demo_purchase_body(self._read_json()), public_base_url=self._public_base_url())
+                    result.pop("provisioning_token", None)
+                    result["factory_note"] = "Device provisioning token is kept on the fulfillment/device side; customers only receive the activation card."
+                    self._send_json(result)
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -817,6 +830,30 @@ def _admin_page() -> str:
 
 def _customer_page() -> str:
     return CUSTOMER_PAGE
+
+
+def _demo_purchase_body(body: dict[str, Any]) -> dict[str, Any]:
+    now = int(time.time())
+    app_id = str(body.get("app_id") or "ava_box").strip() or "ava_box"
+    board_model = str(body.get("board_model") or body.get("model") or "esp32s3").strip() or "esp32s3"
+    payload: dict[str, Any] = {
+        "device_id": str(body.get("device_id") or f"{app_id}-demo-{now}"),
+        "device_name": str(body.get("device_name") or f"{app_id} demo unit"),
+        "board_model": board_model,
+        "app_id": app_id,
+        "plan_id": str(body.get("plan_id") or "plan_starter"),
+        "order_ref": str(body.get("order_ref") or f"DEMO-{now}"),
+        "amount_label": str(body.get("amount_label") or "Demo hardware bundle"),
+        "metadata": {
+            "source": "customer_demo_checkout",
+            "shipping_status": "demo_not_shipped",
+            "fulfillment_note": "In production, payment or fulfillment webhook should call the purchase/provision endpoint after checkout.",
+        },
+    }
+    customer_wallet = str(body.get("customer_wallet") or "").strip()
+    if customer_wallet:
+        payload["customer_wallet"] = customer_wallet
+    return payload
 
 def run_http_gateway(
     host: str = "127.0.0.1",

@@ -415,6 +415,7 @@ def test_http_gateway_customer_portal_login_and_activation(tmp_path):
     try:
         html = _get_text(base_url, "/customer")
         assert "Activate Ava Hardware" in html
+        assert "id=\"demo-purchase-form\"" in html
         assert "id=\"wallet-login-form\"" in html
         assert "id=\"activation-form\"" in html
 
@@ -500,6 +501,58 @@ def test_http_gateway_wallet_customer_purchase_flow(tmp_path):
         assert status == 200
         assert activated["device"]["device_id"] == "wallet_http_box"
         assert activated["device"]["entitlement"]["status"] == "active"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_customer_demo_purchase_auto_provisions_and_activates(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from ava_devicekit.wallet import b58encode
+
+    private_key = Ed25519PrivateKey.generate()
+    wallet = b58encode(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    )
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        purchase = _post(
+            base_url,
+            "/customer/demo-purchase",
+            {"app_id": "ava_box", "plan_id": "plan_starter", "board_model": "esp32s3", "customer_wallet": wallet},
+        )
+        assert purchase["purchase"]["app_id"] == "ava_box"
+        assert purchase["purchase"]["customer_wallet"] == wallet
+        assert purchase["purchase"]["device_id"].startswith("ava_box_demo_")
+        assert "provisioning_token" not in purchase
+        assert "fulfillment/device side" in purchase["factory_note"]
+        assert purchase["activation_card"]["activation_url"].startswith(base_url + "/customer?")
+        assert _get(base_url, "/admin/purchases")["count"] == 1
+        assert _get(base_url, "/admin/apps/ava_box/devices")["count"] == 1
+
+        challenge = _post(base_url, "/customer/wallet/challenge", {"wallet": wallet, "app_id": "ava_box"})
+        signature = b58encode(private_key.sign(challenge["message"].encode("utf-8")))
+        login = _post(base_url, "/customer/wallet/login", {"wallet": wallet, "nonce": challenge["nonce"], "signature": signature, "app_id": "ava_box"})
+        headers = {"Authorization": "Bearer " + login["customer_token"]}
+        status, activated = _post_status(base_url, "/customer/activate", {"activation_code": purchase["activation_code"]}, headers)
+        assert status == 200
+        assert activated["device"]["status"] == "active"
+        assert activated["device"]["customer_id"] == login["customer"]["customer_id"]
+
+        users = _get(base_url, "/admin/apps/ava_box/customers")
+        assert users["count"] == 1
+        orders = _get(base_url, "/admin/purchases")
+        assert orders["items"][0]["status"] == "activated"
+        assert orders["items"][0]["customer_id"] == login["customer"]["customer_id"]
     finally:
         server.shutdown()
         thread.join(timeout=5)

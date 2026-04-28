@@ -47,9 +47,9 @@ This is the intended operator flow: create/select app -> configure server defaul
 |---|---|---|---|
 | 1 | Service owner | Configure ASR/LLM/TTS/chain/execution providers | Backend can serve AI + Solana hardware actions |
 | 2 | Service owner | Create service plans and usage limits | Cost/entitlement rules exist before devices are sold |
-| 3 | Operator | Provision device | Device id, provisioning token, activation code are created |
+| 3 | Checkout/fulfillment or operator | Create purchase/activation card | Backend creates/reuses device, provisions it, assigns app/plan, and returns activation code |
 | 4 | Device firmware | Register with provisioning token | Device receives per-device bearer token |
-| 5 | Customer | Sign in through `/customer`, then submit activation code | Customer session is verified, device is bound, and the device becomes active |
+| 5 | Customer | Sign in through `/customer`, then submit activation code | Wallet session is verified, device is bound, and the device becomes active |
 | 6 | Device | Pull `/device/config` | Device receives AI name, wake phrases, voice, app, firmware channel, wallet/risk mode |
 | 7 | Device/backend | Record usage | ASR/LLM/TTS/API usage is visible by device/customer/period |
 | 8 | Operator | Diagnose from server timeline and device diagnostics | Support can inspect backend state, connection, config, and events |
@@ -89,6 +89,31 @@ Recent events and the Events tab are server-side runtime event streams. They are
 | How do I see the full app relationship? | `Apps -> App relationship map` shows app -> project -> devices -> orders -> customers plus provider/service scope. |
 | How do I provision hardware for one app? | `Fleet Setup -> Provision device` uses `device_id + app_id`; the backend resolves/creates the backing project. |
 | How do I manage purchase activation cards? | `Orders` shows `/admin/purchases` records and re-opens activation-card payloads. |
+| How do I demo customer purchase? | `/customer -> Demo checkout` calls `/customer/demo-purchase`, auto-provisions a demo device, and shows the activation code. |
+
+## Purchase / Provision / Activation Binding
+
+Provision and activation are two different trust boundaries:
+
+| Boundary | Holder | Purpose |
+|---|---|---|
+| `provisioning_token` | Factory/device firmware | Lets the physical device register once and receive its long-lived device token. |
+| `activation_code` | Customer/package/activation card | Lets the customer prove they have the purchased hardware package. |
+| `customer_wallet` | Customer | Optional wallet lock; if present, only that wallet can activate the code. |
+| `device_token` | Device only | Authenticates config pull, events, usage, and OTA after registration. |
+
+`Provision device` already creates an activation code because the backend must know which physical device the customer will bind. The purchase/activation card layer adds the missing business relationship: order reference, app, plan, optional wallet lock, activation URL, and customer-visible instructions.
+
+For a demo checkout, `/customer/demo-purchase` combines these steps:
+
+```text
+Customer clicks demo buy
+  -> backend creates purchase/order
+  -> backend auto-provisions a demo device
+  -> backend returns activation card, not the device provisioning token
+  -> customer wallet-signs and submits activation code
+  -> admin sees order status activated, device customer_id, and app user
+```
 | How do I inspect one device? | `Device Detail` opens diagnostics for a device id, including owner/customer, config, runtime state, connection, usage, and recent events. |
 | How do I see logs for one app? | `Apps -> App logs` filters events by devices assigned to that `app_id`; `Server Timeline` is the global backend log. |
 | How do I manage usage limits? | `Usage` creates service plans, assigns entitlements, records usage, and shows limit status by device. |

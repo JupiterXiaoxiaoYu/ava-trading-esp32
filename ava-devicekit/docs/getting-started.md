@@ -66,6 +66,7 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 | `/customer` | Customer-facing activation portal for purchased hardware |
 | `/customer/login` | Create/reuse a customer account and issue a browser session token |
 | `/customer/me` | Verify the customer session token and return the user's bound devices |
+| `/customer/demo-purchase` | Local demo checkout: creates a purchase, auto-provisions a device, and returns an activation card |
 | `/customer/activate` | Bind an activation code to the logged-in customer |
 | `/customer/register` | API-compatible one-step registration/binding flow for scripted setup |
 
@@ -84,17 +85,29 @@ Use this sequence to verify the local service is usable as a hardware-product ba
 
 ## Wallet-Signature Purchase Flow
 
+Production flow:
+
 1. In `/admin`, create the app/project and service plan.
-2. In Fleet Setup, create a purchase activation card with `device_id`, `app_id`, optional `customer_wallet`, and `plan_id`.
-3. Flash/register the device with its `provisioning_token`; the customer never sees this token.
-4. Give the customer the activation card URL/code.
-5. The customer opens `/customer`, connects a Solana wallet, signs the challenge, and submits the activation code.
-6. The device becomes bound to that wallet-authenticated customer and the plan entitlement is activated.
+2. Payment or fulfillment backend calls `/admin/purchases` with `device_id`, `app_id`, optional `customer_wallet`, and `plan_id`.
+3. `/admin/purchases` creates/reuses the device, provisions it, and returns `provisioning_token + activation_code + activation_card`.
+4. Factory/firmware receives the `provisioning_token`; the customer never sees this token.
+5. Customer receives the activation card URL/code with the shipped device.
+6. Customer opens `/customer`, connects a Solana wallet, signs the challenge, and submits the activation code.
+7. The device becomes bound to that wallet-authenticated customer and the plan entitlement is activated.
+
+Local demo flow:
+
+1. Open `/customer`.
+2. Click `Demo buy Ava hardware`.
+3. The customer page calls `/customer/demo-purchase`, which auto-provisions a demo device and displays the activation code; it does not expose the device provisioning token to the customer.
+4. Connect/sign with a wallet. If the demo purchase was wallet-locked, the same wallet must activate it.
+5. Submit the activation code. `/admin -> Apps/Hardware/Orders/Customer Support` will show the bound customer/device/order.
 
 | Path | Purpose |
 |---|---|
 | `POST /admin/purchases` | Record hardware purchase and generate activation card. |
 | `GET /admin/purchases` | List purchase/order records. |
 | `GET /admin/purchases/{purchase_id}/activation-card` | Re-open the activation card payload. |
+| `POST /customer/demo-purchase` | Dev-only checkout demo; disabled in production unless `AVA_DEVICEKIT_ENABLE_DEMO_CHECKOUT=1`. |
 | `POST /customer/wallet/challenge` | Create a nonce-bound Solana wallet login challenge. |
 | `POST /customer/wallet/login` | Verify the wallet signature and issue a customer session token. |

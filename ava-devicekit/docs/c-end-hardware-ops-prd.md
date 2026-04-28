@@ -140,5 +140,20 @@ Configuration is resolved as default config -> project config -> device override
 | Wallet login | `POST /customer/wallet/login` verifies the Ed25519 signature, creates/reuses the customer, and returns a customer bearer token. |
 | Wallet-locked activation | If the purchase has `customer_wallet`, `/customer/activate` only succeeds for a customer logged in with that wallet. |
 | Plan activation | A purchase can assign `plan_id`; after successful activation the device entitlement becomes active. |
+| Demo checkout | `POST /customer/demo-purchase` is a local demo path that creates a purchase, auto-provisions a demo device, and returns the activation card directly to the customer page without exposing the provisioning token. |
 
 The production identity boundary is wallet signature first. Email remains optional metadata and support fallback, not the primary proof of customer ownership.
+
+## Customer Purchase Demo Requirement
+
+The customer portal must show the hardware ownership loop, not only the final activation form.
+
+| UI Step | Backend Action | Admin Visibility |
+|---|---|---|
+| Customer clicks `Demo buy Ava hardware` | `/customer/demo-purchase` calls the same purchase/provision path used by operator fulfillment | `Orders` shows the purchase; `Hardware` shows the provisioned device |
+| Customer optionally wallet-locks the purchase | Purchase stores `customer_wallet` | `Orders` shows wallet lock |
+| Customer receives activation code on page | Activation card includes URL/code and app/device id | `Orders -> Card` can re-open the same payload |
+| Customer connects/signs wallet | `/customer/wallet/challenge` + `/customer/wallet/login` creates/reuses customer | `Customer Support` shows customer |
+| Customer submits activation code | `/customer/activate` binds device to customer and activates plan | `Apps -> App users`, `Hardware`, and `Orders` show the activated relationship |
+
+Production deployments should replace the demo checkout with a real payment/fulfillment call into `/admin/purchases` or an allowlisted service webhook. The customer-visible activation model stays the same.

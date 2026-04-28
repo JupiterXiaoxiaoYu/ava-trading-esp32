@@ -209,6 +209,21 @@ C 端用户闭环：
 | App 用户管理 | Apps -> App users 或 `GET /admin/apps/{app_id}/customers` | 查看该 app 下的 C 端用户和已绑定设备 |
 | 运营支持 | Device Detail / Usage / Events | 查看单设备 config、usage、logs、OTA 状态 |
 
+本地 customer demo 可以把“购买硬件”也跑通：
+
+```text
+/customer -> Demo buy Ava hardware
+  -> POST /customer/demo-purchase
+  -> create_purchase()
+  -> 自动 provision demo device
+  -> 返回 activation_card
+  -> 用户钱包签名登录
+  -> POST /customer/activate
+  -> 后台 Apps / Hardware / Orders 可看到激活后的 app-device-customer 关系
+```
+
+真实生产环境应由支付/履约后端调用 `/admin/purchases` 或服务 webhook 创建 purchase，而不是让 customer 直接调用 demo endpoint。`/customer/demo-purchase` 在 production mode 下默认禁用，除非显式设置 `AVA_DEVICEKIT_ENABLE_DEMO_CHECKOUT=1`。
+
 后台会通过 `GET /admin/onboarding` 和 Dashboard 的 Setup checklist 返回当前闭环进度。这个 checklist 不依赖前端状态，而是由服务端根据 control plane、provider health、service plan、device registration、customer registration、activation、online session、developer services、firmware catalog 计算，用于告诉开发者/运营下一步该补什么。
 
 框架级 DePIN/设备合约：

@@ -143,6 +143,7 @@ ESP32 input / voice
 | Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
 | App-linked hardware ops | Framework control plane | App is the product unit; project is its internal backing record; devices, purchases, activation cards, customers, hardware profiles, and app logs are shown by app |
 | C-end hardware ops | Framework control plane | Customer records, wallet-signature activation, activation codes, app-scoped users/devices, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
+| Customer purchase demo | Framework gateway | `/customer` includes a demo checkout that calls `/customer/demo-purchase`, auto-provisions a device, displays the activation card, and then binds it through wallet signature activation |
 | Usage and entitlements | Framework control plane | Service plans, per-device entitlements, usage reports, and usage recording endpoints for C-end hardware service cost control |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-firmware-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
