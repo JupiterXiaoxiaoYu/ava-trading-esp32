@@ -34,6 +34,9 @@ class PaperExecutionProvider:
             "amount_usd": str(summary.get("amount_usd_raw") or params.get("amount_usd_raw") or ""),
             "token_amount": str(summary.get("token_amount") or params.get("token_amount") or ""),
             "price_usd": str(summary.get("price_usd") or params.get("price_usd") or ""),
+            "native_amount": str(summary.get("native_amount") or params.get("native_amount") or ""),
+            "out_native_amount": str(summary.get("out_native_amount") or params.get("out_native_amount") or ""),
+            "native_price_usd": str(summary.get("native_price_usd") or params.get("native_price_usd") or ""),
             "out_amount": str(summary.get("out_amount") or params.get("out_amount") or ""),
         }
         state.setdefault("paper_orders", []).insert(0, order)
@@ -102,7 +105,10 @@ def _apply_position(state: dict[str, Any], order: dict[str, Any]) -> None:
 
 def _apply_cash(state: dict[str, Any], order: dict[str, Any]) -> None:
     cash = _paper_cash(state)
-    delta = _extract_amount(order.get("amount"))
+    if str(order.get("action") or "") == "trade.sell_draft":
+        delta = _sell_cash_delta(order)
+    else:
+        delta = _decimal(order.get("native_amount")) or _extract_amount(order.get("amount"))
     if delta <= 0:
         return
     if str(order.get("action") or "") == "trade.sell_draft":
@@ -132,6 +138,17 @@ def _token_delta(order: dict[str, Any]) -> Decimal:
     if trade_usd > 0 and price_usd > 0:
         return trade_usd / price_usd
     return _extract_amount(order.get("amount"))
+
+
+def _sell_cash_delta(order: dict[str, Any]) -> Decimal:
+    explicit = _decimal(order.get("out_native_amount"))
+    if explicit > 0:
+        return explicit
+    amount_usd = _decimal(order.get("amount_usd"))
+    native_price = _decimal(order.get("native_price_usd"))
+    if amount_usd > 0 and native_price > 0:
+        return amount_usd / native_price
+    return Decimal("0")
 
 
 def _decimal(value: Any) -> Decimal:

@@ -32,16 +32,17 @@ class TradingSkill:
         token_id = str(params.get("token_id") or _selected_token_id(context) or "")
         symbol = str(params.get("symbol") or _selected_symbol(context) or "TOKEN")
         request_id = str(params.get("request_id") or f"ava_{int(time.time() * 1000)}")
-        amount_sol = str(params.get("amount_sol") or params.get("amount_native") or self.config.default_buy_sol)
         execution_mode = _execution_mode(params, context, self.config.execution_mode)
         action_name = normalize_action(action)
+        amount_value = _trade_amount_value(action_name, params, self.config)
         limit_price = params.get("limit_price")
         is_limit = action_name == "trade.limit_draft"
-        estimate = _estimate_trade(action_name, amount_sol, params, symbol)
+        estimate = _estimate_trade(action_name, amount_value, params, symbol)
+        amount_display = str(estimate.get("amount_label") or (amount_label(amount_value) if action_name != "trade.sell_draft" else _token_amount_label(_decimal_amount(amount_value), symbol)))
         summary = {
             "symbol": symbol,
             "token_id": token_id,
-            "amount": amount_label(amount_sol),
+            "amount": amount_display,
             "action": action_name,
         }
         summary.update({k: v for k, v in estimate.items() if v not in (None, "")})
@@ -53,7 +54,7 @@ class TradingSkill:
             "symbol": symbol,
             "chain": SOLANA,
             "token_id": token_id,
-            "amount_native": amount_label(amount_sol),
+            "amount_native": amount_display,
             "amount_usd": str(params.get("amount_usd") or estimate.get("amount_usd") or ""),
             "out_amount": str(params.get("out_amount") or estimate.get("out_amount") or ""),
             "timeout_sec": int(params.get("timeout_sec") or 30),
@@ -103,6 +104,7 @@ class TradingSkill:
         execution = executor.execute(summary, pending.params) if executor else {}
         body = _result_body(summary, execution_mode)
         screen = builders.result("Action confirmed", body, ok=True, context=context)
+        screen.payload.update(_result_payload_fields(summary, execution_mode))
         return ActionResult(True, "confirmed", screen=screen, data={**summary, "execution": execution})
 
     def cancel(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
@@ -150,11 +152,32 @@ def amount_label(amount: str) -> str:
 
 
 def _estimate_trade(action: str, amount_native: Any, params: dict[str, Any], symbol: str) -> dict[str, str]:
-    if action not in {"trade.market_draft", "trade.limit_draft"}:
+    if action not in {"trade.market_draft", "trade.limit_draft", "trade.sell_draft"}:
         return {}
-    native_amount = _decimal_amount(amount_native)
     token_price = _decimal_price(params.get("token_price_usd") or params.get("price_usd") or params.get("price_raw") or params.get("current_price"))
     native_price = _decimal_price(params.get("native_price_usd") or params.get("sol_price_usd")) or DEFAULT_SOL_PRICE_USD
+    if action == "trade.sell_draft":
+        token_amount = _decimal_amount(amount_native)
+        if token_amount <= 0:
+            return {}
+        amount_label_text = _token_amount_label(token_amount, symbol)
+        out: dict[str, str] = {"token_amount": _fmt_decimal(token_amount), "amount_label": amount_label_text}
+        if token_price > 0:
+            amount_usd = token_amount * token_price
+            native_out = amount_usd / native_price if native_price > 0 else Decimal("0")
+            out.update(
+                {
+                    "amount_usd": format_money(float(amount_usd), max_chars=12),
+                    "amount_usd_raw": _fmt_decimal(amount_usd),
+                    "native_price_usd": _fmt_decimal(native_price),
+                    "price_usd": _fmt_decimal(token_price),
+                    "out_native_amount": _fmt_decimal(native_out),
+                    "out_amount": amount_label(_format_native_amount(native_out)),
+                }
+            )
+        return out
+
+    native_amount = _decimal_amount(amount_native)
     if native_amount <= 0:
         return {}
     amount_usd = native_amount * native_price
@@ -162,6 +185,7 @@ def _estimate_trade(action: str, amount_native: Any, params: dict[str, Any], sym
         "amount_usd": format_money(float(amount_usd), max_chars=12),
         "amount_usd_raw": _fmt_decimal(amount_usd),
         "native_price_usd": _fmt_decimal(native_price),
+        "native_amount": _fmt_decimal(native_amount),
     }
     if token_price > 0:
         token_amount = amount_usd / token_price
@@ -169,6 +193,12 @@ def _estimate_trade(action: str, amount_native: Any, params: dict[str, Any], sym
         out["price_usd"] = _fmt_decimal(token_price)
         out["out_amount"] = f"{format_count(float(token_amount), max_chars=8)} {symbol or 'TOKEN'}"
     return out
+
+
+def _trade_amount_value(action: str, params: dict[str, Any], config: AvaBoxSkillConfig) -> str:
+    if action == "trade.sell_draft":
+        return str(params.get("token_amount") or params.get("amount_token") or params.get("balance_raw") or params.get("amount_native") or params.get("amount") or "0")
+    return str(params.get("amount_sol") or params.get("amount_native") or config.default_buy_sol)
 
 
 def _decimal_amount(value: Any) -> Decimal:
@@ -192,6 +222,19 @@ def _fmt_decimal(value: Decimal) -> str:
     return format(value.normalize(), "f") if value else "0"
 
 
+def _format_native_amount(value: Decimal) -> str:
+    if value <= 0:
+        return "0"
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _token_amount_label(value: Decimal, symbol: str) -> str:
+    if value <= 0:
+        return f"0 {symbol or 'TOKEN'}"
+    return f"{format_count(float(value), max_chars=8)} {symbol or 'TOKEN'}"
+
+
 def _execution_mode(params: dict[str, Any], context: AppContext | None, default: str) -> str:
     mode = str(params.get("execution_mode") or params.get("trade_mode") or "").lower()
     if not mode and context:
@@ -212,6 +255,15 @@ def _result_body(summary: dict[str, Any], execution_mode: str) -> str:
     if action == "trade.limit_draft":
         return f"{mode} limit order created for {symbol}."
     return f"{mode} buy filled for {symbol}."
+
+
+def _result_payload_fields(summary: dict[str, Any], execution_mode: str) -> dict[str, str]:
+    fields = {"mode_label": execution_mode.upper()}
+    for key in ("amount", "amount_usd", "out_amount"):
+        value = str(summary.get(key) or "")
+        if value:
+            fields[key] = value
+    return fields
 
 
 def _selected_token_id(context: AppContext | None) -> str:

@@ -170,7 +170,10 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     draft = session.handle({"type": "key_action", "action": "buy", **token})
     assert draft["data"]["amount_usd"] == "$15"
     assert draft["data"]["out_amount"] == "750K BONK"
-    session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    buy_result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert buy_result["data"]["success"] is True
+    assert buy_result["data"]["out_amount"] == "750K BONK"
+    assert buy_result["data"]["amount_usd"] == "$15"
 
     portfolio = session.handle({"type": "key_action", "action": "portfolio"})
     data = portfolio["data"]
@@ -182,6 +185,17 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     assert data["holdings"][0]["avg_cost_usd"] == "$0.00002"
     assert data["holdings"][0]["value_usd"] == "$15.00"
     assert data["holdings"][0]["pnl"] == "$0"
+
+    sell_draft = session.handle({"type": "key_action", "action": "portfolio_sell", **data["holdings"][0]})
+    assert sell_draft["screen"] == "confirm"
+    assert sell_draft["data"]["action"] == "SELL"
+    assert sell_draft["data"]["amount_native"] == "750K BONK"
+    assert sell_draft["data"]["out_amount"] == "0.1 SOL"
+    sell_result = session.handle({"type": "confirm", "trade_id": sell_draft["action_draft"]["request_id"]})
+    assert sell_result["data"]["success"] is True
+    assert sell_result["data"]["out_amount"] == "0.1 SOL"
+    portfolio_after_sell = session.handle({"type": "key_action", "action": "portfolio"})
+    assert portfolio_after_sell["data"]["pnl_reason"] == "Cash: 1 SOL"
 
 
 def test_legacy_screen_context_token_is_treated_as_selected():

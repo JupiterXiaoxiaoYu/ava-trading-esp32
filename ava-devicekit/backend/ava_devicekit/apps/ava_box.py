@@ -148,8 +148,13 @@ class AvaBoxApp:
             self._remember_screen(draft.screen)
             return draft
         if action == "portfolio_sell":
-            token_id = str(payload.get("token_id") or payload.get("addr") or self._selected_token_id())
-            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, **trade_mode_payload, "token_id": token_id, "symbol": payload.get("symbol") or self._selected_symbol(), "amount_native": payload.get("balance_raw") or payload.get("amount_native") or ""}, context=self.context)
+            sell_payload = {
+                **payload,
+                "token_id": payload.get("token_id") or payload.get("addr") or self._selected_token_id(),
+                "symbol": payload.get("symbol") or self._selected_symbol(),
+                "amount_native": payload.get("balance_raw") or payload.get("amount_native") or "",
+            }
+            draft = self.skills.create_action_draft("trade.sell_draft", self._trade_params(sell_payload, trade_mode_payload), context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
@@ -326,7 +331,16 @@ class AvaBoxApp:
 
     def _trade_params(self, payload: dict[str, Any], mode_payload: dict[str, Any]) -> dict[str, Any]:
         market = self._selected_market_row()
-        price = payload.get("price_raw") or payload.get("price_usd") or market.get("price_raw") or market.get("price")
+        price = (
+            payload.get("price_raw")
+            or payload.get("price_usd")
+            or payload.get("last_price_usd")
+            or payload.get("avg_cost_usd")
+            or market.get("price_raw")
+            or market.get("price")
+            or market.get("last_price_usd")
+            or market.get("avg_cost_usd")
+        )
         return {
             **market,
             **payload,

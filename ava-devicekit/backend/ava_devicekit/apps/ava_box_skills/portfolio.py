@@ -69,6 +69,8 @@ def _portfolio_row(row: dict[str, Any]) -> dict[str, Any]:
         "contract_tail": str(row.get("contract_tail") or _contract_tail(addr)),
         "source_tag": str(row.get("source_tag") or row.get("source") or "paper"),
         "balance_raw": str(row.get("balance_raw") or row.get("amount_raw") or row.get("amount") or "0"),
+        "last_price_usd": str(row.get("last_price_usd") or row.get("price_usd") or ""),
+        "cost_basis_usd": str(row.get("cost_basis_usd") or ""),
     }
 
 
