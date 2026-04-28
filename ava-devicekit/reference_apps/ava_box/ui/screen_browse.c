@@ -200,6 +200,21 @@ static const char *_signal_summary(const browse_token_t *t)
     return "Signal updating";
 }
 
+static void _signal_amount_text(const browse_token_t *t, char *out, size_t out_n)
+{
+    const char *value;
+    const char *p;
+    if (!out || out_n == 0) return;
+    out[0] = '\0';
+    if (!t) return;
+    value = _signal_value(t);
+    p = value;
+    if (strncmp(p, "BUY", 3) == 0) p += 3;
+    else if (strncmp(p, "SELL", 4) == 0) p += 4;
+    while (*p == ' ') p++;
+    snprintf(out, out_n, "%s", *p ? p : value);
+}
+
 static const char *_signal_first(const browse_token_t *t)
 {
     return t->signal_first[0] ? t->signal_first : "First -";
@@ -394,14 +409,25 @@ static void _render_rows(void)
                                   t->signal_last[0] || t->signal_count[0] ||
                                   t->signal_vol[0];
             if (has_signal_meta) {
-                lv_label_set_text(ui->lbl_price, _signal_value(t));
+                const char *label = _signal_label(t);
+                char amount_buf[32];
+                _signal_amount_text(t, amount_buf, sizeof(amount_buf));
+                lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _browse_first_line_y());
+                lv_obj_set_width(ui->lbl_price, 22);
+                lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_CENTER, 0);
+                lv_obj_set_pos(ui->lbl_chg, COL_PRICE_X + 28, _browse_first_line_y());
+                lv_obj_set_width(ui->lbl_chg, 194);
+                lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_LEFT, 0);
+                lv_label_set_text(ui->lbl_price, strcmp(label, "SELL") == 0 ? "S" : (strcmp(label, "BUY") == 0 ? "B" : "?"));
+                lv_obj_set_style_text_color(ui->lbl_price, strcmp(label, "SELL") == 0 ? COLOR_RED : (strcmp(label, "BUY") == 0 ? COLOR_GREEN : COLOR_GRAY), 0);
+                lv_label_set_text(ui->lbl_chg, amount_buf);
+                lv_obj_set_style_text_color(ui->lbl_chg, text_color, 0);
+                lv_label_set_text(ui->lbl_chain, "");
                 lv_label_set_text(ui->lbl_subtitle, "");
-                lv_label_set_text(ui->lbl_chg, "");
                 lv_label_set_text(ui->lbl_meta1, _signal_first(t));
                 lv_label_set_text(ui->lbl_meta2, _signal_last(t));
                 lv_label_set_text(ui->lbl_meta3, _signal_count(t));
                 lv_label_set_text(ui->lbl_meta4, _signal_vol(t));
-                lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
             } else {
                 const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
                 lv_color_t chg_color = COLOR_GRAY;
