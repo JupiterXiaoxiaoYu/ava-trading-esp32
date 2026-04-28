@@ -114,7 +114,7 @@ def make_handler(
                 if not self._authorized_admin():
                     return
                 active = self._session().app.manifest.to_dict()
-                self._send_json({"active": active, "items": [active]})
+                self._send_json(control_plane.apps_overview(active_manifest=active))
                 return
             if path.startswith("/admin/apps/") and path.endswith("/customers"):
                 if not self._authorized_admin():
@@ -712,12 +712,15 @@ def _dashboard_payload(
 ) -> dict[str, Any]:
     providers = provider_health() if provider_health else provider_health_report(settings)
     control_plane = ControlPlaneStore(settings.control_plane_store_path).snapshot()
+    active_manifest = manager.get("default").app.manifest.to_dict()
+    apps = ControlPlaneStore(settings.control_plane_store_path).apps_overview(active_manifest=active_manifest)
     firmware = firmware_catalog(settings)
     developer_services = developer_service_report(settings.developer_services)
     return {
         "ok": True,
         "runtime": settings.sanitized_dict(),
         "control_plane": control_plane,
+        "apps": apps,
         "providers": providers,
         "developer_services": developer_services,
         "firmware": firmware,

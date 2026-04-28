@@ -25,6 +25,22 @@ The console must therefore prioritize service operation, not developer-account c
 
 The important correction is: customers should not be treated as developers. A customer buys/receives hardware, registers once, then binds it to the service by activation code. Operators may pre-create or import customer records, but that is an operations shortcut, not the core product flow.
 
+## App-Centered Data Model
+
+The product unit is the app. A project is the internal control-plane record that stores app ownership/config metadata; operators should think in `app_id`, not manually in `project_id`.
+
+| Relationship | Rule | Current Behavior |
+|---|---|---|
+| App -> Project | One app has a backing project record. | Creating an app creates a project/app record; provisioning can also auto-create the backing project from `app_id`. |
+| App -> Providers | Apps inherit server default providers. | ASR, LLM, TTS, chain, and execution provider config are server-wide defaults in the MVP. |
+| App -> Services | Apps inherit server service registry entries. | Solana RPC, wallet proxy, oracle, payment, data anchor, and custom APIs are registered at backend level. |
+| App -> Hardware profiles | Hardware profiles are the board models used by devices under the app. | The console groups profiles from device `board_model`; OTA/profile targeting can build on this. |
+| App -> Devices | Every physical unit belongs to one app. | `/admin/devices/register` accepts `device_id + app_id`; `project_id` is resolved internally. |
+| App -> Orders | A purchase/activation card is scoped to the app and device. | `/admin/purchases` records `app_id`, `device_id`, `plan_id`, optional wallet lock, and activation URL. |
+| App -> Customers | Customers become app users by wallet login plus device activation. | `/admin/apps/{app_id}/customers` shows app users and their bound devices. |
+
+This is the intended operator flow: create/select app -> configure server defaults -> provision app-linked hardware -> create activation card -> customer wallet-signs and activates -> support by app/device/customer.
+
 ## End-To-End Flow
 
 | Step | Actor | Console/API | Result |
@@ -47,8 +63,10 @@ The admin UI should be read as an operator console with these jobs:
 |---|---|---|
 | Overview | Server posture and fleet totals | Server-wide, all devices |
 | Dashboard | Setup checklist and next required action | Server-computed app/user/device closure |
-| Apps | App/project records, app users, app-scoped logs | App records, customers, devices, runtime events |
-| Fleet Setup | Team operators, provisioning, device inventory | Control-plane records |
+| Apps | App/project records, app relationship map, app users, app-scoped logs | App records, customers, devices, purchases, runtime events |
+| Fleet Setup | Team operators, provisioning, purchase activation cards | Control-plane records |
+| Hardware | App-linked hardware profiles and device inventory | Devices grouped by app/board model |
+| Orders | Purchases, wallet locks, plans, activation cards | App/device/customer activation records |
 | Customers | Operator import/support view for customer/device binding | Customer/device binding |
 | Providers | Runtime ASR/LLM/TTS/chain/execution configuration | Server-wide provider config |
 | Usage | Service plans, entitlements, cost/usage counters | Device/customer/service-period |
@@ -68,6 +86,9 @@ Recent events and the Events tab are server-side runtime event streams. They are
 | What should I do next? | `Dashboard -> Setup checklist` uses `/admin/onboarding` to show required setup progress and next action. |
 | Where does the C-end user enter? | `/customer` is the hardware-owner portal. `Customer Support` remains an operator support/import view. |
 | How do I see app users? | `Apps -> App users` shows `/admin/apps/{app_id}/customers` with bound devices. |
+| How do I see the full app relationship? | `Apps -> App relationship map` shows app -> project -> devices -> orders -> customers plus provider/service scope. |
+| How do I provision hardware for one app? | `Fleet Setup -> Provision device` uses `device_id + app_id`; the backend resolves/creates the backing project. |
+| How do I manage purchase activation cards? | `Orders` shows `/admin/purchases` records and re-opens activation-card payloads. |
 | How do I inspect one device? | `Device Detail` opens diagnostics for a device id, including owner/customer, config, runtime state, connection, usage, and recent events. |
 | How do I see logs for one app? | `Apps -> App logs` filters events by devices assigned to that `app_id`; `Server Timeline` is the global backend log. |
 | How do I manage usage limits? | `Usage` creates service plans, assigns entitlements, records usage, and shows limit status by device. |

@@ -141,7 +141,8 @@ ESP32 input / voice
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider, optional self-custody transaction provider, and custom execution provider classes in `apps/ava_box_skills/execution.py` |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/ota/firmware`, `/admin/developer/services`, optional bearer auth |
 | Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
-| C-end hardware ops | Framework control plane | Customer records, one-step user registration, activation codes, app-scoped users/devices, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
+| App-linked hardware ops | Framework control plane | App is the product unit; project is its internal backing record; devices, purchases, activation cards, customers, hardware profiles, and app logs are shown by app |
+| C-end hardware ops | Framework control plane | Customer records, wallet-signature activation, activation codes, app-scoped users/devices, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
 | Usage and entitlements | Framework control plane | Service plans, per-device entitlements, usage reports, and usage recording endpoints for C-end hardware service cost control |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-firmware-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |

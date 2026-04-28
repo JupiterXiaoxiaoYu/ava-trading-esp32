@@ -162,9 +162,10 @@ Control Plane 是当前自托管后台的数据层，默认存储在 JSON 文件
 | 数据对象 | 用途 |
 |---|---|
 | users | 运营/开发/查看者账号记录；不是 C 端用户注册系统 |
-| projects | app/project 记录，用于 app id、chain、owner、device config 默认值 |
+| projects | app 的内部 backing record，用于 app id、chain、owner、device config 默认值 |
 | customers | C 端硬件客户，绑定激活码后的设备 |
 | devices | 已 provision / registered / active / suspended / revoked 的硬件 |
+| purchases | 硬件订单/激活卡，连接 app、device、plan、activation code、可选 wallet lock |
 | runtime_config | 后台持久化 provider/adapter/execution/services 配置 |
 | default_device_config | 设备默认 AI name、language、wake phrases、volume、wallet mode、risk mode |
 | service_plans | 设备套餐和 usage limits |
@@ -173,24 +174,38 @@ Control Plane 是当前自托管后台的数据层，默认存储在 JSON 文件
 设备生命周期：
 
 ```text
-Operator creates project/app record
-  -> Operator provisions device
+Operator creates/selects app_id
+  -> Backend resolves or creates the backing project record
+  -> Operator provisions device for that app_id
   -> Backend returns provisioning_token + activation_code
+  -> Operator creates purchase/activation card for app_id + device_id + plan_id
   -> Device registers with provisioning_token
   -> Backend returns per-device bearer token
-  -> C-end user signs in at `/customer` and activates device with activation_code
+  -> C-end user signs in at `/customer` with wallet signature and activates device with activation_code
   -> Device pulls resolved config and starts normal operation
   -> Operator monitors logs/usage/OTA/provider health
 ```
+
+App 是产品单元，Project 是内部控制面记录。后台和 API 的正常操作应该围绕 `app_id`，不是让运营手填 `project_id`。当前对应关系如下：
+
+| 对应关系 | 当前实现 |
+|---|---|
+| App -> Project | `POST /admin/projects` 创建 app/project record；`POST /admin/devices/register` 也可以只传 `app_id` 并自动创建 backing project |
+| App -> Provider/Service | 当前为 server default，所有 app 继承 ASR/LLM/TTS/chain/execution 和 services 配置 |
+| App -> Hardware | 设备的 `board_model` 形成 hardware profile，用于后台 inventory 和后续 OTA targeting |
+| App -> Device | 每个 device 必须有一个 `app_id`，`/admin/apps/{app_id}/devices` 查看该 app 的硬件 |
+| App -> Order | `POST /admin/purchases` 记录 `app_id + device_id + plan_id + activation_code + customer_wallet` |
+| App -> Customer | 钱包登录并激活设备后，customer 通过 `app_ids` 和绑定设备进入 app 用户列表 |
 
 C 端用户闭环：
 
 | 步骤 | API / 后台入口 | 结果 |
 |---|---|---|
-| 创建 app/project | Apps -> Create app/project record 或 `POST /admin/projects` | 生成 app/project 运营记录 |
-| 预制硬件 | Fleet Setup -> Provision device 或 `POST /admin/devices/register` | 生成 provisioning token 和 activation code |
+| 创建/选择 app | Apps -> Create app/project record 或 `POST /admin/projects` | 生成 app 运营记录；project 是 backing record |
+| 预制硬件 | Fleet Setup -> Provision device 或 `POST /admin/devices/register` | 按 `app_id` 生成 device、provisioning token 和 activation code |
+| 创建激活卡 | Fleet Setup -> Create purchase 或 `POST /admin/purchases` | 生成订单/激活 URL，可绑定 plan 和 buyer wallet |
 | 设备注册 | `POST /device/register` | 设备换取 per-device bearer token |
-| 用户登录/验证 | `/customer` -> sign in -> activation code，或脚本调用 `POST /customer/register` | 创建/复用 customer，验证 customer session，并绑定 activation code |
+| 用户登录/验证 | `/customer` -> wallet signature -> activation code | 创建/复用 customer，验证 wallet session，并绑定 activation code |
 | App 用户管理 | Apps -> App users 或 `GET /admin/apps/{app_id}/customers` | 查看该 app 下的 C 端用户和已绑定设备 |
 | 运营支持 | Device Detail / Usage / Events | 查看单设备 config、usage、logs、OTA 状态 |
 
@@ -478,7 +493,9 @@ export AVE_PROXY_WALLET_ID=...
 | Product | Apps | 创建 app/project record、查看 CLI app template、查 app logs |
 | Product | Providers | 查看和编辑 ASR/LLM/TTS/chain/execution provider config |
 | Product | Services | 查看 backend service registry，测试 allowlisted service invoke |
-| Hardware Ops | Fleet Setup | 创建 operator、provision device、查看 fleet inventory |
+| Hardware Ops | Fleet Setup | 创建 operator、按 app provision device、创建 purchase/activation card |
+| Hardware Ops | Hardware | 按 app/hardware profile 查看 device inventory |
+| Hardware Ops | Orders | 查看 purchase/order、wallet lock、activation card、plan、status |
 | Hardware Ops | Device Detail | 查询单设备 config、diagnostics、runtime session、usage |
 | Hardware Ops | Firmware | 发布固件、查看 firmware catalog、触发 OTA check |
 | Customers | Customer Support | 运营 support/import customer；C 端入口是 `/customer` |
@@ -514,8 +531,10 @@ Configure app providers
 | 功能 | 说明 |
 |---|---|
 | Create app/project record | 创建 `project_id`、`app_id`、chain、owner |
+| App relationship map | 展示 app -> project -> hardware -> device -> order -> customer，以及 providers/services 当前 scope |
 | Code templates | 展示 `ava-devicekit init-app` 模板命令 |
 | Current app records | 查看 control plane 中的 app/project |
+| App users | 调用 `/admin/apps/{app_id}/customers` 查看 app 下的 C 端用户和绑定设备 |
 | App logs | 按 app id 或 device id 聚合事件日志 |
 
 开发者真正创建代码仍通过 CLI：

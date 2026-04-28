@@ -33,10 +33,23 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 |---|---|---|
 | Control-plane user | Admin/developer/operator identity for managing the backend | `user_id`, `username`, `display_name`, `role` |
 | Customer | C-end hardware user receiving a physical device | `customer_id`, `email`, `display_name`, `wallet`, `status`, `app_ids`, `project_ids`, hashed customer session token |
-| Project | Product/app grouping, defaulting to Solana | `project_id`, `name`, `chain`, `owner_user_id`, `device_config` |
+| App | Product experience assigned to hardware and customers | `app_id`, app manifest, app-scoped devices/users/orders |
+| Project | Internal app backing record, defaulting to Solana | `project_id`, `app_id`, `name`, `chain`, `owner_user_id`, `device_config` |
 | Device | Physical ESP32 unit | `device_id`, `project_id`, `customer_id`, `board_model`, `app_id`, `status`, `firmware_version`, `config` |
+| Purchase/order | Hardware sale or shipment activation record | `purchase_id`, `order_ref`, `app_id`, `device_id`, `plan_id`, `activation_code`, `customer_wallet` |
 | Runtime config | Server-side provider/service configuration | `providers`, `adapters`, `execution`, `services` |
 | Firmware | OTA binary artifact | `model`, `version`, `filename`, `size` |
+
+## App Relationship Requirements
+
+| Requirement | Implementation |
+|---|---|
+| Device belongs to app | Provisioning accepts `device_id + app_id`; the backend stores `device.app_id` and resolves/creates the backing project. |
+| Project id is not an operator input | `project_id` remains accepted for compatibility, but normal UI does not expose it for provisioning. |
+| Providers/services have clear scope | Provider and service registry entries are shown as `server_default` inherited by apps until per-app overrides are implemented. |
+| Hardware is visible by app | Admin Hardware page lists `app_id`, `board_model`, `device_id`, customer, plan, and status. |
+| Orders are visible by app | Admin Orders page lists purchase/order records with app, device, wallet lock, activation code, plan, and status. |
+| Customers are visible by app | `/admin/apps/{app_id}/customers` returns wallet-authenticated customers and their bound devices. |
 
 ## Device Lifecycle
 
@@ -91,6 +104,7 @@ Configuration is resolved as default config -> project config -> device override
 | `GET` | `/customer/me` | Verify customer token and return the user's devices |
 | `POST` | `/customer/activate` | Bind an activation code to the logged-in customer |
 | `POST` | `/customer/register` | C-end user registration; creates/reuses customer and optionally binds an activation code |
+| `GET` | `/admin/apps` | App overview with project/device/order/customer counts and provider/service scope |
 | `GET` | `/admin/apps/{app_id}/customers` | App-scoped user list with bound devices |
 | `GET` | `/admin/apps/{app_id}/devices` | App-scoped hardware list |
 | `GET` | `/admin/onboarding` | Server-side setup checklist and next required action for closing the app/user/device loop |
@@ -103,6 +117,8 @@ Configuration is resolved as default config -> project config -> device override
 | `GET` | `/admin/devices/{device_id}/diagnostics` | View device state, connection, config, and recent events |
 | `GET` | `/device/config` | Device pulls its resolved configuration |
 | `POST` | `/device/usage` | Device reports usage with its bearer token |
+| `GET/POST` | `/admin/purchases` | List/create app-scoped purchase activation cards |
+| `GET` | `/admin/purchases/{purchase_id}/activation-card` | Re-open the customer activation payload |
 
 ## Remaining Later Work
 

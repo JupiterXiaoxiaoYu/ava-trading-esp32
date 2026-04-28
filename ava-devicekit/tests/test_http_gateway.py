@@ -90,8 +90,13 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "data-tab=\"devices\"" in html
         assert "data-tab=\"control\"" in html
         assert "data-tab=\"apps\"" in html
+        assert "data-tab=\"hardware\"" in html
+        assert "data-tab=\"orders\"" in html
         assert "data-tab=\"usage\"" in html
         assert "Hardware Service Console" in html
+        assert "id=\"app-map\"" in html
+        assert "id=\"hardware-devices-table\"" in html
+        assert "id=\"orders-purchases-table\"" in html
         assert "id=\"app-log-form\"" in html
         assert "id=\"customer-register-form\"" in html
         assert "id=\"purchase-form\"" in html
@@ -108,7 +113,9 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert _get(base_url, "/admin/developer/services")["count"] == 0
         assert "items" in _get(base_url, "/admin/ota/firmware")
         assert _get(base_url, "/admin/tasks")["count"] == 0
-        assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+        apps = _get(base_url, "/admin/apps")
+        assert apps["active"]["app_id"] == "ava_box"
+        assert apps["items"][0]["app_id"] == "ava_box"
         assert _get(base_url, "/admin/apps/ava_box/customers")["ok"] is True
         assert _get(base_url, "/admin/apps/ava_box/devices")["ok"] is True
         onboarding = _get(base_url, "/admin/onboarding")
@@ -123,6 +130,28 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert purchase_step["api"] == "POST /admin/purchases"
         assert _get(base_url, "/admin/dashboard.json")["onboarding"]["required_total"] >= 1
         assert _get(base_url, "/admin/dashboard.json")["ok"] is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_provisions_device_by_app_id_without_project_id(tmp_path):
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        provisioned = _post(base_url, "/admin/devices/register", {"device_id": "sensor-http-box", "app_id": "sensor_oracle"})
+
+        assert provisioned["device"]["app_id"] == "sensor_oracle"
+        assert provisioned["device"]["project_id"].startswith("prj_sensor_oracle")
+        apps = _get(base_url, "/admin/apps")
+        sensor = next(item for item in apps["items"] if item["app_id"] == "sensor_oracle")
+        assert sensor["devices_count"] == 1
+        assert sensor["project_id"] == provisioned["device"]["project_id"]
+        devices = _get(base_url, "/admin/apps/sensor_oracle/devices")
+        assert devices["items"][0]["device_id"] == "sensor_http_box"
     finally:
         server.shutdown()
         thread.join(timeout=5)

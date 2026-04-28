@@ -70,6 +70,7 @@ class ControlPlaneStore:
                         "slug": "default-solana",
                         "owner_user_id": data["users"][0]["user_id"],
                         "chain": "solana",
+                        "app_id": "ava_box",
                         "description": "Default project for local ESP32 Solana hardware apps.",
                         "created_at": now,
                     }
@@ -476,6 +477,47 @@ class ControlPlaneStore:
         rows = [_safe_device(item) for item in data.get("devices", []) if not app_id or item.get("app_id") == app_id]
         return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
 
+    def apps_overview(self, *, active_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = self.bootstrap()
+        projects = [dict(item) for item in data.get("projects", [])]
+        devices = data.get("devices", [])
+        customers = data.get("customers", [])
+        purchases = data.get("purchases", [])
+        app_ids = {str(item.get("app_id") or "ava_box") for item in projects}
+        app_ids.update(str(item.get("app_id") or "") for item in devices if item.get("app_id"))
+        app_ids.update(str(item.get("app_id") or "") for item in purchases if item.get("app_id"))
+        if active_manifest and active_manifest.get("app_id"):
+            app_ids.add(str(active_manifest["app_id"]))
+        rows: list[dict[str, Any]] = []
+        for app_id in sorted(app_ids or {"ava_box"}):
+            project = next((item for item in projects if str(item.get("app_id") or "") == app_id), None)
+            app_devices = [item for item in devices if str(item.get("app_id") or "") == app_id or (project and item.get("project_id") == project.get("project_id"))]
+            app_purchases = [item for item in purchases if str(item.get("app_id") or "") == app_id]
+            customer_ids = {str(item.get("customer_id") or "") for item in app_devices if item.get("customer_id")}
+            app_customers = [
+                item
+                for item in customers
+                if app_id in set(item.get("app_ids") or []) or str(item.get("customer_id") or "") in customer_ids
+            ]
+            hardware_profiles = sorted({str(item.get("board_model") or "esp32") for item in app_devices})
+            rows.append(
+                {
+                    "app_id": app_id,
+                    "project_id": str((project or {}).get("project_id") or ""),
+                    "name": str((project or {}).get("name") or (active_manifest or {}).get("name") or app_id),
+                    "chain": str((project or {}).get("chain") or (active_manifest or {}).get("chain") or "solana"),
+                    "project": dict(project or {}),
+                    "devices_count": len(app_devices),
+                    "active_devices_count": len([item for item in app_devices if item.get("status") in {"active", "online_seen"}]),
+                    "customers_count": len(app_customers),
+                    "purchases_count": len(app_purchases),
+                    "hardware_profiles": hardware_profiles,
+                    "provider_scope": "server_default",
+                    "service_scope": "server_default",
+                }
+            )
+        return {"ok": True, "items": rows, "count": len(rows), "active": active_manifest or {}}
+
     def purchases(self, app_id: str = "") -> dict[str, Any]:
         data = self.bootstrap()
         app_id = str(app_id or "").strip()
@@ -487,7 +529,7 @@ class ControlPlaneStore:
         requested_device_id = str(body.get("device_id") or body.get("serial") or _id("device"))
         device_id = normalize_control_device_id(requested_device_id)
         app_id = str(body.get("app_id") or "ava_box").strip()
-        project_id = str(body.get("project_id") or data["projects"][0]["project_id"])
+        project_id = str(body.get("project_id") or "").strip()
         plan_id = str(body.get("plan_id") or "")
         if plan_id and not any(item.get("plan_id") == plan_id for item in data["service_plans"]):
             raise ValueError("service_plan_not_found")
@@ -520,14 +562,26 @@ class ControlPlaneStore:
             current_device = _find_device(state, str(device["device_id"]))
             if not current_device:
                 raise ValueError("device_not_found")
-            current_device["app_id"] = app_id or str(current_device.get("app_id") or "ava_box")
+            resolved_app_id = app_id or str(current_device.get("app_id") or "ava_box")
+            existing_project_id = str(current_device.get("project_id") or "")
+            resolver_project_id = project_id or (existing_project_id if str(current_device.get("app_id") or "") == resolved_app_id else "")
+            project = _resolve_project_for_app(
+                state,
+                app_id=resolved_app_id,
+                project_id=resolver_project_id,
+                owner_user_id=str(current_device.get("owner_user_id") or state["users"][0]["user_id"]),
+                chain=str(body.get("chain") or "solana"),
+                name=str(body.get("app_name") or body.get("project_name") or f"{resolved_app_id} App"),
+            )
+            current_device["app_id"] = resolved_app_id
+            current_device["project_id"] = str(project.get("project_id") or current_device.get("project_id") or "")
             if plan_id:
                 current_device["entitlement"] = _entitlement({"plan_id": plan_id, "status": str(body.get("entitlement_status") or "pending_activation"), "expires_at": body.get("expires_at") or 0})
             purchase = {
                 "purchase_id": _id("pur"),
                 "order_ref": str(body.get("order_ref") or body.get("order_id") or ""),
                 "status": str(body.get("status") or "paid"),
-                "app_id": app_id or str(current_device.get("app_id") or "ava_box"),
+                "app_id": str(current_device.get("app_id") or "ava_box"),
                 "project_id": str(current_device.get("project_id") or project_id),
                 "device_id": str(current_device["device_id"]),
                 "activation_code": activation_code,
@@ -609,18 +663,27 @@ class ControlPlaneStore:
 
     def provision_device(self, body: dict[str, Any]) -> dict[str, Any]:
         data = self.bootstrap()
-        project_id = str(body.get("project_id") or data["projects"][0]["project_id"]).strip()
-        owner_user_id = str(body.get("owner_user_id") or _project_owner(data, project_id) or data["users"][0]["user_id"]).strip()
+        app_id = str(body.get("app_id") or "ava_box").strip()
+        project_id = str(body.get("project_id") or "").strip()
+        owner_user_id = str(body.get("owner_user_id") or data["users"][0]["user_id"]).strip()
         device_id = _slug(str(body.get("device_id") or _id("dev"))).replace("-", "_")
         now = _now()
         token = _token("avaprov")
         created: dict[str, Any] = {}
 
         def mutate(state: dict[str, Any]) -> None:
-            nonlocal created
+            nonlocal created, project_id, owner_user_id
             _ensure_shape(state)
-            if not any(item.get("project_id") == project_id for item in state["projects"]):
-                raise ValueError("project_not_found")
+            project = _resolve_project_for_app(
+                state,
+                app_id=app_id,
+                project_id=project_id,
+                owner_user_id=owner_user_id,
+                chain=str(body.get("chain") or "solana"),
+                name=str(body.get("app_name") or body.get("project_name") or f"{app_id} App"),
+            )
+            project_id = str(project["project_id"])
+            owner_user_id = str(body.get("owner_user_id") or project.get("owner_user_id") or state["users"][0]["user_id"]).strip()
             if not any(item.get("user_id") == owner_user_id for item in state["users"]):
                 raise ValueError("owner_not_found")
             if any(item.get("device_id") == device_id for item in state["devices"]):
@@ -631,7 +694,7 @@ class ControlPlaneStore:
                 "owner_user_id": owner_user_id,
                 "name": str(body.get("name") or device_id),
                 "board_model": str(body.get("board_model") or body.get("model") or "esp32"),
-                "app_id": str(body.get("app_id") or "ava_box"),
+                "app_id": app_id,
                 "status": "provisioned",
                 "customer_id": str(body.get("customer_id") or ""),
                 "activation_code_hash": _hash_token(_activation_code(device_id)),
@@ -1023,6 +1086,11 @@ def _ensure_shape(data: dict[str, Any]) -> None:
             customer["app_ids"] = [str(customer["app_id"])] if customer.get("app_id") else []
         if not isinstance(customer.get("project_ids"), list):
             customer["project_ids"] = [str(customer["project_id"])] if customer.get("project_id") else []
+    for project in data["projects"]:
+        if not isinstance(project, dict):
+            continue
+        if not project.get("app_id"):
+            project["app_id"] = "ava_box" if project.get("project_id") == "prj_default_solana" else _slug(str(project.get("name") or "app")).replace("-", "_")
     data["version"] = int(data.get("version") or 1)
 
 
@@ -1090,6 +1158,56 @@ def _project_owner(data: dict[str, Any], project_id: str) -> str:
         if item.get("project_id") == project_id:
             return str(item.get("owner_user_id") or "")
     return ""
+
+
+def _resolve_project_for_app(
+    data: dict[str, Any],
+    *,
+    app_id: str,
+    project_id: str = "",
+    owner_user_id: str = "",
+    chain: str = "solana",
+    name: str = "",
+) -> dict[str, Any]:
+    app_id = str(app_id or "ava_box").strip()
+    project_id = str(project_id or "").strip()
+    if project_id:
+        project = next((item for item in data.get("projects", []) if item.get("project_id") == project_id), None)
+        if project:
+            if not project.get("app_id"):
+                project["app_id"] = app_id
+                return project
+            if str(project.get("app_id") or "") == app_id:
+                return project
+    project = next((item for item in data.get("projects", []) if str(item.get("app_id") or "") == app_id), None)
+    if project:
+        return project
+    if not data.get("users"):
+        raise ValueError("owner_not_found")
+    owner = owner_user_id or str(data["users"][0]["user_id"])
+    if not any(item.get("user_id") == owner for item in data["users"]):
+        raise ValueError("owner_not_found")
+    slug = _slug(app_id)
+    base_project_id = f"prj_{slug.replace('-', '_')}"
+    candidate = base_project_id
+    suffix = 2
+    existing_ids = {str(item.get("project_id") or "") for item in data.get("projects", [])}
+    while candidate in existing_ids:
+        candidate = f"{base_project_id}_{suffix}"
+        suffix += 1
+    project = {
+        "project_id": candidate,
+        "name": name or f"{app_id} App",
+        "slug": slug,
+        "owner_user_id": owner,
+        "chain": chain or "solana",
+        "app_id": app_id,
+        "description": "Auto-created from app id during device provisioning.",
+        "device_config": {},
+        "created_at": _now(),
+    }
+    data["projects"].append(project)
+    return project
 
 
 def _hash_token(token: str) -> str:

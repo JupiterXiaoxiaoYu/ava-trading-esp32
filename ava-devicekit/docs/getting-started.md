@@ -29,6 +29,18 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 
 ## Admin Endpoints
 
+### Control-Plane Relationship
+
+| Layer | Meaning | Operator-facing rule |
+|---|---|---|
+| App | The product experience a customer device runs, such as `ava_box` or `sensor_oracle`. | Operators choose/create an `app_id`; this is the primary product handle. |
+| Project | Internal control-plane record backing an app. | `project_id` is resolved from `app_id` and should not be hand-entered for normal provisioning. |
+| Device | One physical ESP32 hardware unit. | Every device belongs to exactly one `app_id`; provisioning with only `device_id + app_id` is valid. |
+| Hardware profile | Board/model class derived from device `board_model`. | Used for inventory, OTA targeting, and board-port documentation. |
+| Providers/services | Server runtime defaults inherited by apps. | ASR/LLM/TTS/chain/execution and service registry are configured once for the backend until app overrides are added. |
+| Purchase/order | Activation-card record for shipped hardware. | Connects `app_id + device_id + plan_id + activation_code + optional customer_wallet`. |
+| Customer | C-end hardware owner. | Customer enters through `/customer`, signs with wallet, then binds an activation code. |
+
 | Path | Purpose |
 |---|---|
 | `/admin` | Operator dashboard with setup checklist, apps, fleet, customers, providers, usage, firmware, services, events, and raw state |
@@ -36,11 +48,11 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 | `/admin/capabilities` | Machine-readable framework/userland capability map |
 | `/admin/runtime` | Sanitized runtime settings without secret values |
 | `/admin/runtime/providers` | Update one ASR, LLM, TTS, chain, or execution provider block |
-| `/admin/apps` | Active app manifest list |
+| `/admin/apps` | App overview with app -> project -> device/order/customer counts |
 | `/admin/apps/{app_id}/customers` | App-scoped C-end users and their bound devices |
 | `/admin/apps/{app_id}/devices` | App-scoped hardware inventory |
-| `/admin/projects` | Create/list app project records |
-| `/admin/devices/register` | Provision hardware and return provisioning token plus activation code |
+| `/admin/projects` | Create/list app project records; project is the internal backing record for an app |
+| `/admin/devices/register` | Provision hardware by `device_id + app_id`; returns provisioning token plus activation code |
 | `/device/register` | Device exchanges provisioning token for a per-device bearer token |
 | `/device/config` | Device pulls resolved configuration after registration |
 | `/admin/devices/{device_id}/diagnostics` | Support view for one device: control-plane record, config, state, connection, usage, and events |
@@ -65,10 +77,10 @@ Use this sequence to verify the local service is usable as a hardware-product ba
 2. Create an app/project in `Apps`, or use the default `ava_box` project.
 3. Configure providers in `Providers`; secret values stay in environment variables.
 4. Create a service plan in `Usage`.
-5. Provision hardware in `Fleet Setup`; copy the `provisioning_token` and `activation_code`.
+5. Provision hardware in `Fleet Setup` with `device_id + app_id`; copy the `provisioning_token` and `activation_code`.
 6. Register the device with `POST /device/register`.
-7. Open `/customer`, sign in with the hardware buyer email, and activate the device with the `activation_code`.
-8. Confirm the user appears in `Apps -> App users` and the device appears in `Device Detail`.
+7. Open `/customer`, connect/sign with the hardware buyer wallet, and activate the device with the `activation_code`.
+8. Confirm the user appears in `Apps -> App users`, the device appears in `Hardware`, and the order appears in `Orders`.
 
 ## Wallet-Signature Purchase Flow
 

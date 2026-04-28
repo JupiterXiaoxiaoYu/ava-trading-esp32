@@ -16,6 +16,8 @@ def test_control_plane_bootstrap_and_device_registration(tmp_path):
     provisioned = store.provision_device({"device_id": "ava-box-001", "project_id": project["project_id"], "owner_user_id": user["user_id"], "app_id": "solana_ai_depin_device"})
 
     assert provisioned["device"]["device_id"] == "ava_box_001"
+    assert provisioned["device"]["app_id"] == "solana_ai_depin_device"
+    assert provisioned["device"]["project_id"] != project["project_id"]
     assert "provisioning_token" in provisioned
     registered = store.register_device({"provisioning_token": provisioned["provisioning_token"], "device_id": "ava-box-001", "firmware_version": "1.0.0"})
     assert registered["device"]["status"] == "registered"
@@ -73,6 +75,34 @@ def test_control_plane_customer_registration_and_app_users(tmp_path):
 
     same = store.register_customer({"email": "buyer@example.com", "app_id": "ava_box"})
     assert same["customer"]["customer_id"] == registered["customer"]["customer_id"]
+
+
+def test_control_plane_app_resolver_auto_creates_project_for_device(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+
+    provisioned = store.provision_device({"device_id": "sensor-one", "app_id": "sensor_oracle"})
+
+    assert provisioned["device"]["app_id"] == "sensor_oracle"
+    assert provisioned["device"]["project_id"].startswith("prj_sensor_oracle")
+    apps = store.apps_overview()
+    sensor = next(item for item in apps["items"] if item["app_id"] == "sensor_oracle")
+    assert sensor["project_id"] == provisioned["device"]["project_id"]
+    assert sensor["devices_count"] == 1
+    assert sensor["provider_scope"] == "server_default"
+    assert sensor["service_scope"] == "server_default"
+
+
+def test_control_plane_purchase_keeps_existing_device_project_aligned_to_app(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+    store.provision_device({"device_id": "retail-one", "app_id": "ava_box"})
+
+    purchase = store.create_purchase({"device_id": "retail-one", "app_id": "payment_terminal", "plan_id": "plan_starter"})
+
+    assert purchase["purchase"]["app_id"] == "payment_terminal"
+    assert purchase["purchase"]["project_id"].startswith("prj_payment_terminal")
+    device = store.app_devices("payment_terminal")["items"][0]
+    assert device["device_id"] == "retail_one"
+    assert device["project_id"] == purchase["purchase"]["project_id"]
 
 
 def test_control_plane_customer_session_token_and_activation(tmp_path):
