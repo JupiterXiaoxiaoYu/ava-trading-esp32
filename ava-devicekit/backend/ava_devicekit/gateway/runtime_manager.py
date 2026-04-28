@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,21 +9,11 @@ from ava_devicekit.apps.ava_box_skills import AvaBoxSkillConfig
 from ava_devicekit.core.types import AppContext, ScreenPayload
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
+from ava_devicekit.runtime.events import RuntimeEvent, RuntimeEventBus
 from ava_devicekit.runtime.settings import RuntimeSettings
 from ava_devicekit.storage.json_store import JsonStore
 
 SessionBuilder = Callable[[str], DeviceSession]
-
-
-@dataclass(slots=True)
-class RuntimeEvent:
-    ts: float
-    device_id: str
-    event: str
-    payload: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"ts": self.ts, "device_id": self.device_id, "event": self.event, "payload": self.payload}
 
 
 class RuntimeManager:
@@ -42,7 +32,8 @@ class RuntimeManager:
         self.state_store_path = str(state_store_path) if state_store_path else None
         self.queue_outbound = queue_outbound
         self.sessions: dict[str, DeviceSession] = {}
-        self.events: list[RuntimeEvent] = []
+        self.event_bus = RuntimeEventBus(max_events=max_events)
+        self.events: list[RuntimeEvent] = self.event_bus.events
         self._restored_boot_payloads: dict[str, dict[str, Any]] = {}
         self._state_mtimes: dict[str, float] = {}
 
@@ -109,6 +100,7 @@ class RuntimeManager:
         restored_payload = self._restored_boot_payloads.pop(device_id, None) or external_payload
         payload = session.emit(_screen_from_payload(restored_payload, session.app.context)) if restored_payload else session.boot()
         self._persist_session_state(device_id, session)
+        self._record_runtime_payload_events(device_id, payload, previous_screen="")
         self.record(device_id, "boot", {"screen": payload.get("screen"), "restored": bool(restored_payload)})
         return payload
 
@@ -116,10 +108,12 @@ class RuntimeManager:
         device_id = normalize_device_id(device_id)
         session = self.get(device_id)
         self._refresh_external_state(device_id, session)
+        previous_screen = str(session.snapshot().get("screen") or "")
         payload = session.handle(message)
         self._persist_session_state(device_id, session)
         if self.queue_outbound:
             self._append_outbound_payload(device_id, payload)
+        self._record_runtime_payload_events(device_id, payload, previous_screen=previous_screen)
         self.record(device_id, "message", {"message_type": message.get("type"), "screen": payload.get("screen")})
         return payload
 
@@ -130,7 +124,16 @@ class RuntimeManager:
         return session.snapshot()
 
     def list_devices(self) -> list[dict[str, Any]]:
-        return [{"device_id": device_id, **session.snapshot()} for device_id, session in sorted(self.sessions.items())]
+        device_ids = set(self.sessions)
+        device_ids.update(self._stored_device_ids())
+        return [
+            {
+                "device_id": device_id,
+                **(self.sessions[device_id].snapshot() if device_id in self.sessions else {}),
+                "connection": self.connection_state(device_id),
+            }
+            for device_id in sorted(device_ids)
+        ]
 
     def outbox(self, device_id: str = "default") -> dict[str, Any]:
         device_id = normalize_device_id(device_id)
@@ -143,34 +146,125 @@ class RuntimeManager:
         device_id = normalize_device_id(device_id)
         self._persist_session_state(device_id, self.get(device_id))
 
-    def pop_queued_outbound(self, device_id: str = "default") -> list[dict[str, Any]]:
+    def lease_queued_outbound(self, device_id: str = "default", *, visibility_timeout_sec: float = 5.0, max_attempts: int = 3) -> list[dict[str, Any]]:
         path = _device_outbox_path(self.state_store_path, device_id)
         if not path:
             return []
-        drained: list[dict[str, Any]] = []
+        leased: list[dict[str, Any]] = []
 
-        def drain(state: dict[str, Any]) -> dict[str, Any]:
+        def lease(state: dict[str, Any]) -> dict[str, Any]:
+            now = time.time()
             items = state.get("items") if isinstance(state.get("items"), list) else []
-            drained.extend(item for item in items if isinstance(item, dict))
-            state["items"] = []
+            kept = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("acked"):
+                    continue
+                attempts = int(item.get("attempts") or 0)
+                if attempts >= max_attempts:
+                    continue
+                if float(item.get("lease_until") or 0) > now:
+                    kept.append(item)
+                    continue
+                item["attempts"] = attempts + 1
+                item["lease_until"] = now + visibility_timeout_sec
+                item["last_sent_at"] = now
+                payload = dict(item.get("payload") if isinstance(item.get("payload"), dict) else {})
+                payload["message_id"] = str(item.get("message_id") or "")
+                payload["ack_required"] = True
+                leased.append(payload)
+                kept.append(item)
+            state["items"] = kept[-100:]
             state["updated_at"] = time.time()
             return state
 
-        JsonStore(path).update({"items": []}, drain)
-        return drained
+        JsonStore(path).update({"items": []}, lease)
+        for item in leased:
+            self.event_bus.outbound_sent(device_id, item, message_id=item.get("message_id", ""))
+        return leased
+
+    def pop_queued_outbound(self, device_id: str = "default") -> list[dict[str, Any]]:
+        return self.lease_queued_outbound(device_id, visibility_timeout_sec=0, max_attempts=1)
+
+    def ack_outbound(self, device_id: str = "default", message_id: str = "") -> bool:
+        path = _device_outbox_path(self.state_store_path, device_id)
+        message_id = str(message_id or "").strip()
+        if not path or not message_id:
+            return False
+        removed = False
+
+        def ack(state: dict[str, Any]) -> dict[str, Any]:
+            nonlocal removed
+            items = state.get("items") if isinstance(state.get("items"), list) else []
+            kept = []
+            for item in items:
+                if isinstance(item, dict) and str(item.get("message_id") or "") == message_id:
+                    removed = True
+                    continue
+                kept.append(item)
+            state["items"] = kept
+            state["updated_at"] = time.time()
+            return state
+
+        JsonStore(path).update({"items": []}, ack)
+        if removed:
+            self.event_bus.outbound_acked(device_id, {"message_id": message_id})
+        return removed
+
+    def register_connection(self, device_id: str = "default", *, transport: str = "websocket", session_id: str = "") -> dict[str, Any]:
+        device_id = normalize_device_id(device_id)
+        state = {
+            "device_id": device_id,
+            "connected": True,
+            "transport": transport,
+            "session_id": str(session_id or ""),
+            "connected_at": time.time(),
+            "last_seen": time.time(),
+        }
+        path = _device_connection_path(self.state_store_path, device_id)
+        if path:
+            JsonStore(path).write(state)
+        self.event_bus.device_connected(device_id, transport=transport, session_id=state["session_id"])
+        return state
+
+    def touch_connection(self, device_id: str = "default") -> None:
+        path = _device_connection_path(self.state_store_path, device_id)
+        if not path:
+            return
+
+        def touch(state: dict[str, Any]) -> dict[str, Any]:
+            state["device_id"] = normalize_device_id(device_id)
+            state["connected"] = True
+            state["last_seen"] = time.time()
+            return state
+
+        JsonStore(path).update({"items": []}, touch)
+
+    def unregister_connection(self, device_id: str = "default", *, reason: str = "") -> None:
+        path = _device_connection_path(self.state_store_path, device_id)
+        state = self.connection_state(device_id)
+        state["connected"] = False
+        state["disconnected_at"] = time.time()
+        if reason:
+            state["disconnect_reason"] = reason
+        if path:
+            JsonStore(path).write(state)
+        self.event_bus.device_disconnected(device_id, reason=reason)
+
+    def connection_state(self, device_id: str = "default") -> dict[str, Any]:
+        path = _device_connection_path(self.state_store_path, device_id)
+        if not path:
+            return {"device_id": normalize_device_id(device_id), "connected": normalize_device_id(device_id) in self.sessions}
+        state = JsonStore(path).read({})
+        return state if isinstance(state, dict) and state else {"device_id": normalize_device_id(device_id), "connected": False}
 
     def record(self, device_id: str, event: str, payload: dict[str, Any] | None = None) -> None:
-        self.events.append(RuntimeEvent(time.time(), normalize_device_id(device_id), event, payload or {}))
-        if len(self.events) > self.max_events:
-            self.events = self.events[-self.max_events :]
+        self.event_bus.record(device_id, event, payload)
+        self.events = self.event_bus.events
 
-    def event_log(self, *, device_id: str = "", limit: int = 100) -> dict[str, Any]:
-        rows = self.events
-        if device_id:
-            device_id = normalize_device_id(device_id)
-            rows = [row for row in rows if row.device_id == device_id]
-        rows = rows[-max(1, limit) :]
-        return {"items": [row.to_dict() for row in rows], "count": len(rows)}
+    def event_log(self, *, device_id: str = "", limit: int = 100, event: str = "") -> dict[str, Any]:
+        return self.event_bus.event_log(device_id=device_id, limit=limit, event=event)
 
     def _persist_session_state(self, device_id: str, session: DeviceSession) -> None:
         path = _device_store_path(self.state_store_path, device_id)
@@ -195,15 +289,26 @@ class RuntimeManager:
         path = _device_outbox_path(self.state_store_path, device_id)
         if not path:
             return
+        message_id = f"msg_{uuid.uuid4().hex}"
 
         def append(state: dict[str, Any]) -> dict[str, Any]:
             items = state.get("items") if isinstance(state.get("items"), list) else []
-            items.append(payload)
+            items.append(
+                {
+                    "message_id": message_id,
+                    "payload": payload,
+                    "created_at": time.time(),
+                    "attempts": 0,
+                    "lease_until": 0,
+                    "acked": False,
+                }
+            )
             state["items"] = items[-100:]
             state["updated_at"] = time.time()
             return state
 
         JsonStore(path).update({"items": []}, append)
+        self.event_bus.outbound_queued(device_id, payload, message_id=message_id, screen=payload.get("screen", ""))
 
     def _restore_session_state(self, device_id: str, session: DeviceSession) -> dict[str, Any] | None:
         path = _device_store_path(self.state_store_path, device_id)
@@ -234,6 +339,34 @@ class RuntimeManager:
             return None
         return self._restore_session_state(device_id, session)
 
+    def _record_runtime_payload_events(self, device_id: str, payload: dict[str, Any], *, previous_screen: str) -> None:
+        screen = str(payload.get("screen") or "")
+        if screen and screen != previous_screen:
+            self.event_bus.screen_changed(device_id, screen=screen, previous_screen=previous_screen)
+        context = payload.get("context")
+        if isinstance(context, dict):
+            self.event_bus.context_updated(device_id, context, screen=screen)
+
+    def _stored_device_ids(self) -> set[str]:
+        if not self.state_store_path:
+            return set()
+        base = Path(self.state_store_path)
+        directory = base.parent if base.suffix else base
+        if not directory.exists():
+            return set()
+        suffix = base.suffix if base.suffix else ".json"
+        prefix = f"{base.stem}." if base.suffix else ""
+        ids = set()
+        for path in directory.glob("*.connection"):
+            name = path.name
+            if base.suffix:
+                if not name.startswith(prefix) or not name.endswith(f"{suffix}.connection"):
+                    continue
+                ids.add(name[len(prefix) : -len(f"{suffix}.connection")])
+            elif name.endswith(f"{suffix}.connection"):
+                ids.add(name[: -len(f"{suffix}.connection")])
+        return {normalize_device_id(item) for item in ids if item}
+
 
 def normalize_device_id(device_id: str | None) -> str:
     text = str(device_id or "default").strip()
@@ -263,6 +396,13 @@ def _device_outbox_path(base: str | Path | None, device_id: str) -> str | None:
     if not path:
         return None
     return f"{path}.outbox"
+
+
+def _device_connection_path(base: str | Path | None, device_id: str) -> str | None:
+    path = _device_store_path(base, device_id)
+    if not path:
+        return None
+    return f"{path}.connection"
 
 
 def _last_screen_to_dict(screen: Any) -> dict[str, Any] | None:

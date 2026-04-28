@@ -146,3 +146,89 @@ def test_generic_contracts_parse_context_and_input_events():
     msg = DeviceMessage.from_dict(event.to_dict() | {"type": "input_event"})
     assert msg.type == "input_event"
     assert msg.context is not None
+
+
+def test_board_profile_and_input_map_validate_framework_shape():
+    from ava_devicekit.core.contracts import BoardProfile, InputMap, validate_board_profile, validate_input_map
+
+    profile = BoardProfile.from_dict(
+        {
+            "board_id": "third_party_esp32",
+            "name": "Third Party ESP32",
+            "display": {"width": 240, "height": 240, "color": "rgb565"},
+            "input_map": {
+                "capabilities": [
+                    {
+                        "source": "joystick",
+                        "kinds": ["move", "press"],
+                        "codes": ["up", "down", "left", "right", "center"],
+                        "semantic_actions": ["cursor.up", "cursor.down", "confirm"],
+                    }
+                ],
+                "aliases": {"btn_a": "confirm"},
+                "required_actions": ["confirm"],
+            },
+            "outputs": ["display", "speaker"],
+        }
+    )
+    assert profile is not None
+    assert profile.validate().ok
+    assert validate_board_profile(profile.to_dict()).ok
+    assert validate_input_map(profile.input_map).ok
+
+    bad_map = InputMap.from_dict({"capabilities": [{"source": "button"}], "required_actions": ["confirm"]})
+    result = bad_map.validate()
+    assert not result.ok
+    assert any("required action" in error for error in result.errors)
+
+
+def test_screen_payload_validation_uses_generic_screen_contracts():
+    from ava_devicekit.core.contracts import ScreenContract, ensure_screen_payload, validate_screen_payload
+    from ava_devicekit.core.types import ScreenPayload
+
+    contract = ScreenContract(
+        screen_id="sensor_panel",
+        payload_schema={
+            "type": "object",
+            "required": ["temperature"],
+            "properties": {"temperature": {"type": "number"}, "unit": {"enum": ["c", "f"]}},
+        },
+        context_schema={"type": "object", "required": ["screen"], "properties": {"screen": {"const": "sensor_panel"}}},
+    )
+    payload = ScreenPayload("sensor_panel", {"temperature": 24.5, "unit": "c"})
+    assert validate_screen_payload(payload, contracts=[contract]).ok
+    assert ensure_screen_payload(payload, contracts=[contract])["screen"] == "sensor_panel"
+
+    missing = validate_screen_payload({"type": "display", "screen": "sensor_panel", "data": {"unit": "c"}}, contracts=[contract])
+    assert not missing.ok
+    assert "data.temperature is required" in missing.errors
+
+    undeclared = validate_screen_payload({"type": "display", "screen": "other", "data": {}}, contracts=[contract])
+    assert not undeclared.ok
+    assert "screen 'other' is not declared" in undeclared.errors
+
+
+def test_selection_context_validation_is_generic_and_strict():
+    from ava_devicekit.core.contracts import SelectionContext, validate_selection_context
+
+    context = SelectionContext.from_dict(
+        {
+            "app_id": "weather_station",
+            "screen": "sensor_panel",
+            "cursor": 0,
+            "selected": {"sensor_id": "outdoor", "label": "Outdoor"},
+            "visible_rows": [{"sensor_id": "outdoor"}],
+            "focused_component": "row:0",
+        }
+    )
+    assert context is not None
+    assert context.validate().ok
+    assert context.selected == {"sensor_id": "outdoor", "label": "Outdoor"}
+
+    bad = validate_selection_context({"screen": "sensor_panel", "cursor": 2, "visible_rows": [{"sensor_id": "outdoor"}]})
+    assert not bad.ok
+    assert any("cursor" in error for error in bad.errors)
+
+    malformed = validate_selection_context({"screen": "sensor_panel", "visible_rows": ["not-object"]})
+    assert not malformed.ok
+    assert "visible_rows must be a list of objects" in malformed.errors

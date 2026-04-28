@@ -86,3 +86,58 @@ def test_runtime_manager_queues_cross_process_outbound_payloads(tmp_path):
     assert [item["screen"] for item in queued] == ["spotlight"]
     assert ws_side.pop_queued_outbound("device-a") == []
     assert ws_side.state("device-a")["screen"] == "spotlight"
+
+
+def test_runtime_manager_outbound_ack_and_retry(tmp_path):
+    state_store = tmp_path / "runtime-state"
+    manager = RuntimeManager.for_app(mock=True, state_store_path=state_store, queue_outbound=True)
+
+    manager.boot("device-a")
+    manager.handle("device-a", {"type": "key_action", "action": "watch"})
+    first = manager.lease_queued_outbound("device-a", visibility_timeout_sec=60)
+    assert len(first) == 1
+    assert first[0]["ack_required"] is True
+    message_id = first[0]["message_id"]
+
+    assert manager.lease_queued_outbound("device-a", visibility_timeout_sec=60) == []
+    assert manager.ack_outbound("device-a", message_id) is True
+    assert manager.lease_queued_outbound("device-a", visibility_timeout_sec=0) == []
+
+
+def test_runtime_manager_connection_registry(tmp_path):
+    state_store = tmp_path / "runtime-state"
+    manager = RuntimeManager.for_app(mock=True, state_store_path=state_store)
+
+    state = manager.register_connection("device-a", transport="legacy_ws", session_id="s1")
+    assert state["connected"] is True
+    assert manager.connection_state("device-a")["transport"] == "legacy_ws"
+    assert manager.list_devices()[0]["connection"]["connected"] is True
+
+    manager.unregister_connection("device-a", reason="closed")
+    assert manager.connection_state("device-a")["connected"] is False
+    assert manager.event_log()["items"][-1]["event"] == "device.disconnected"
+
+
+def test_runtime_manager_emits_framework_runtime_events(tmp_path):
+    state_store = tmp_path / "runtime-state"
+    manager = RuntimeManager.for_app(mock=True, state_store_path=state_store, queue_outbound=True)
+
+    manager.register_connection("device-a", transport="websocket", session_id="session-1")
+    manager.boot("device-a")
+    manager.handle("device-a", {"type": "key_action", "action": "watch"})
+    sent = manager.lease_queued_outbound("device-a")
+    assert sent and sent[0]["ack_required"] is True
+    assert manager.ack_outbound("device-a", sent[0]["message_id"])
+    manager.unregister_connection("device-a", reason="closed")
+
+    names = [item["event"] for item in manager.event_log(device_id="device-a", limit=20)["items"]]
+    assert "device.connected" in names
+    assert "screen.changed" in names
+    assert "context.updated" in names
+    assert "outbound.queued" in names
+    assert "outbound.sent" in names
+    assert "outbound.acked" in names
+    assert "device.disconnected" in names
+
+    screen_events = manager.event_log(device_id="device-a", event="screen.changed", limit=10)["items"]
+    assert [item["payload"]["screen"] for item in screen_events] == ["feed", "spotlight"]

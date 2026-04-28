@@ -50,6 +50,8 @@ class LegacyFirmwareConnection:
         self._outbound_task: asyncio.Task | None = None
 
     async def open(self, ws: Any) -> None:
+        if self.manager:
+            self.manager.register_connection(self.device_id, transport="legacy_ws", session_id=self.session_id)
         self._start_market_stream(ws)
         self._start_outbound_queue(ws)
         try:
@@ -64,6 +66,8 @@ class LegacyFirmwareConnection:
                 self._market_task.cancel()
             if self._outbound_task:
                 self._outbound_task.cancel()
+            if self.manager:
+                self.manager.unregister_connection(self.device_id, reason="ws_closed")
 
     async def handle_raw(self, raw: str) -> list[dict[str, Any]]:
         return await self._handle_text(raw, allow_async_asr=True)
@@ -84,7 +88,13 @@ class LegacyFirmwareConnection:
         if msg_type == "hello":
             return self._hello(msg)
         if msg_type == "ping":
+            if self.manager:
+                self.manager.touch_connection(self.device_id)
             return [{"type": "pong", "session_id": self.session_id}]
+        if msg_type in {"ack", "message_ack"}:
+            message_id = str(msg.get("message_id") or msg.get("id") or "")
+            ok = self.manager.ack_outbound(self.device_id, message_id) if self.manager else False
+            return [{"type": "ack", "message_id": message_id, "ok": ok, "session_id": self.session_id}]
         if msg_type == "goodbye":
             return [{"type": "goodbye", "session_id": self.session_id}]
         if msg_type == "key_action":
@@ -236,8 +246,10 @@ class LegacyFirmwareConnection:
                 await asyncio.sleep(0.5)
                 self.manager.state(self.device_id)
                 self.session = self.manager.get(self.device_id)
-                for payload in self.manager.pop_queued_outbound(self.device_id):
+                self.manager.touch_connection(self.device_id)
+                for payload in self.manager.lease_queued_outbound(self.device_id):
                     await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                    self.manager.ack_outbound(self.device_id, str(payload.get("message_id") or ""))
                     self._sync_market_subscriptions([payload])
 
         self._outbound_task = asyncio.create_task(poll(), name="ava_devicekit_outbound_queue")
