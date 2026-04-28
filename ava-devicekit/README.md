@@ -120,6 +120,10 @@ ESP32 input / voice
 | `POST` | `/admin/runtime/providers` | Update one ASR/LLM/TTS/chain/execution provider from the web console |
 | `POST` | `/admin/devices/{device_id}/ota-check` | Queue an `ota_check` command so an online device runs its normal OTA pull flow |
 | `POST` | `/admin/developer/services/{service_id}/invoke` | Backend-only allowlisted service invocation for app/admin tooling |
+| `GET` | `/customer` | Customer-facing hardware activation portal |
+| `POST` | `/customer/login` | Create/reuse a C-end customer and issue a customer bearer token |
+| `GET` | `/customer/me` | Verify customer bearer token and return bound devices |
+| `POST` | `/customer/activate` | Bind an activation code to the logged-in C-end customer |
 | `POST` | `/device/register` | Exchange a one-time provisioning token for a per-device bearer token |
 | `POST` | `/device/activate` | Bind a physical device to a C-end customer using its activation code |
 | `GET` | `/device/config` | Device pulls its resolved language/voice/wake/app/OTA/wallet config |

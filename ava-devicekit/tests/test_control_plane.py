@@ -74,6 +74,27 @@ def test_control_plane_customer_registration_and_app_users(tmp_path):
     assert same["customer"]["customer_id"] == registered["customer"]["customer_id"]
 
 
+def test_control_plane_customer_session_token_and_activation(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+    provisioned = store.provision_device({"device_id": "portal-box", "app_id": "ava_box"})
+
+    login = store.login_customer({"email": "portal@example.com", "display_name": "Portal User", "app_id": "ava_box"})
+    assert login["customer_token"].startswith("avacus_")
+    assert login["customer"]["email"] == "portal@example.com"
+    assert "customer_token_hash" not in login["customer"]
+
+    session = store.customer_session(login["customer_token"])
+    assert session["customer"]["customer_id"] == login["customer"]["customer_id"]
+    assert session["devices"] == []
+
+    activated = store.activate_customer_device(login["customer"]["customer_id"], {"activation_code": provisioned["activation_code"]})
+    assert activated["device"]["status"] == "active"
+    assert activated["devices"][0]["device_id"] == "portal_box"
+
+    public = store.snapshot()
+    assert "customer_token_hash" not in public["customers"][0]
+
+
 def test_control_plane_runtime_config_is_persisted_and_redacted(tmp_path):
     store = ControlPlaneStore(tmp_path / "control.json")
     result = store.update_runtime_config({"providers": {"llm": {"provider": "openai-compatible", "model": "x", "api_key_env": "OPENAI_API_KEY", "api_key": "raw"}}})

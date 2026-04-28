@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ava_devicekit.control_plane import ControlPlaneStore
 from ava_devicekit.gateway.admin_page import ADMIN_PAGE
+from ava_devicekit.gateway.customer_page import CUSTOMER_PAGE
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
@@ -89,6 +90,15 @@ def make_handler(
                 if not self._authorized_admin():
                     return
                 self._send_bytes(_admin_page().encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path in {"/customer", "/customer/"}:
+                self._send_bytes(_customer_page().encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path == "/customer/me":
+                session = self._customer_session()
+                if not session:
+                    return
+                self._send_json(session)
                 return
             if path == "/admin/runtime":
                 if not self._authorized_admin():
@@ -272,6 +282,21 @@ def make_handler(
             if path == "/customer/register":
                 try:
                     self._send_json(control_plane.register_customer(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/customer/login":
+                try:
+                    self._send_json(control_plane.login_customer(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/customer/activate":
+                session = self._customer_session()
+                if not session:
+                    return
+                try:
+                    self._send_json(control_plane.activate_customer_device(session["customer"]["customer_id"], self._read_json()))
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -511,6 +536,15 @@ def make_handler(
                 self._send_json({"ok": False, "error": "token_required", "token_env": settings.device_token_env}, HTTPStatus.UNAUTHORIZED)
             return False
 
+        def _customer_session(self) -> dict[str, Any] | None:
+            supplied = self.headers.get("Authorization", "")
+            token = supplied.removeprefix("Bearer ").strip()
+            try:
+                return control_plane.customer_session(token)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.UNAUTHORIZED)
+                return None
+
         def _authorized(self, token_env: str) -> bool:
             expected = os.environ.get(token_env, "")
             if not expected:
@@ -689,9 +723,9 @@ def _onboarding_from_parts(
         _step("service_plan", "Create service plan", bool(plans), "Usage", "POST /admin/service-plans", "Define the usage and entitlement model for C-end hardware users."),
         _step("device_provisioned", "Provision hardware", bool(devices), "Fleet Setup", "POST /admin/devices/register", "Create a device record and get its provisioning token plus activation code."),
         _step("device_registered", "Register device token", bool(registered), "Device firmware", "POST /device/register", "Device exchanges the one-time provisioning token for a per-device bearer token."),
-        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Entry", "POST /customer/register", "Create or reuse a customer account for the hardware user."),
-        _step("user_device_bound", "Bind user to device", bool(linked), "Customer Entry", "POST /customer/register with activation_code", "Activation code links the purchased device to the user and app."),
-        _step("device_active", "Activate device", bool(active), "Customer Entry", "POST /device/activate", "Device is active or has been seen online after activation."),
+        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Portal", "GET /customer then POST /customer/login", "Create or reuse a customer account for the hardware user."),
+        _step("user_device_bound", "Bind user to device", bool(linked), "Customer Portal", "POST /customer/activate", "Activation code links the purchased device to the logged-in user and app."),
+        _step("device_active", "Activate device", bool(active), "Customer Portal", "POST /customer/activate", "Device is active or has been seen online after activation."),
         _step("live_session", "Verify live session", bool(online), "Device Detail", "POST /device/boot or WebSocket hello", "Confirm that at least one hardware unit is connected to this backend.", required=False),
         _step("developer_services", "Configure backend services", bool((developer_services.get("items") or [])), "Services", "runtime services[]", "Register Solana RPC, payment, oracle, reward, data anchor, wallet, or custom APIs.", required=False),
         _step("firmware", "Publish firmware", bool((firmware.get("items") or [])), "Firmware", "POST /admin/ota/firmware", "Publish at least one OTA binary for pull-based updates.", required=False),
@@ -713,7 +747,7 @@ def _onboarding_from_parts(
             "Configure Providers with env var names",
             "Provision device in Fleet Setup",
             "Register device with provisioning token",
-            "Register customer with /customer/register and activation_code",
+            "Open /customer, sign in, and bind activation_code",
             "Inspect app users, device diagnostics, usage, events, and OTA",
         ],
     }
@@ -733,6 +767,10 @@ def _step(step_id: str, title: str, done: bool, tab: str, api: str, description:
 
 def _admin_page() -> str:
     return ADMIN_PAGE
+
+
+def _customer_page() -> str:
+    return CUSTOMER_PAGE
 
 def run_http_gateway(
     host: str = "127.0.0.1",

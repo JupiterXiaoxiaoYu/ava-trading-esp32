@@ -12,7 +12,7 @@ The console must therefore prioritize service operation, not developer-account c
 |---|---|---:|---|
 | Service owner / builder | Backend, API keys, firmware, service plans, hardware inventory | Yes | Configure providers, provision devices, ship hardware, monitor cost and health |
 | Operator/support | Device support, OTA, diagnostics, customer binding | Yes | Look up customer/device, inspect server timeline, suspend/revoke, push config/OTA |
-| C-end hardware customer | A purchased physical device and optional wallet/account identity | Not in admin MVP | Activate/bind device, use hardware, receive service/config updates |
+| C-end hardware customer | A purchased physical device and optional wallet/account identity | Customer portal only | Sign in at `/customer`, activate/bind device, use hardware, receive service/config updates |
 | Physical device | Device token, app config, firmware channel, telemetry | No | Register, activate, pull config, report usage/events, receive OTA/commands |
 
 ## Correct Account Model
@@ -20,7 +20,7 @@ The console must therefore prioritize service operation, not developer-account c
 | Account Type | Purpose | Created By | Current Implementation |
 |---|---|---|---|
 | Operator user | Admin/developer/support identity for running the backend | Service owner | `/admin/users` as team/operator records |
-| Customer | C-end hardware owner | One-step registration, activation flow, or operator import | `/customer/register`, `/admin/customers`, `/device/activate` |
+| Customer | C-end hardware owner | Customer portal, one-step API, or operator import | `/customer`, `/customer/login`, `/customer/activate`, `/customer/register`, `/admin/customers` |
 | Device identity | Physical unit authentication and configuration target | Operator provisioning + device registration | `/admin/devices/register`, `/device/register` |
 
 The important correction is: customers should not be treated as developers. A customer buys/receives hardware, registers once, then binds it to the service by activation code. Operators may pre-create or import customer records, but that is an operations shortcut, not the core product flow.
@@ -33,7 +33,7 @@ The important correction is: customers should not be treated as developers. A cu
 | 2 | Service owner | Create service plans and usage limits | Cost/entitlement rules exist before devices are sold |
 | 3 | Operator | Provision device | Device id, provisioning token, activation code are created |
 | 4 | Device firmware | Register with provisioning token | Device receives per-device bearer token |
-| 5 | Customer | Register through `/customer/register` with activation code | Customer is created/reused, device is bound, and the device becomes active |
+| 5 | Customer | Sign in through `/customer`, then submit activation code | Customer session is verified, device is bound, and the device becomes active |
 | 6 | Device | Pull `/device/config` | Device receives AI name, wake phrases, voice, app, firmware channel, wallet/risk mode |
 | 7 | Device/backend | Record usage | ASR/LLM/TTS/API usage is visible by device/customer/period |
 | 8 | Operator | Diagnose from server timeline and device diagnostics | Support can inspect backend state, connection, config, and events |
@@ -49,7 +49,7 @@ The admin UI should be read as an operator console with these jobs:
 | Dashboard | Setup checklist and next required action | Server-computed app/user/device closure |
 | Apps | App/project records, app users, app-scoped logs | App records, customers, devices, runtime events |
 | Fleet Setup | Team operators, provisioning, device inventory | Control-plane records |
-| Customers | One-step C-end user registration, customer import, activation | Customer/device binding |
+| Customers | Operator import/support view for customer/device binding | Customer/device binding |
 | Providers | Runtime ASR/LLM/TTS/chain/execution configuration | Server-wide provider config |
 | Usage | Service plans, entitlements, cost/usage counters | Device/customer/service-period |
 | Live Sessions | Currently connected runtime sessions | Runtime session state, not complete fleet inventory |
@@ -66,7 +66,7 @@ Recent events and the Events tab are server-side runtime event streams. They are
 | What is the overall state of the service? | `Dashboard` shows server-wide posture, fleet totals, provider status, and recent server timeline. |
 | How do I create an app? | `Apps` creates a project/app record and shows CLI app templates such as `init-app --type depin`; code generation remains a CLI/developer workflow. |
 | What should I do next? | `Dashboard -> Setup checklist` uses `/admin/onboarding` to show required setup progress and next action. |
-| Where does the C-end user enter? | `Customer Entry` supports one-step user registration and binds a purchased device with an activation code. |
+| Where does the C-end user enter? | `/customer` is the hardware-owner portal. `Customer Support` remains an operator support/import view. |
 | How do I see app users? | `Apps -> App users` shows `/admin/apps/{app_id}/customers` with bound devices. |
 | How do I inspect one device? | `Device Detail` opens diagnostics for a device id, including owner/customer, config, runtime state, connection, usage, and recent events. |
 | How do I see logs for one app? | `Apps -> App logs` filters events by devices assigned to that `app_id`; `Server Timeline` is the global backend log. |
@@ -79,7 +79,9 @@ Recent events and the Events tab are server-side runtime event streams. They are
 |---|---|
 | Operator/team records | Complete MVP |
 | C-end customer records | Complete MVP |
-| One-step C-end user registration | Complete MVP |
+| Customer portal login/session | Complete MVP |
+| Customer activation portal | Complete MVP |
+| One-step C-end user registration API | Complete MVP |
 | App-scoped users/devices | Complete MVP |
 | Server-computed onboarding checklist | Complete MVP |
 | Device provisioning/registration/activation | Complete MVP |
@@ -90,11 +92,11 @@ Recent events and the Events tab are server-side runtime event streams. They are
 | Service plans, entitlements, usage counters | Complete MVP |
 | OTA publish and OTA check | Complete MVP |
 
-## Still Later
+## Later Extensions
 
 | Capability | Reason |
 |---|---|
-| Public customer portal | Admin console is operator-only for now; customer portal can come after hardware flow stabilizes |
-| Payment/billing automation | Not required for a self-hosted MVP; service plans and entitlements are enough to operate manually |
-| OTA staged rollout and rollback UI | Important before large fleet rollout |
-| Real Solana device proof program | Needed for full DePIN proof/reward story, not required for operator console correctness |
+| Passwordless email codes or wallet signature login | The current portal issues local bearer sessions after email login; production deployments can replace this with email OTP, wallet signature, or hosted identity. |
+| Payment/billing automation | Service plans and entitlements are enough for manual operation; automated billing can connect through backend services. |
+| OTA staged rollout and rollback UI | Important before large fleet rollout. |
+| Real Solana device proof program | Needed for full on-chain DePIN proof/reward programs. |

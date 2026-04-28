@@ -178,7 +178,7 @@ Operator creates project/app record
   -> Backend returns provisioning_token + activation_code
   -> Device registers with provisioning_token
   -> Backend returns per-device bearer token
-  -> C-end user activates device with activation_code
+  -> C-end user signs in at `/customer` and activates device with activation_code
   -> Device pulls resolved config and starts normal operation
   -> Operator monitors logs/usage/OTA/provider health
 ```
@@ -190,7 +190,7 @@ C 端用户闭环：
 | 创建 app/project | Apps -> Create app/project record 或 `POST /admin/projects` | 生成 app/project 运营记录 |
 | 预制硬件 | Fleet Setup -> Provision device 或 `POST /admin/devices/register` | 生成 provisioning token 和 activation code |
 | 设备注册 | `POST /device/register` | 设备换取 per-device bearer token |
-| 用户一次注册 | Customer Entry -> One-step user registration 或 `POST /customer/register` | 创建/复用 customer，并可同时绑定 activation code |
+| 用户登录/验证 | `/customer` -> sign in -> activation code，或脚本调用 `POST /customer/register` | 创建/复用 customer，验证 customer session，并绑定 activation code |
 | App 用户管理 | Apps -> App users 或 `GET /admin/apps/{app_id}/customers` | 查看该 app 下的 C 端用户和已绑定设备 |
 | 运营支持 | Device Detail / Usage / Events | 查看单设备 config、usage、logs、OTA 状态 |
 
@@ -481,7 +481,7 @@ export AVE_PROXY_WALLET_ID=...
 | Hardware Ops | Fleet Setup | 创建 operator、provision device、查看 fleet inventory |
 | Hardware Ops | Device Detail | 查询单设备 config、diagnostics、runtime session、usage |
 | Hardware Ops | Firmware | 发布固件、查看 firmware catalog、触发 OTA check |
-| Customers | Customer Entry | 创建/import customer、用 activation code 绑定硬件 |
+| Customers | Customer Support | 运营 support/import customer；C 端入口是 `/customer` |
 | Customers | Usage | 创建 service plan、分配 entitlement、记录/查看 usage |
 | Support | Raw | 完整 dashboard JSON，用于 debug/support |
 
@@ -589,7 +589,7 @@ Provision result 会返回：
 | `provisioning_token` | 设备注册时换取 per-device bearer token |
 | `activation_code` | C 端用户激活绑定设备 |
 
-### 6.7 Customer Entry
+### 6.7 Customer Portal And Support
 
 C 端用户路径：
 
@@ -605,6 +605,7 @@ C 端用户路径：
 
 | 功能 | 说明 |
 |---|---|
+| `/customer` portal | C 端用户登录、验证 session、绑定 activation code |
 | Create/import customer | 运营手工创建客户 |
 | Activate purchased device | 用 activation code 绑定设备和 customer |
 | Customers table | 查看 customer_id、email、wallet、status |
@@ -983,7 +984,7 @@ http://127.0.0.1:8788/admin
 | 创建 service plan | Usage |
 | provision 设备 | Fleet Setup |
 | 烧录固件，设备 register | Device API |
-| 用户输入 activation code | Customer Entry |
+| 用户输入 activation code | `/customer` portal；运营兜底在 Customer Support |
 | 查看设备在线和 config | Device Detail |
 | 发布固件 | Firmware |
 | 查 AI/业务日志 | Server Timeline / App logs |

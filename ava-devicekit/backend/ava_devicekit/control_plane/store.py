@@ -80,7 +80,7 @@ class ControlPlaneStore:
         items = {
             "version": data.get("version", 1),
             "users": [dict(item) for item in data.get("users", [])],
-            "customers": [dict(item) for item in data.get("customers", [])],
+            "customers": [_safe_customer(item) for item in data.get("customers", [])],
             "projects": [dict(item) for item in data.get("projects", [])],
             "devices": [dict(item) for item in data.get("devices", [])],
             "runtime_config": _redact(dict(data.get("runtime_config") or {})),
@@ -214,7 +214,7 @@ class ControlPlaneStore:
             data["customers"].append(created)
 
         self.store.update(_default_state(), mutate)
-        return {"ok": True, "customer": created}
+        return {"ok": True, "customer": _safe_customer(created)}
 
     def register_customer(self, body: dict[str, Any]) -> dict[str, Any]:
         """Self-service C-end customer registration with optional device binding."""
@@ -239,7 +239,7 @@ class ControlPlaneStore:
                 if wallet:
                     existing["wallet"] = wallet
                 _ensure_customer_app_link(existing, app_id=app_id, project_id=project_id)
-                customer = dict(existing)
+                customer = _safe_customer(existing)
                 return
             customer = {
                 "customer_id": _id("cus"),
@@ -254,6 +254,7 @@ class ControlPlaneStore:
                 "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
             }
             data["customers"].append(customer)
+            customer = _safe_customer(customer)
 
         self.store.update(_default_state(), mutate)
         result: dict[str, Any] = {"ok": True, "customer": customer, "created": bool(customer.get("registered_at") == now)}
@@ -277,7 +278,71 @@ class ControlPlaneStore:
         if not customer:
             raise ValueError("customer_not_found")
         devices = [_safe_device(item) for item in data.get("devices", []) if item.get("customer_id") == customer.get("customer_id")]
-        return {"ok": True, "customer": dict(customer), "devices": devices, "device_count": len(devices)}
+        return {"ok": True, "customer": _safe_customer(customer), "devices": devices, "device_count": len(devices)}
+
+    def login_customer(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Create or reuse a C-end account and issue a customer session token."""
+
+        email = str(body.get("email") or "").strip().lower()
+        if not email:
+            raise ValueError("email_required")
+        display_name = str(body.get("display_name") or body.get("name") or email)
+        wallet = str(body.get("wallet") or body.get("wallet_address") or "")
+        app_id = str(body.get("app_id") or "ava_box").strip()
+        project_id = str(body.get("project_id") or "").strip()
+        token = _token("avacus")
+        now = _now()
+        customer_id = ""
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal customer_id
+            _ensure_shape(data)
+            customer = next((item for item in data["customers"] if item.get("email") == email), None)
+            if not customer:
+                customer = {
+                    "customer_id": _id("cus"),
+                    "email": email,
+                    "display_name": display_name,
+                    "wallet": wallet,
+                    "status": "active",
+                    "app_ids": [],
+                    "project_ids": [],
+                    "created_at": now,
+                    "registered_at": now,
+                    "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+                }
+                data["customers"].append(customer)
+            else:
+                if display_name and customer.get("display_name") in {"", customer.get("email"), "customer"}:
+                    customer["display_name"] = display_name
+                if wallet:
+                    customer["wallet"] = wallet
+            _ensure_customer_app_link(customer, app_id=app_id, project_id=project_id)
+            customer["customer_token_hash"] = _hash_token(token)
+            customer["last_login_at"] = now
+            customer_id = str(customer["customer_id"])
+
+        self.store.update(_default_state(), mutate)
+        profile = self.customer(customer_id)
+        return {"ok": True, "customer": profile["customer"], "devices": profile["devices"], "device_count": profile["device_count"], "customer_token": token}
+
+    def customer_session(self, token: str) -> dict[str, Any]:
+        token = str(token or "").strip()
+        if not token:
+            raise ValueError("customer_token_required")
+        token_hash = _hash_token(token)
+        data = self.bootstrap()
+        for customer in data.get("customers", []):
+            expected = str(customer.get("customer_token_hash") or "")
+            if expected and secrets.compare_digest(expected, token_hash):
+                devices = [_safe_device(item) for item in data.get("devices", []) if item.get("customer_id") == customer.get("customer_id")]
+                return {"ok": True, "customer": _safe_customer(customer), "devices": devices, "device_count": len(devices)}
+        raise ValueError("invalid_customer_token")
+
+    def activate_customer_device(self, customer_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        activation = self.activate_device({**body, "customer_id": customer_id})
+        profile = self.customer(customer_id)
+        return {"ok": True, "activation": activation, "device": activation["device"], "customer": profile["customer"], "devices": profile["devices"], "device_count": profile["device_count"]}
 
     def app_customers(self, app_id: str) -> dict[str, Any]:
         data = self.bootstrap()
@@ -289,7 +354,7 @@ class ControlPlaneStore:
             if app_id and app_id not in set(customer.get("app_ids") or []) and customer.get("customer_id") not in customer_ids:
                 continue
             linked_devices = [_safe_device(item) for item in devices if item.get("customer_id") == customer.get("customer_id")]
-            rows.append({**dict(customer), "devices": linked_devices, "device_count": len(linked_devices)})
+            rows.append({**_safe_customer(customer), "devices": linked_devices, "device_count": len(linked_devices)})
         return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
 
     def app_devices(self, app_id: str) -> dict[str, Any]:
@@ -724,6 +789,12 @@ def _safe_device(device: dict[str, Any]) -> dict[str, Any]:
     safe.pop("provisioning_token_hash", None)
     safe.pop("device_token_hash", None)
     safe.pop("activation_code_hash", None)
+    return safe
+
+
+def _safe_customer(customer: dict[str, Any]) -> dict[str, Any]:
+    safe = dict(customer)
+    safe.pop("customer_token_hash", None)
     return safe
 
 

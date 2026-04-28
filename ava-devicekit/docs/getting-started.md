@@ -42,10 +42,20 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 | `/admin/projects` | Create/list app project records |
 | `/admin/devices/register` | Provision hardware and return provisioning token plus activation code |
 | `/device/register` | Device exchanges provisioning token for a per-device bearer token |
-| `/customer/register` | C-end user registration; can also bind an activation code in one request |
-| `/device/activate` | Bind a provisioned device to an existing or newly created customer |
 | `/device/config` | Device pulls resolved configuration after registration |
 | `/admin/devices/{device_id}/diagnostics` | Support view for one device: control-plane record, config, state, connection, usage, and events |
+
+## Customer Endpoints
+
+`/admin` is the service-owner/operator console. C-end hardware owners should not use it.
+
+| Path | Purpose |
+|---|---|
+| `/customer` | Customer-facing activation portal for purchased hardware |
+| `/customer/login` | Create/reuse a customer account and issue a browser session token |
+| `/customer/me` | Verify the customer session token and return the user's bound devices |
+| `/customer/activate` | Bind an activation code to the logged-in customer |
+| `/customer/register` | API-compatible one-step registration/binding flow for scripted setup |
 
 ## First Closed Loop
 
@@ -57,5 +67,5 @@ Use this sequence to verify the local service is usable as a hardware-product ba
 4. Create a service plan in `Usage`.
 5. Provision hardware in `Fleet Setup`; copy the `provisioning_token` and `activation_code`.
 6. Register the device with `POST /device/register`.
-7. Register the C-end user with `POST /customer/register`, passing the `activation_code`.
+7. Open `/customer`, sign in with the hardware buyer email, and activate the device with the `activation_code`.
 8. Confirm the user appears in `Apps -> App users` and the device appears in `Device Detail`.

@@ -368,6 +368,46 @@ def test_http_gateway_customer_register_binds_app_device(tmp_path):
         thread.join(timeout=5)
 
 
+def test_http_gateway_customer_portal_login_and_activation(tmp_path):
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        html = _get_text(base_url, "/customer")
+        assert "Ava Device Activation" in html
+        assert "id=\"customer-login-form\"" in html
+        assert "id=\"activation-form\"" in html
+
+        status, body = _get_status(base_url, "/customer/me")
+        assert status == 401
+        assert body["error"] == "customer_token_required"
+
+        provisioned = _post(base_url, "/admin/devices/register", {"device_id": "portal-box", "app_id": "ava_box"})
+        login = _post(base_url, "/customer/login", {"email": "portal@example.com", "display_name": "Portal", "app_id": "ava_box"})
+        assert login["customer_token"].startswith("avacus_")
+        assert "customer_token_hash" not in login["customer"]
+        headers = {"Authorization": "Bearer " + login["customer_token"]}
+
+        status, profile = _get_status(base_url, "/customer/me", headers)
+        assert status == 200
+        assert profile["customer"]["email"] == "portal@example.com"
+        assert profile["devices"] == []
+
+        status, activated = _post_status(base_url, "/customer/activate", {"activation_code": provisioned["activation_code"]}, headers)
+        assert status == 200
+        assert activated["device"]["status"] == "active"
+        assert activated["devices"][0]["device_id"] == "portal_box"
+
+        users = _get(base_url, "/admin/apps/ava_box/customers")
+        assert users["count"] == 1
+        assert users["items"][0]["device_count"] == 1
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
 def test_http_gateway_service_plans_entitlement_and_usage(tmp_path):
     settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))

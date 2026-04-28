@@ -12,7 +12,9 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 |---|---|---|
 | Prepare a new hardware unit | Provision device, generate provisioning token and activation code | Implemented MVP |
 | Hand device to a C-end user | Activate device with customer profile or customer id | Implemented MVP |
-| Let a C-end user register once | Public `/customer/register` flow creates/reuses the customer and can bind an activation code in the same request | Implemented MVP |
+| Let a C-end user log in | `/customer` portal creates/reuses the customer and stores a customer session token in the browser | Implemented MVP |
+| Let a C-end user verify ownership | `/customer/activate` requires a customer session and binds the activation code to that user | Implemented MVP |
+| Support scripted registration | Public `/customer/register` flow creates/reuses the customer and can bind an activation code in the same request | Implemented MVP |
 | Manage app users | App-scoped customer/device views show which users belong to each hardware app | Implemented MVP |
 | Manage device identity | Per-device bearer token, status, revoke/suspend | Implemented MVP |
 | Configure AI providers without editing files | Web-edit ASR/LLM/TTS/chain/execution config by env key/model/base URL/options | Implemented MVP |
@@ -30,7 +32,7 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 | Entity | Purpose | Current Fields |
 |---|---|---|
 | Control-plane user | Admin/developer/operator identity for managing the backend | `user_id`, `username`, `display_name`, `role` |
-| Customer | C-end hardware user receiving a physical device | `customer_id`, `email`, `display_name`, `wallet`, `status`, `app_ids`, `project_ids` |
+| Customer | C-end hardware user receiving a physical device | `customer_id`, `email`, `display_name`, `wallet`, `status`, `app_ids`, `project_ids`, hashed customer session token |
 | Project | Product/app grouping, defaulting to Solana | `project_id`, `name`, `chain`, `owner_user_id`, `device_config` |
 | Device | Physical ESP32 unit | `device_id`, `project_id`, `customer_id`, `board_model`, `app_id`, `status`, `firmware_version`, `config` |
 | Runtime config | Server-side provider/service configuration | `providers`, `adapters`, `execution`, `services` |
@@ -84,6 +86,10 @@ Configuration is resolved as default config -> project config -> device override
 | `GET/POST` | `/admin/runtime/config` | View or update persisted runtime provider/service config and apply it to the running process |
 | `POST` | `/admin/runtime/providers` | Update one provider block from the console |
 | `GET/POST` | `/admin/customers` | List or create C-end customers |
+| `GET` | `/customer` | Customer-facing hardware activation portal |
+| `POST` | `/customer/login` | Create/reuse a customer account and issue a customer bearer token |
+| `GET` | `/customer/me` | Verify customer token and return the user's devices |
+| `POST` | `/customer/activate` | Bind an activation code to the logged-in customer |
 | `POST` | `/customer/register` | C-end user registration; creates/reuses customer and optionally binds an activation code |
 | `GET` | `/admin/apps/{app_id}/customers` | App-scoped user list with bound devices |
 | `GET` | `/admin/apps/{app_id}/devices` | App-scoped hardware list |
@@ -105,5 +111,5 @@ Configuration is resolved as default config -> project config -> device override
 | Payment/billing automation | Manual plans and entitlements are implemented; payment collection can be connected through the service registry. |
 | OTA rollout cohorts | Reduces risk when pushing firmware to C-end devices. |
 | OTA result reporting | Operator must know whether C-end devices updated successfully. |
-| Customer-facing portal | The admin console is the operator entry point for the current self-hosted product shape. |
+| Production identity provider | The portal currently uses local customer bearer tokens; email OTP, wallet signature, or an external identity provider can replace the login boundary. |
 | Real Solana proof provider | Required to move from Solana-ready hardware framework to complete on-chain DePIN proof flow. |

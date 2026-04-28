@@ -25,9 +25,10 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Explicit ACK protocol | Framework + firmware port contract | Complete at protocol/template boundary | Backend supports ACK; board template extracts `message_id` and ACKs after render/command acceptance. Existing Ava Box remains compatible through compatibility auto-ack. |
 | Device protocol spec | Framework docs | Complete | `docs/device-protocol.md` defines all current JSON and binary protocol frames. |
 | Security hardening | Framework deploy policy | Complete | `production_mode` enforces configured admin/device bearer tokens; docs define allowlist and credential boundaries. |
-| Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is an operator dashboard with Dashboard, Apps, Fleet Setup, Customer Entry, Device Detail, Providers, Usage, Server Timeline, Firmware, Services, and Raw areas. |
+| Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is an operator dashboard with Dashboard, Apps, Fleet Setup, Customer Support, Device Detail, Providers, Usage, Server Timeline, Firmware, Services, and Raw areas. |
 | Users/projects/devices registry | Framework control plane | Complete MVP | Local JSON-backed control plane bootstraps users/projects, provisions devices, exchanges one-time registration tokens, and validates per-device bearer tokens. |
 | C-end customer activation | Framework control plane | Complete MVP | Local customers, activation codes, `/device/activate`, device status changes, suspend/revoke, and per-device config are supported. |
+| C-end customer portal | Framework public UI/API | Complete MVP | `/customer` provides a hardware-owner login and activation portal separate from `/admin`; `/customer/login`, `/customer/me`, and `/customer/activate` verify customer sessions and bind devices. |
 | C-end user registration | Framework control plane | Complete MVP | `/customer/register` creates/reuses a customer and can bind an activation code in one request. |
 | App user management | Framework admin/API | Complete MVP | `/admin/apps/{app_id}/customers` and `/admin/apps/{app_id}/devices` expose app-scoped customers and hardware units; `/admin` shows app users. |
 | Onboarding checklist | Framework admin/API | Complete MVP | `/admin/onboarding` and Dashboard Setup checklist compute required next actions for app/provider/plan/device/customer/activation/live-session setup. |
@@ -53,5 +54,5 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Device registration | Production deployments should provision devices through the control plane and store the returned device token on the device. The global device token remains only for compatibility and lab deployments. |
 | Provider config editing | The web console stores provider config and env var names, not raw secrets. Actual API keys should remain in environment variables or a secret manager. |
 | Usage metering | Devices and backend/admin calls can report usage directly. Firmware voice paths also meter ASR seconds, LLM token usage, and TTS characters for provisioned devices. |
-| C-end operations | The current scope is a self-hosted operator console for one builder serving hardware users. Hosted SaaS, billing, tenant isolation, and developer marketplaces remain outside this milestone. |
+| C-end operations | `/admin` is the service-owner/operator console; `/customer` is the C-end hardware-owner portal. Hosted SaaS, automated billing, tenant isolation, and developer marketplaces remain outside this milestone. |
 | Chain-specific trading | AVE/Solana trade execution belongs to Ava Box app skills, not `ChainAdapter`. |
