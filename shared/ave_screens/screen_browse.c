@@ -215,6 +215,19 @@ static void _signal_amount_text(const browse_token_t *t, char *out, size_t out_n
     snprintf(out, out_n, "%s", *p ? p : value);
 }
 
+static void _signal_addr_text(const browse_token_t *t, char *out, size_t out_n)
+{
+    const char *suffix;
+    if (!out || out_n == 0) return;
+    out[0] = '\0';
+    if (!t || !t->token_id[0]) return;
+    snprintf(out, out_n, "%s", t->token_id);
+    suffix = strstr(out, "-solana");
+    if (suffix && suffix[7] == '\0') {
+        out[suffix - out] = '\0';
+    }
+}
+
 static const char *_signal_first(const browse_token_t *t)
 {
     return t->signal_first[0] ? t->signal_first : "First -";
@@ -411,18 +424,24 @@ static void _render_rows(void)
             if (has_signal_meta) {
                 const char *label = _signal_label(t);
                 char amount_buf[32];
+                char addr_buf[96];
                 _signal_amount_text(t, amount_buf, sizeof(amount_buf));
+                _signal_addr_text(t, addr_buf, sizeof(addr_buf));
                 lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _browse_first_line_y());
                 lv_obj_set_width(ui->lbl_price, 22);
                 lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_CENTER, 0);
                 lv_obj_set_pos(ui->lbl_chg, COL_PRICE_X + 28, _browse_first_line_y());
-                lv_obj_set_width(ui->lbl_chg, 194);
+                lv_obj_set_width(ui->lbl_chg, 84);
                 lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_LEFT, 0);
+                lv_obj_set_pos(ui->lbl_chain, 206, _browse_first_line_y());
+                lv_obj_set_width(ui->lbl_chain, 106);
+                lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_LEFT, 0);
                 lv_label_set_text(ui->lbl_price, strcmp(label, "SELL") == 0 ? "S" : (strcmp(label, "BUY") == 0 ? "B" : "?"));
                 lv_obj_set_style_text_color(ui->lbl_price, strcmp(label, "SELL") == 0 ? COLOR_RED : (strcmp(label, "BUY") == 0 ? COLOR_GREEN : COLOR_GRAY), 0);
                 lv_label_set_text(ui->lbl_chg, amount_buf);
                 lv_obj_set_style_text_color(ui->lbl_chg, text_color, 0);
-                lv_label_set_text(ui->lbl_chain, "");
+                lv_label_set_text(ui->lbl_chain, addr_buf);
+                lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
                 lv_label_set_text(ui->lbl_subtitle, "");
                 lv_label_set_text(ui->lbl_meta1, _signal_first(t));
                 lv_label_set_text(ui->lbl_meta2, _signal_last(t));
@@ -587,7 +606,7 @@ static void _build_screen(void)
         ui->lbl_meta2 = lv_label_create(ui->row);
         ui->lbl_meta3 = lv_label_create(ui->row);
         ui->lbl_meta4 = lv_label_create(ui->row);
-        lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
         lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_SCROLL_CIRCULAR);

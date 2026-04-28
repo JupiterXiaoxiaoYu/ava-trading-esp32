@@ -7,7 +7,7 @@
     "source_label": "SIGNALS",
     "tokens": [
       {
-        "token_id": "signal-001",
+        "token_id": "6AVAUKa9uxQpruHZUinFECpXEh1usRVtzQWK8N2wpump-solana",
         "chain": "solana",
         "symbol": "SMART",
         "signal_type": "SMART_MONEY",
@@ -27,7 +27,7 @@
         "signal_summary": "First 5m Last 2m Count 2 Vol $125K"
       },
       {
-        "token_id": "signal-002",
+        "token_id": "21qY7erkeZArtVJiTtqZPfUj8sfftRqubHZAG1651H1z-solana",
         "chain": "solana",
         "symbol": "HODL",
         "signal_type": "REBALANCE",
