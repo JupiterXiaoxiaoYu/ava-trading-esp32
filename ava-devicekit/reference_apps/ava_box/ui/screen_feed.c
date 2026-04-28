@@ -86,10 +86,10 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 #define BOTTOM_BAR_H (240 - BOTTOM_Y)
 
 /* Column x positions (within the row container, i.e. relative to x=0) */
-#define COL_CHAIN_X    224
+#define COL_CHAIN_X    236
 #define COL_SYM_X     4
-#define COL_PRICE_X   72
-#define COL_CHG_X     154
+#define COL_PRICE_X   88
+#define COL_CHG_X     162
 #define COL_VOL_X     COL_CHAIN_X
 #define COL_OVERLAY_TITLE_X   24
 #define COL_OVERLAY_TITLE_W   84
@@ -751,15 +751,15 @@ static void _apply_token_row_layout(feed_row_ui_t *ui)
     lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
     lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
-    lv_obj_set_width(ui->lbl_sym, 62);
+    lv_obj_set_width(ui->lbl_sym, 78);
     lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
-    lv_obj_set_width(ui->lbl_price, 76);
+    lv_obj_set_width(ui->lbl_price, 68);
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
-    lv_obj_set_width(ui->lbl_chg, 64);
+    lv_obj_set_width(ui->lbl_chg, 66);
     lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, _center_text_y(&lv_font_montserrat_12));
-    lv_obj_set_width(ui->lbl_chain, 88);
+    lv_obj_set_width(ui->lbl_chain, 76);
     lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
@@ -1007,7 +1007,7 @@ static void _build_screen(void)
         lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chain, 88);
+        lv_obj_set_width(ui->lbl_chain, 76);
         lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Symbol */
@@ -1016,7 +1016,7 @@ static void _build_screen(void)
         lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
         lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
         lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(ui->lbl_sym, 62);
+        lv_obj_set_width(ui->lbl_sym, 78);
 
         /* Price */
         ui->lbl_price = lv_label_create(ui->row);
@@ -1024,7 +1024,7 @@ static void _build_screen(void)
         lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
         lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_price, 76);
+        lv_obj_set_width(ui->lbl_price, 68);
         lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Change % */
@@ -1033,7 +1033,7 @@ static void _build_screen(void)
         lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(ui->lbl_chg, 64);
+        lv_obj_set_width(ui->lbl_chg, 66);
         lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
 
         ui->lbl_subtitle = lv_label_create(ui->row);

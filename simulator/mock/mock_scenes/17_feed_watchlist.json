@@ -9,7 +9,7 @@
       {
         "token_id": "wl-001",
         "chain": "solana",
-        "symbol": "KEEP",
+        "symbol": "VIRTUAL",
         "price": "$2.11",
         "change_24h": "+0.9%",
         "change_positive": 1,

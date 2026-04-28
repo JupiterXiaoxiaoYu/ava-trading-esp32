@@ -466,7 +466,8 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
             return 1;
         }
         if (strcmp(test_case->screen_name, "feed_watchlist") == 0) {
-            if (count_labels_containing_text_recursive(scr, "$2.11") <= 0 ||
+            if (count_labels_containing_text_recursive(scr, "VIRTUAL") <= 0 ||
+                count_labels_containing_text_recursive(scr, "$2.11") <= 0 ||
                 count_labels_containing_text_recursive(scr, "+0.9%") <= 0 ||
                 count_labels_containing_text_recursive(scr, "$0.88") <= 0 ||
                 count_labels_containing_text_recursive(scr, "$2M") <= 0) {

@@ -22,10 +22,10 @@
 #define TOP_BAR_H         22
 #define BOTTOM_Y          215
 
-#define COL_CHAIN_X  224
+#define COL_CHAIN_X  236
 #define COL_SYM_X    4
-#define COL_PRICE_X  72
-#define COL_CHG_X    154
+#define COL_PRICE_X  88
+#define COL_CHG_X    162
 #define COL_VOL_X    COL_CHAIN_X
 
 #define COLOR_GREEN   lv_color_hex(0x00C853)
@@ -249,19 +249,19 @@ static void _apply_row_layout(browse_row_ui_t *ui)
     lv_obj_set_style_text_font(ui->lbl_meta4, &lv_font_montserrat_12, 0);
 
     lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, first_line_y);
-    lv_obj_set_width(ui->lbl_sym, 62);
+    lv_obj_set_width(ui->lbl_sym, 78);
     lv_obj_set_style_text_align(ui->lbl_sym, LV_TEXT_ALIGN_LEFT, 0);
 
     lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, first_line_y);
-    lv_obj_set_width(ui->lbl_price, 76);
+    lv_obj_set_width(ui->lbl_price, 68);
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, first_line_y);
-    lv_obj_set_width(ui->lbl_chg, 64);
+    lv_obj_set_width(ui->lbl_chg, 66);
     lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, first_line_y);
-    lv_obj_set_width(ui->lbl_chain, 88);
+    lv_obj_set_width(ui->lbl_chain, 76);
     lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
 
     lv_obj_set_pos(ui->lbl_subtitle, COL_SYM_X, second_line_y);
