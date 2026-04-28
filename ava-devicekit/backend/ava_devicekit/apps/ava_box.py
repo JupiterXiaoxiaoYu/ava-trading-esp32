@@ -319,17 +319,31 @@ class AvaBoxApp:
                 payload["tokens"] = rows
         elif self.last_screen.screen == "spotlight":
             token_id = str(payload.get("token_id") or "")
+            pair_id = str(payload.get("main_pair_id") or "")
             for event in events:
-                if event.token_id == token_id and event.channel == "price":
+                if event.channel == "price" and _event_matches_token(event.token_id, token_id, payload):
                     _apply_price(payload, event.data)
                     changed = True
-                if event.token_id == token_id and event.channel == "kline":
-                    points = event.data.get("points") or event.data.get("chart")
-                    if isinstance(points, list):
-                        payload["chart"] = points
+                if event.channel == "kline" and _event_matches_kline(event.token_id, pair_id, token_id):
+                    incoming_interval = str(event.data.get("interval") or "")
+                    selected_interval = str(payload.get("interval") or self.context.state.get("interval") or "60")
+                    if _normalized_interval(selected_interval) != "s1":
+                        continue
+                    if incoming_interval and _normalized_interval(incoming_interval) != _normalized_interval(selected_interval):
+                        continue
+                    close = _optional_float(event.data.get("close", event.data.get("c")))
+                    if close > 0:
+                        key = f"_live_kline:{token_id}:s1"
+                        points = [row for row in self.context.state.get(key, []) if isinstance(row, dict)]
+                        points.append({"close": close, "time": _optional_int(event.data.get("time", event.data.get("t"))) or 0})
+                        points = points[-48:]
+                        self.context.state[key] = points
+                        payload.update(_chart_payload(points))
+                        payload["interval"] = selected_interval
                         changed = True
         if not changed:
             return None
+        payload["live"] = True
         return self._remember_screen(ScreenPayload(self.last_screen.screen, payload, context=self.context))
 
 
@@ -363,11 +377,102 @@ def _apply_price(target: dict[str, Any], data: dict[str, Any]) -> None:
         target["change_positive"] = value >= 0
 
 
+def _event_matches_token(event_token_id: str, token_id: str, payload: dict[str, Any]) -> bool:
+    event_id = str(event_token_id or "")
+    if not event_id:
+        return False
+    addr = str(payload.get("addr") or "")
+    chain = str(payload.get("chain") or "solana")
+    candidates = {token_id, addr, f"{addr}-{chain}"}
+    return event_id in candidates
+
+
+def _event_matches_kline(event_token_id: str, pair_id: str, token_id: str) -> bool:
+    event_id = str(event_token_id or "")
+    if not event_id:
+        return False
+    return event_id in {pair_id, token_id} or (pair_id and event_id.startswith(pair_id + "-"))
+
+
+def _normalized_interval(interval: str) -> str:
+    value = str(interval or "").strip().lower()
+    return value[1:] if value.startswith("k") else value
+
+
+def _chart_payload(points: list[dict[str, Any]]) -> dict[str, Any]:
+    closes = [_optional_float(row.get("close", row.get("c"))) for row in points]
+    closes = [value for value in closes if value > 0]
+    if not closes:
+        return {}
+    lo, hi = min(closes), max(closes)
+    if hi <= lo:
+        chart = [500 for _ in closes]
+    else:
+        chart = [int((value - lo) / (hi - lo) * 1000) for value in closes]
+    times = [_optional_int(row.get("time", row.get("t"))) or 0 for row in points]
+    times = [value for value in times if value > 0]
+    return {
+        "chart": chart,
+        "chart_min": _fmt_price(lo),
+        "chart_max": _fmt_price(hi),
+        "chart_min_y": _fmt_y_label(lo),
+        "chart_mid_y": _fmt_y_label((lo + hi) / 2.0),
+        "chart_max_y": _fmt_y_label(hi),
+        "chart_t_start": _fmt_chart_time(times[0]) if times else "",
+        "chart_t_mid": _fmt_chart_time(times[len(times) // 2]) if times else "",
+        "chart_t_end": "now",
+    }
+
+
 def _optional_float(value: Any) -> float:
     try:
         return float(str(value).replace("$", "").replace("%", ""))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _fmt_price(price: Any) -> str:
+    value = _optional_float(price)
+    if value <= 0:
+        return "$0"
+    if value >= 1000:
+        return f"${value:,.0f}"
+    if value >= 1:
+        return f"${value:.4f}"
+    if value >= 0.01:
+        return f"${value:.6f}"
+    import math
+
+    decimals = max(2, -math.floor(math.log10(abs(value))) + 3)
+    return f"${value:.{decimals}f}"
+
+
+def _fmt_y_label(price: Any) -> str:
+    value = _optional_float(price)
+    if value <= 0:
+        return "--"
+    if value >= 1000:
+        return f"${value:,.0f}"
+    if value >= 1:
+        return f"${value:.2f}"
+    if value >= 0.001:
+        return f"${value:.4f}"
+    import math
+
+    exp = int(math.floor(math.log10(abs(value))))
+    mantissa = value / (10**exp)
+    return f"{mantissa:.2f}e{exp}"
+
+
+def _fmt_chart_time(ts: int) -> str:
+    if not ts:
+        return ""
+    from datetime import datetime
+
+    try:
+        return datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
+    except Exception:
+        return ""
 
 
 def _as_browse(screen: ScreenPayload, *, mode: str, source_label: str) -> ScreenPayload:

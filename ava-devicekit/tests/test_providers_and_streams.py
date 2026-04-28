@@ -275,10 +275,29 @@ def test_ave_data_wss_builds_frames_and_parses_price_events():
     frame = adapter.subscribe_frame(StreamSubscription("price", ["So111-solana"]), request_id=7)
     assert '"method":"subscribe"' in frame
     assert 'So111-solana' in frame
+    kline_frame = adapter.subscribe_frame(StreamSubscription("kline", ["Pair111"], interval="s1", chain="solana"), request_id=8)
+    assert '"params":["kline","Pair111","s1","solana"]' in kline_frame
     events = adapter.handle_message({"result": {"prices": [{"token_id": "So111-solana", "price": "100"}]}})
     assert events[0].channel == "price"
     assert events[0].data["price"] == "100"
     assert adapter.snapshot()[0].token_id == "So111-solana"
+
+
+def test_ave_data_wss_parses_actual_kline_container():
+    adapter = AveDataWSSAdapter()
+    events = adapter.handle_message(
+        {
+            "result": {
+                "id": "Pair111-solana",
+                "interval": "s1",
+                "kline": {"eth": {"close": "0.1234", "time": 1710000000}},
+            }
+        }
+    )
+    assert events[0].channel == "kline"
+    assert events[0].token_id == "Pair111"
+    assert events[0].data["pair"] == "Pair111"
+    assert events[0].data["interval"] == "s1"
 
 
 def test_audio_decoder_boundary_accepts_pcm16_only():
@@ -368,3 +387,25 @@ def test_market_stream_runtime_updates_current_feed_screen():
     assert emitted
     assert emitted[0]["data"]["tokens"][0]["price"] == "$999"
     assert emitted[0]["data"]["tokens"][0]["change_24h"] == "+1.50%"
+
+
+def test_market_stream_runtime_updates_live_s1_spotlight_chart():
+    session = create_device_session(mock=True)
+    session.handle({"type": "key_action", "action": "watch"})
+    app = session.app
+    app.last_screen.payload["interval"] = "s1"
+    app.last_screen.payload["main_pair_id"] = "Pair111"
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(
+        session,
+        [
+            MarketStreamEvent("kline", "Pair111", {"close": "0.1", "time": 1710000000, "interval": "s1"}),
+            MarketStreamEvent("kline", "Pair111", {"close": "0.2", "time": 1710000001, "interval": "s1"}),
+        ],
+    )
+    assert emitted
+    data = emitted[-1]["data"]
+    assert data["live"] is True
+    assert data["interval"] == "s1"
+    assert data["chart_t_end"] == "now"
+    assert data["chart"] == [0, 1000]

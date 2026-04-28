@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ from ava_devicekit.providers.asr.base import ASRProvider
 from ava_devicekit.providers.registry import ProviderBundle, create_provider_bundle
 from ava_devicekit.providers.pipeline import VoicePipeline
 from ava_devicekit.runtime.settings import RuntimeSettings
+from ava_devicekit.streams.ave_data_wss import AveDataWSSAdapter, AveDataWSSConfig
+from ava_devicekit.streams.base import MarketStreamEvent, StreamSubscription
+from ava_devicekit.streams.runtime import MarketStreamRuntime
 
 
 class LegacyFirmwareConnection:
@@ -37,15 +41,21 @@ class LegacyFirmwareConnection:
         self.session_id = uuid.uuid4().hex
         self.audio_params = {"format": "pcm16", "sample_rate": 16000, "channels": 1, "frame_duration": 60}
         self.audio = audio or AudioInputBuffer()
+        self.market_runtime: MarketStreamRuntime | None = None
+        self._market_task: asyncio.Task | None = None
 
     async def open(self, ws: Any) -> None:
-        async for raw in ws:
-            if isinstance(raw, bytes):
-                for payload in self.handle_binary(raw):
-                    await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-                continue
-            for payload in await self.handle_raw(raw):
-                await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        self._start_market_stream(ws)
+        try:
+            async for raw in ws:
+                if isinstance(raw, bytes):
+                    payloads = self.handle_binary(raw)
+                else:
+                    payloads = await self.handle_raw(raw)
+                await self._send_payloads(ws, payloads)
+        finally:
+            if self._market_task:
+                self._market_task.cancel()
 
     async def handle_raw(self, raw: str) -> list[dict[str, Any]]:
         return await self._handle_text(raw, allow_async_asr=True)
@@ -163,6 +173,48 @@ class LegacyFirmwareConnection:
             {"type": "tts", "state": "stop", "session_id": self.session_id},
         ]
 
+    async def _send_payloads(self, ws: Any, payloads: list[dict[str, Any]]) -> None:
+        for payload in payloads:
+            await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        self._sync_market_subscriptions(payloads)
+
+    def _start_market_stream(self, ws: Any) -> None:
+        if not os.environ.get("AVE_API_KEY"):
+            return
+        adapter = AveDataWSSAdapter(AveDataWSSConfig(api_key_env="AVE_API_KEY"))
+        self.market_runtime = MarketStreamRuntime(adapter)
+
+        async def on_events(events: list[MarketStreamEvent]) -> None:
+            if not self.market_runtime:
+                return
+            for payload in self.market_runtime.apply_events(self.session, events):
+                await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                self._sync_market_subscriptions([payload])
+
+        self._market_task = asyncio.create_task(adapter.run_forever(on_events), name="ava_devicekit_market_stream")
+
+    def _sync_market_subscriptions(self, payloads: list[dict[str, Any]]) -> None:
+        if not self.market_runtime:
+            return
+        for payload in payloads:
+            if payload.get("type") != "display":
+                continue
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            screen = str(payload.get("screen") or "")
+            if screen == "feed":
+                tokens = data.get("tokens") if isinstance(data.get("tokens"), list) else []
+                token_ids = [str(row.get("token_id") or "") for row in tokens if isinstance(row, dict) and row.get("token_id")]
+                if token_ids:
+                    self.market_runtime.subscribe(StreamSubscription("price", token_ids[:20], chain=str(data.get("chain") or "solana")))
+            elif screen == "spotlight":
+                token_id = str(data.get("token_id") or "")
+                chain = str(data.get("chain") or "solana")
+                if token_id:
+                    self.market_runtime.subscribe(StreamSubscription("price", [token_id], chain=chain))
+                pair = str(data.get("main_pair_id") or "")
+                if pair:
+                    self.market_runtime.subscribe(StreamSubscription("kline", [pair], interval=_to_wss_kline_interval(str(data.get("interval") or "60")), chain=chain))
+
 
 def _device_message_from_key_action(msg: dict[str, Any]) -> dict[str, Any]:
     payload = {k: v for k, v in msg.items() if k not in {"type", "action", "context", "selection"}}
@@ -224,6 +276,17 @@ def _spoken_summary(payload: dict[str, Any]) -> str:
 def _is_model_fallback(payload: dict[str, Any]) -> bool:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     return payload.get("screen") == "notify" and "model fallback" in str(data.get("body") or "").lower()
+
+
+def _to_wss_kline_interval(interval: str) -> str:
+    value = str(interval or "60").strip().lower()
+    if not value:
+        return "k60"
+    if value == "s1":
+        return "s1"
+    if value.startswith("k"):
+        return value
+    return f"k{value}"
 
 
 async def run_legacy_firmware_gateway(

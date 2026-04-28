@@ -109,15 +109,24 @@ class SolanaAdapter(ChainAdapter):
         addr, chain = split_token_reference(token_id)
         if not addr:
             raise ValueError("token_id is required")
+        interval = str(interval or "60").strip().lower() or "60"
         token = _first_payload(self.client.get(f"/tokens/{addr}-{chain}"))
         risk = _safe(lambda: self.client.get(f"/contracts/{addr}-{chain}"), {})
-        kline = _safe(lambda: self.client.get(f"/klines/token/{addr}-{chain}", {"interval": interval, "limit": 48}), {})
+        is_live_second = interval == "s1"
+        kline = {} if is_live_second else _safe(lambda: self.client.get(f"/klines/token/{addr}-{chain}", {"interval": interval, "limit": 48}), {})
         chart = _extract_chart_payload(kline)
+        if is_live_second and not chart.get("chart"):
+            price_now = _safe_float(token.get("current_price_usd", token.get("price")))
+            if price_now > 0:
+                chart = _extract_chart_payload({"data": {"points": [{"close": price_now, "time": 0} for _ in range(12)]}})
+                chart["chart"] = [500] * 12
         flags = _risk_flags(risk)
         identity = _token_identity({**token, "addr": addr, "chain": chain, "token_id": f"{addr}-{chain}"})
+        main_pair_id = _extract_main_pair_id(token)
         payload = {
             **identity,
             "addr": addr,
+            "main_pair_id": main_pair_id,
             "interval": interval,
             "pair": f"{identity.get('symbol', '???')} / USDC",
             "price": _fmt_price(token.get("current_price_usd", token.get("price"))),
@@ -206,6 +215,22 @@ def _token_row(token: dict[str, Any]) -> dict[str, Any]:
         "source": identity.get("source_tag") or "solana",
         "risk_level": str(token.get("risk_level") or "UNKNOWN"),
     }
+
+
+def _extract_main_pair_id(token: dict[str, Any]) -> str:
+    raw_main_pair = token.get("main_pair") if isinstance(token, dict) else None
+    if isinstance(raw_main_pair, str):
+        return raw_main_pair.strip()
+    if isinstance(raw_main_pair, dict):
+        for key in ("pair_id", "pair_address", "pair", "address", "id"):
+            value = str(raw_main_pair.get(key) or "").strip()
+            if value:
+                return value
+    for key in ("pair_id", "pair_address", "main_pair_address"):
+        value = str(token.get(key) or "").strip() if isinstance(token, dict) else ""
+        if value:
+            return value
+    return ""
 
 
 def _extract_chart_payload(kline_resp: dict[str, Any]) -> dict[str, Any]:

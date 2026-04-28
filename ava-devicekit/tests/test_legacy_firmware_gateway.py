@@ -215,6 +215,22 @@ def test_legacy_firmware_accepts_goodbye_frame():
     assert replies == [{"type": "goodbye", "session_id": conn.session_id}]
 
 
+def test_legacy_firmware_market_subscription_syncs_feed_and_s1_spotlight():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+
+    conn.market_runtime = __import__("ava_devicekit.streams.runtime", fromlist=["MarketStreamRuntime"]).MarketStreamRuntime(
+        __import__("ava_devicekit.streams.mock", fromlist=["MockMarketStreamAdapter"]).MockMarketStreamAdapter()
+    )
+    hello = conn.handle_text(json.dumps({"type": "hello"}))
+    conn._sync_market_subscriptions(hello)
+    assert any(sub.channel == "price" for sub in conn.market_runtime.subscriptions)
+
+    spotlight = conn.handle_text(json.dumps({"type": "key_action", "action": "kline_interval", "interval": "s1"}))
+    spotlight[0]["data"]["main_pair_id"] = "Pair111"
+    conn._sync_market_subscriptions(spotlight)
+    assert any(sub.channel == "kline" and sub.token_ids == ["Pair111"] and sub.interval == "s1" for sub in conn.market_runtime.subscriptions)
+
+
 def test_legacy_firmware_accepts_screen_context_and_mcp_frames():
     conn = LegacyFirmwareConnection(create_device_session(mock=True))
     context_reply = conn.handle_text(

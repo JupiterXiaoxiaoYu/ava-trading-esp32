@@ -9,6 +9,7 @@ class StreamSubscription:
     channel: str
     token_ids: list[str] = field(default_factory=list)
     interval: str = "60"
+    chain: str = ""
 
 
 @dataclass(slots=True)
