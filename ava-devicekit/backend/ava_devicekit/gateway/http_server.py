@@ -758,18 +758,18 @@ def _onboarding_from_parts(
     linked = [item for item in devices if item.get("customer_id")]
     online = [item for item in manager.list_devices() if (item.get("connection") or {}).get("connected")]
     steps = [
-        _step("app_project", "Create an app/project", bool(projects), "Apps", "POST /admin/projects", "Create the product app record that devices and users attach to."),
-        _step("providers", "Configure providers", bool(providers.get("ok")), "Providers", "POST /admin/runtime/providers", "Set ASR, LLM, TTS, chain, and execution providers by env-key references."),
-        _step("service_plan", "Create service plan", bool(plans), "Usage", "POST /admin/service-plans", "Define the usage and entitlement model for C-end hardware users."),
-        _step("device_provisioned", "Provision hardware", bool(devices), "Fleet Setup", "POST /admin/devices/register", "Create a device record and get its provisioning token plus activation code."),
-        _step("purchase_recorded", "Create purchase activation card", bool(purchases), "Fleet Setup", "POST /admin/purchases", "Record the hardware purchase, assign a plan, and generate the customer activation URL/card."),
-        _step("device_registered", "Register device token", bool(registered), "Device firmware", "POST /device/register", "Device exchanges the one-time provisioning token for a per-device bearer token."),
-        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Portal", "GET /customer then POST /customer/wallet/login", "Create or reuse a customer account after Solana wallet signature verification."),
-        _step("user_device_bound", "Bind user to device", bool(linked), "Customer Portal", "POST /customer/activate", "Activation code links the purchased device to the logged-in user and app."),
-        _step("device_active", "Activate device", bool(active), "Customer Portal", "POST /customer/activate", "Device is active or has been seen online after activation."),
-        _step("live_session", "Verify live session", bool(online), "Device Detail", "POST /device/boot or WebSocket hello", "Confirm that at least one hardware unit is connected to this backend.", required=False),
-        _step("developer_services", "Configure backend services", bool((developer_services.get("items") or [])), "Services", "runtime services[]", "Register Solana RPC, payment, oracle, reward, data anchor, wallet, or custom APIs.", required=False),
-        _step("firmware", "Publish firmware", bool((firmware.get("items") or [])), "Firmware", "POST /admin/ota/firmware", "Publish at least one OTA binary for pull-based updates.", required=False),
+        _step("app_project", "Create an app/project", bool(projects), "Apps", "POST /admin/projects", "Create the product app record that devices and users attach to.", entry="/admin -> Apps -> Create app/project record"),
+        _step("providers", "Configure providers", bool(providers.get("ok")), "Providers", "POST /admin/runtime/providers", "Set ASR, LLM, TTS, chain, and execution providers by env-key references.", entry="/admin -> Providers -> Edit provider config"),
+        _step("service_plan", "Create service plan", bool(plans), "Usage", "POST /admin/service-plans", "Define the usage and entitlement model for C-end hardware users.", entry="/admin -> Usage -> Create service plan"),
+        _step("device_provisioned", "Provision hardware", bool(devices), "Fleet Setup", "POST /admin/devices/register", "Create a device record and get its provisioning token plus activation code.", entry="/admin -> Fleet Setup -> Provision device"),
+        _step("purchase_recorded", "Create purchase activation card", bool(purchases), "Fleet Setup", "POST /admin/purchases", "Record the hardware purchase, assign a plan, and generate the customer activation URL/card.", entry="/admin -> Fleet Setup -> Create purchase and activation card"),
+        _step("device_registered", "Register device token", bool(registered), "Device firmware", "POST /device/register", "Device exchanges the one-time provisioning token for a per-device bearer token.", entry="Device firmware or mock device client"),
+        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Portal", "GET /customer then POST /customer/wallet/login", "Create or reuse a customer account after Solana wallet signature verification.", entry="/customer -> Connect wallet"),
+        _step("user_device_bound", "Bind user to device", bool(linked), "Customer Portal", "POST /customer/activate", "Activation code links the purchased device to the logged-in user and app.", entry="/customer -> Activation code"),
+        _step("device_active", "Activate device", bool(active), "Customer Portal", "POST /customer/activate", "Device is active or has been seen online after activation.", entry="/customer -> Activate device"),
+        _step("live_session", "Verify live session", bool(online), "Device Detail", "POST /device/boot or WebSocket hello", "Confirm that at least one hardware unit is connected to this backend.", required=False, entry="/admin -> Device Detail or connected hardware"),
+        _step("developer_services", "Configure backend services", bool((developer_services.get("items") or [])), "Services", "runtime services[]", "Register Solana RPC, payment, oracle, reward, data anchor, wallet, or custom APIs.", required=False, entry="/admin -> Services"),
+        _step("firmware", "Publish firmware", bool((firmware.get("items") or [])), "Firmware", "POST /admin/ota/firmware", "Publish at least one OTA binary for pull-based updates.", required=False, entry="/admin -> Firmware -> Publish firmware"),
     ]
     required = [item for item in steps if item["required"]]
     complete_required = [item for item in required if item["done"]]
@@ -795,7 +795,7 @@ def _onboarding_from_parts(
     }
 
 
-def _step(step_id: str, title: str, done: bool, tab: str, api: str, description: str, *, required: bool = True) -> dict[str, Any]:
+def _step(step_id: str, title: str, done: bool, tab: str, api: str, description: str, *, required: bool = True, entry: str = "") -> dict[str, Any]:
     return {
         "id": step_id,
         "title": title,
@@ -803,6 +803,7 @@ def _step(step_id: str, title: str, done: bool, tab: str, api: str, description:
         "required": required,
         "tab": tab,
         "api": api,
+        "entry": entry,
         "description": description,
     }
 

@@ -115,6 +115,12 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert onboarding["ok"] is True
         assert onboarding["next_action"]["id"] == "device_provisioned"
         assert any(item["id"] == "customer_registered" for item in onboarding["steps"])
+        device_step = next(item for item in onboarding["steps"] if item["id"] == "device_provisioned")
+        purchase_step = next(item for item in onboarding["steps"] if item["id"] == "purchase_recorded")
+        assert device_step["entry"] == "/admin -> Fleet Setup -> Provision device"
+        assert device_step["api"] == "POST /admin/devices/register"
+        assert purchase_step["entry"] == "/admin -> Fleet Setup -> Create purchase and activation card"
+        assert purchase_step["api"] == "POST /admin/purchases"
         assert _get(base_url, "/admin/dashboard.json")["onboarding"]["required_total"] >= 1
         assert _get(base_url, "/admin/dashboard.json")["ok"] is True
     finally:
