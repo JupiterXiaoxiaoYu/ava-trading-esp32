@@ -9,15 +9,15 @@ DeviceKit is the reusable framework. Ava Box is the first reference app built on
 | LLM fallback production config | Framework | `providers/llm`, `providers/registry.py`, `providers/pipeline.py` | Deterministic app routing happens before LLM fallback. |
 | Generic gateway, admin, OTA, app session | Framework | `gateway`, `ota`, `runtime` | `/admin/*` endpoints expose capabilities, sanitized runtime, and app manifests. |
 | CLI, package, templates, docs | Framework | `cli.py`, `pyproject.toml`, `userland`, `docs` | Used by app developers and board-port developers. |
-| Chain data adapter interface | Framework | `adapters/base.py` | Limited to feed, search, token detail. |
-| Solana data adapter | Reference adapter | `adapters/solana.py` | Swappable implementation of the generic chain adapter. |
+| Chain data adapter interface | Framework | `adapters/base.py`, `adapters/registry.py` | Limited to feed, search, token detail; custom adapter classes can be selected in runtime config. |
+| AVE-backed Solana data adapter | Reference adapter | `adapters/solana.py` | Swappable implementation of the generic chain adapter. |
 | Live AVE market WSS | Ava Box/reference integration | `streams/ave_data_wss.py` | Kept out of core app/session contracts; runtime can subscribe, cache, and apply price/kline events to Ava Box screens. |
 | Watchlist, portfolio, trading skills | Ava Box app | `apps/ava_box_skills` | Product behavior owned by Ava Box, not DeviceKit core. |
-| Real wallet/trade transaction construction | Ava Box app | `apps/ava_box_skills/execution.py` | ESP32 is the physical confirmation surface; Ava Box can use server-managed proxy/custodial wallets for execution, with credentials and signing kept server-side. |
+| Real wallet/trade transaction construction | Ava Box app | `apps/ava_box_skills/execution.py` | ESP32 is the physical confirmation surface; Ava Box can use server-managed proxy/custodial wallets or any custom `TradeExecutionProvider`, with credentials and signing kept server-side. |
 | Ava Box LVGL screens | Ava Box app/UI userland | `shared_ui/screens` contracts plus app screen C files | Framework owns portable screen contracts; product screens render product payloads. |
 | Scratch Arcade buttons/joystick | Reference board port | `firmware/ports/scratch_arcade` | Core firmware runtime does not mandate input hardware. |
 | Dashboard/app builder | Framework minimum, product extension later | `gateway/http_server.py`, future web UI | Current implementation exposes admin APIs; a full web dashboard can consume them. |
 
 ## Development Rule
 
-If a feature mentions a token, trade, watchlist, portfolio, AVE, or Solana-specific execution flow, it belongs in an app or adapter. If a feature describes message transport, provider lifecycle, manifest loading, screen payload contracts, runtime config, OTA, or board-port boundaries, it belongs in DeviceKit framework.
+If a feature mentions a token, trade, watchlist, portfolio, AVE, or Solana-specific execution flow, it belongs in an app, adapter, or execution provider. If a feature describes message transport, provider lifecycle, manifest loading, screen payload contracts, runtime config, OTA, or board-port boundaries, it belongs in DeviceKit framework.

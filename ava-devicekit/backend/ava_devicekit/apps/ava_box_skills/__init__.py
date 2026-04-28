@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig
-from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, AveSolanaTradeConfig, AveSolanaTradeProvider
+from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, AveSolanaTradeConfig, AveSolanaTradeProvider, load_trade_execution_provider
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.apps.ava_box_skills.portfolio import PortfolioSkill
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
@@ -58,6 +58,8 @@ class AvaBoxSkillService:
 
     def _create_executor(self):
         mode = self.config.execution_mode.lower()
+        if self.config.execution_provider_class or mode in {"custom", "class", "python"}:
+            return load_trade_execution_provider(self.config.execution_provider_class, self.config.execution_options or {})
         if mode == "paper":
             return self.paper_executor
         if mode in {"proxy", "proxy_wallet", "custodial", "hosted", "real"}:
@@ -80,4 +82,4 @@ class AvaBoxSkillService:
         return None
 
 
-__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveProxyWalletTradeProvider", "AveSolanaTradeConfig", "AveSolanaTradeProvider"]
+__all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveProxyWalletTradeProvider", "AveSolanaTradeConfig", "AveSolanaTradeProvider", "load_trade_execution_provider"]

@@ -8,6 +8,15 @@
   "timezone_offset_hours": 8,
   "websocket_ping_interval": 30,
   "websocket_ping_timeout": 10,
+  "adapters": {
+    "chain": {
+      "provider": "solana",
+      "options": {
+        "data_base": "https://data.ave-api.xyz/v2",
+        "api_key_env": "AVE_API_KEY"
+      }
+    }
+  },
   "providers": {
     "asr": {
       "provider": "qwen",
@@ -60,6 +69,7 @@
     "api_key_env": "AVE_API_KEY",
     "secret_key_env": "AVE_SECRET_KEY",
     "proxy_wallet_id_env": "AVE_PROXY_WALLET_ID",
-    "proxy_default_gas": "1000000"
+    "proxy_default_gas": "1000000",
+    "options": {}
   }
 }

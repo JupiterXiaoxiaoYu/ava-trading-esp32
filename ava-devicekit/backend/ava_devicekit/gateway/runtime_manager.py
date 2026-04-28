@@ -42,6 +42,7 @@ class RuntimeManager:
         mock: bool = False,
         skill_store_path: str | None = None,
         skill_config: AvaBoxSkillConfig | None = None,
+        adapter_options: dict[str, Any] | None = None,
     ) -> "RuntimeManager":
         def build(device_id: str) -> DeviceSession:
             store = _device_store_path(skill_store_path, device_id)
@@ -57,6 +58,8 @@ class RuntimeManager:
                     execution_secret_key_env=config.execution_secret_key_env,
                     proxy_wallet_id_env=config.proxy_wallet_id_env,
                     proxy_default_gas=config.proxy_default_gas,
+                    execution_provider_class=config.execution_provider_class,
+                    execution_options=dict(config.execution_options or {}),
                 )
             return create_device_session(
                 app_id=app_id,
@@ -65,6 +68,7 @@ class RuntimeManager:
                 mock=mock,
                 skill_store_path=store,
                 skill_config=config,
+                adapter_options=adapter_options,
             )
 
         return cls(build)

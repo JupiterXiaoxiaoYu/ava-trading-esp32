@@ -10,10 +10,12 @@ This status file separates framework responsibility from Ava Box reference-app r
 | TTS device return | Framework gateway | Complete at protocol boundary | Existing-firmware gateway sends text TTS frames and optional base64 audio frames with content type. |
 | LLM fallback config | Framework | Complete | OpenAI-compatible and custom LLM providers are runtime selectable; deterministic app routes run before fallback. |
 | Live market stream contract | Framework | Complete | `MarketStreamAdapter` + `MarketStreamRuntime`. |
+| Chain adapter selection | Framework | Complete | Runtime config can select built-in `solana`/`mock_solana` or a custom `ChainAdapter` class. |
 | AVE live WSS | Ava Box/reference | Complete at adapter/runtime boundary | AVE WSS adapter builds subscriptions, parses events, caches snapshots, and can run reconnecting WSS loop. |
 | Live price UI updates | Ava Box app | Complete | Ava Box applies price/kline events to current feed or spotlight payload and emits updated screens. |
 | Paper execution | Ava Box app | Complete | Local confirmed drafts update paper orders/positions. |
 | Custodial/proxy wallet execution | Ava Box app | Complete at provider boundary | AVE proxy-wallet provider submits market/limit orders with HMAC auth after physical device confirmation. |
+| Custom trade execution | Ava Box app | Complete at provider boundary | Runtime config can load a custom `TradeExecutionProvider` class for non-AVE execution APIs. |
 | Concrete Ava Box UI package | Ava Box app | Complete as reference-app package | Current LVGL screens are copied into `reference_apps/ava_box/ui`; DeviceKit core keeps only generic UI contracts. |
 | Admin APIs | Framework | Complete | `/admin`, `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events` with optional bearer auth. |
 | CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, run-http, and run-legacy-ws. |

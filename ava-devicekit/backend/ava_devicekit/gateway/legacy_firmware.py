@@ -67,18 +67,27 @@ class LegacyFirmwareConnection:
             return self._hello(msg)
         if msg_type == "ping":
             return [{"type": "pong", "session_id": self.session_id}]
+        if msg_type == "goodbye":
+            return [{"type": "goodbye", "session_id": self.session_id}]
         if msg_type == "key_action":
             return [self.session.handle(_device_message_from_key_action(msg))]
         if msg_type == "input_event":
             return [self.session.handle({"type": "input_event", **_message_context(msg), **{k: v for k, v in msg.items() if k not in {"type", "context", "selection"}}})]
+        if msg_type == "screen_context":
+            return [self.session.handle({"type": "screen_context", "payload": _message_context(msg).get("context", {})})]
         if msg_type == "listen":
             return await self._handle_listen(msg, allow_async_asr=allow_async_asr)
+        if msg_type == "listen_detect":
+            return self._route_detected_text(str(msg.get("text") or msg.get("wake_word") or ""), msg)
         if msg_type == "trade_action":
             return [self.session.handle(_device_message_from_trade_action(msg))]
+        if msg_type == "mcp":
+            payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+            return [self.session.handle({"type": "input_event", "payload": {"semantic_action": "mcp", **payload}, **_message_context(msg)})]
         if msg_type == "confirm":
-            return [self.session.handle({"type": "confirm", **_message_context(msg)})]
+            return [self.session.handle({"type": "confirm", "payload": _message_payload(msg), **_message_context(msg)})]
         if msg_type == "cancel" or (msg_type == "abort"):
-            return [self.session.handle({"type": "cancel", **_message_context(msg)})]
+            return [self.session.handle({"type": "cancel", "payload": _message_payload(msg), **_message_context(msg)})]
         if msg_type == "signed_tx":
             return [self.session.handle({"type": "signed_tx", **_message_context(msg), **{k: v for k, v in msg.items() if k not in {"type", "context"}}})]
         return [_system_error(f"unsupported:{msg_type or 'empty'}")]
@@ -163,8 +172,13 @@ def _device_message_from_key_action(msg: dict[str, Any]) -> dict[str, Any]:
 def _device_message_from_trade_action(msg: dict[str, Any]) -> dict[str, Any]:
     action = str(msg.get("action") or "").strip().lower()
     msg_type = "cancel" if action in {"cancel", "abort"} else "confirm"
-    payload = {k: v for k, v in msg.items() if k not in {"type", "action", "context", "selection"}}
+    payload = _message_payload(msg, exclude={"action"})
     return {"type": msg_type, "payload": payload, **_message_context(msg)}
+
+
+def _message_payload(msg: dict[str, Any], *, exclude: set[str] | None = None) -> dict[str, Any]:
+    excluded = {"type", "context", "selection", *(exclude or set())}
+    return {k: v for k, v in msg.items() if k not in excluded}
 
 
 def _message_context(msg: dict[str, Any]) -> dict[str, Any]:
@@ -232,12 +246,14 @@ async def run_legacy_firmware_gateway(
     providers: ProviderBundle = create_provider_bundle(settings)
 
     async def handler(ws: Any) -> None:
+        adapter_name = settings.chain_adapter if adapter.strip().lower() in {"", "auto"} and settings.chain_adapter else adapter
         session = create_device_session(
             app_id=app_id,
             manifest_path=manifest_path,
-            adapter=adapter,
+            adapter=adapter_name,
             mock=mock,
             skill_store_path=skill_store_path,
+            adapter_options={**settings.chain_adapter_options, **({"class": settings.chain_adapter_class} if settings.chain_adapter_class else {})},
             skill_config=settings.ava_box_skill_config(store_path=skill_store_path),
         )
         audio = AudioInputBuffer(decoder=create_audio_decoder(settings.audio_decoder_class, settings.audio_decoder_options))

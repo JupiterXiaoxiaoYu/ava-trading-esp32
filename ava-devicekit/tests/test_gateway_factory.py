@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+import types
 
 from ava_devicekit.adapters.registry import default_adapter_registry
+from ava_devicekit.core.types import AppContext
 from ava_devicekit.gateway.factory import create_device_session
+from ava_devicekit.screen import builders
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -12,6 +16,32 @@ def test_adapter_registry_exposes_real_and_mock_solana():
     registry = default_adapter_registry()
     assert registry.names() == ["mock_solana", "solana"]
     assert registry.create("mock-solana").chain == "solana"
+
+
+def test_adapter_registry_loads_custom_chain_adapter():
+    module = types.ModuleType("_ava_test_adapters")
+
+    class CustomAdapter:
+        chain = "custom"
+
+        def __init__(self, label="CUSTOM"):
+            self.label = label
+
+        def get_feed(self, *, topic: str = "trending", platform: str = "", context: AppContext | None = None):
+            return builders.feed([], chain=self.chain, source_label=self.label, context=context)
+
+        def search_tokens(self, keyword: str, *, context: AppContext | None = None):
+            return builders.feed([], chain=self.chain, source_label="SEARCH", context=context)
+
+        def get_token_detail(self, token_id: str, *, interval: str = "60", context: AppContext | None = None):
+            return builders.spotlight({"symbol": token_id or "TOKEN", "chain": self.chain}, context=context)
+
+    module.CustomAdapter = CustomAdapter
+    sys.modules[module.__name__] = module
+
+    adapter = default_adapter_registry().create("custom", class_path="_ava_test_adapters.CustomAdapter", options={"label": "ALT"})
+    assert adapter.chain == "custom"
+    assert adapter.get_feed().payload["source_label"] == "ALT"
 
 
 def test_factory_loads_ava_box_with_mock_adapter():
@@ -33,6 +63,34 @@ def test_factory_accepts_explicit_manifest_and_skill_store(tmp_path):
     watchlist = session.handle({"type": "key_action", "action": "watchlist"})
     assert watchlist["screen"] == "feed"
     assert watchlist["data"]["mode"] == "watchlist"
+
+
+def test_factory_passes_custom_adapter_options():
+    module = types.ModuleType("_ava_test_factory_adapters")
+
+    class CustomAdapter:
+        chain = "solana"
+
+        def __init__(self, label="CUSTOM"):
+            self.label = label
+
+        def get_feed(self, *, topic: str = "trending", platform: str = "", context: AppContext | None = None):
+            return builders.feed([], chain="solana", source_label=self.label, context=context)
+
+        def search_tokens(self, keyword: str, *, context: AppContext | None = None):
+            return builders.feed([], chain="solana", source_label="SEARCH", context=context)
+
+        def get_token_detail(self, token_id: str, *, interval: str = "60", context: AppContext | None = None):
+            return builders.spotlight({"symbol": "CUSTOM", "chain": "solana"}, context=context)
+
+    module.CustomAdapter = CustomAdapter
+    sys.modules[module.__name__] = module
+
+    session = create_device_session(
+        adapter="custom",
+        adapter_options={"class_path": "_ava_test_factory_adapters.CustomAdapter", "options": {"label": "ALT-FEED"}},
+    )
+    assert session.boot()["data"]["source_label"] == "ALT-FEED"
 
 
 def test_voice_command_uses_device_selection_context():
@@ -219,3 +277,19 @@ def test_runtime_settings_builds_ava_box_custodial_skill_config():
     assert config.proxy_wallet_id_env == "WALLET_ID"
     assert config.execution_secret_key_env == "SECRET"
     assert config.store_path == "state.json"
+
+
+def test_runtime_settings_exposes_custom_adapter_and_execution_provider():
+    settings = RuntimeSettings.from_dict(
+        {
+            "adapters": {"chain": {"provider": "custom", "class": "pkg.Adapter", "options": {"endpoint": "https://data.example"}}},
+            "execution": {"mode": "custom", "class": "pkg.Executor", "options": {"endpoint": "https://exec.example"}},
+        }
+    )
+    assert settings.chain_adapter == "custom"
+    assert settings.chain_adapter_class == "pkg.Adapter"
+    assert settings.chain_adapter_options == {"endpoint": "https://data.example"}
+    config = settings.ava_box_skill_config()
+    assert config.execution_mode == "custom"
+    assert config.execution_provider_class == "pkg.Executor"
+    assert config.execution_options == {"endpoint": "https://exec.example"}

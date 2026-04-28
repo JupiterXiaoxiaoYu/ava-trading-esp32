@@ -36,6 +36,9 @@ class RuntimeSettings:
     timezone_offset_hours: int = DEFAULT_TIMEZONE_OFFSET_HOURS
     websocket_ping_interval: int = DEFAULT_WEBSOCKET_PING_INTERVAL
     websocket_ping_timeout: int = DEFAULT_WEBSOCKET_PING_TIMEOUT
+    chain_adapter: str = ""
+    chain_adapter_class: str = ""
+    chain_adapter_options: dict[str, Any] = field(default_factory=dict)
     audio_decoder_class: str = ""
     audio_decoder_options: dict[str, Any] = field(default_factory=dict)
     asr_provider: str = "disabled"
@@ -68,12 +71,17 @@ class RuntimeSettings:
     execution_secret_key_env: str = "AVE_SECRET_KEY"
     proxy_wallet_id_env: str = "AVE_PROXY_WALLET_ID"
     proxy_default_gas: str = "1000000"
+    execution_provider_class: str = ""
+    execution_options: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "RuntimeSettings":
         data = data or {}
         server = data.get("server") if isinstance(data.get("server"), dict) else {}
         providers = data.get("providers") if isinstance(data.get("providers"), dict) else {}
+        adapters = data.get("adapters") if isinstance(data.get("adapters"), dict) else {}
+        chain_adapter = adapters.get("chain") if isinstance(adapters.get("chain"), dict) else {}
+        chain_adapter_name = adapters.get("chain") if isinstance(adapters.get("chain"), str) else ""
         audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
         asr = providers.get("asr") if isinstance(providers.get("asr"), dict) else {}
         llm = providers.get("llm") if isinstance(providers.get("llm"), dict) else {}
@@ -91,6 +99,9 @@ class RuntimeSettings:
             timezone_offset_hours=int(data.get("timezone_offset_hours") or server.get("timezone_offset") or DEFAULT_TIMEZONE_OFFSET_HOURS),
             websocket_ping_interval=int(data.get("websocket_ping_interval") or data.get("websocket_transport_ping_interval") or DEFAULT_WEBSOCKET_PING_INTERVAL),
             websocket_ping_timeout=int(data.get("websocket_ping_timeout") or data.get("websocket_transport_ping_timeout") or DEFAULT_WEBSOCKET_PING_TIMEOUT),
+            chain_adapter=str(data.get("chain_adapter") or chain_adapter_name or chain_adapter.get("provider") or chain_adapter.get("name") or ""),
+            chain_adapter_class=str(data.get("chain_adapter_class") or chain_adapter.get("class") or chain_adapter.get("class_path") or ""),
+            chain_adapter_options=_provider_options(chain_adapter),
             audio_decoder_class=str(data.get("audio_decoder_class") or audio.get("decoder_class") or audio.get("decoder") or ""),
             audio_decoder_options=_provider_options(audio),
             asr_provider=str(data.get("asr_provider") or asr.get("provider") or "disabled"),
@@ -123,6 +134,8 @@ class RuntimeSettings:
             execution_secret_key_env=str(data.get("execution_secret_key_env") or execution.get("secret_key_env") or "AVE_SECRET_KEY"),
             proxy_wallet_id_env=str(data.get("proxy_wallet_id_env") or execution.get("proxy_wallet_id_env") or "AVE_PROXY_WALLET_ID"),
             proxy_default_gas=str(data.get("proxy_default_gas") or execution.get("proxy_default_gas") or "1000000"),
+            execution_provider_class=str(data.get("execution_provider_class") or execution.get("class") or execution.get("class_path") or ""),
+            execution_options=_provider_options(execution),
         )
 
     @classmethod
@@ -156,6 +169,13 @@ class RuntimeSettings:
             "device_token_env": self.device_token_env,
             "websocket_ping_interval": self.websocket_ping_interval,
             "websocket_ping_timeout": self.websocket_ping_timeout,
+            "adapters": {
+                "chain": {
+                    "provider": self.chain_adapter,
+                    "class": self.chain_adapter_class,
+                    "options": _sanitize_options(self.chain_adapter_options),
+                }
+            },
             "providers": {
                 "asr": {"provider": self.asr_provider, "class": self.asr_class, "model": self.asr_model, "api_key_env": self.asr_api_key_env, "options": _sanitize_options(self.asr_options)},
                 "llm": {"provider": self.llm_provider, "class": self.llm_class, "model": self.llm_model, "base_url": self.llm_base_url, "api_key_env": self.llm_api_key_env, "options": _sanitize_options(self.llm_options)},
@@ -169,6 +189,8 @@ class RuntimeSettings:
                 "secret_key_env": self.execution_secret_key_env,
                 "proxy_wallet_id_env": self.proxy_wallet_id_env,
                 "proxy_default_gas": self.proxy_default_gas,
+                "class": self.execution_provider_class,
+                "options": _sanitize_options(self.execution_options),
             },
         }
 
@@ -181,6 +203,8 @@ class RuntimeSettings:
             execution_secret_key_env=self.execution_secret_key_env,
             proxy_wallet_id_env=self.proxy_wallet_id_env,
             proxy_default_gas=self.proxy_default_gas,
+            execution_provider_class=self.execution_provider_class,
+            execution_options=dict(self.execution_options),
         )
 
     def __post_init__(self) -> None:
@@ -192,11 +216,34 @@ class RuntimeSettings:
             self.tts_options = {}
         if self.audio_decoder_options is None:
             self.audio_decoder_options = {}
+        if self.chain_adapter_options is None:
+            self.chain_adapter_options = {}
+        if self.execution_options is None:
+            self.execution_options = {}
 
 
 def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
     options = data.get("options") if isinstance(data.get("options"), dict) else {}
-    reserved = {"provider", "class", "class_path", "decoder", "decoder_class", "base_url", "model", "api_key_env", "language", "sample_rate", "voice", "format", "options"}
+    reserved = {
+        "provider",
+        "name",
+        "mode",
+        "class",
+        "class_path",
+        "decoder",
+        "decoder_class",
+        "base_url",
+        "model",
+        "api_key_env",
+        "secret_key_env",
+        "proxy_wallet_id_env",
+        "proxy_default_gas",
+        "language",
+        "sample_rate",
+        "voice",
+        "format",
+        "options",
+    }
     inline = {k: v for k, v in data.items() if k not in reserved}
     return {**inline, **options}
 
@@ -206,4 +253,11 @@ def _sanitize_options(options: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     blocked = ("key", "secret", "token", "password")
     safe_token_fields = {"max_tokens", "max_output_tokens"}
-    return {k: ("<redacted>" if k.lower() not in safe_token_fields and any(word in k.lower() for word in blocked) else v) for k, v in options.items()}
+    return {
+        k: (
+            "<redacted>"
+            if k.lower() not in safe_token_fields and not k.lower().endswith("_env") and any(word in k.lower() for word in blocked)
+            else v
+        )
+        for k, v in options.items()
+    }

@@ -48,7 +48,7 @@ Ava Box can run through DeviceKit without importing the legacy assistant backend
 |---|---|
 | Hardware app contract | `apps/base.py` defines the minimal `boot()` and `handle()` runtime interface |
 | App registry | `apps/registry.py` loads manifests and creates the Ava Box reference app |
-| Adapter registry | `adapters/registry.py` resolves `solana` and offline `mock_solana` adapters |
+| Adapter registry | `adapters/registry.py` resolves built-ins (`solana`, `mock_solana`) and runtime-configured custom chain adapters |
 | Session factory | `gateway/factory.py` creates a runnable `DeviceSession` from CLI or code |
 | HTTP gateway | `gateway/http_server.py` exposes boot/message/state/outbox endpoints |
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
@@ -94,7 +94,7 @@ ESP32 input / voice
 | TTS provider | Framework provider boundary | Selectable TTS registry with mock, OpenAI-compatible HTTP TTS, and custom provider classes |
 | LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider plus custom LLM provider classes through `providers/registry.py` |
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
-| Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider and optional self-custody transaction provider in `apps/ava_box_skills/execution.py` |
+| Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider, optional self-custody transaction provider, and custom execution provider classes in `apps/ava_box_skills/execution.py` |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, optional bearer auth |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `run-http`, and `run-legacy-ws` |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
@@ -132,7 +132,23 @@ Example runtime config:
   "websocket_url": "wss://ava.example.com/ava/v1/",
   "firmware_bin_dir": "data/bin",
   "websocket_ping_interval": 30,
-  "websocket_ping_timeout": 10
+  "websocket_ping_timeout": 10,
+  "adapters": {
+    "chain": {
+      "provider": "custom",
+      "class": "my_app.adapters.MyChainAdapter",
+      "options": {
+        "base_url": "https://data.example.com"
+      }
+    }
+  },
+  "execution": {
+    "mode": "custom",
+    "class": "my_app.execution.MyTradeExecutor",
+    "options": {
+      "base_url": "https://trade.example.com"
+    }
+  }
 }
 ```
 

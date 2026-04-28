@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 SOLANA = "solana"
 DEFAULT_STORE = "data/ava_box_app_state.json"
@@ -18,3 +19,5 @@ class AvaBoxSkillConfig:
     execution_secret_key_env: str = "AVE_SECRET_KEY"
     proxy_wallet_id_env: str = "AVE_PROXY_WALLET_ID"
     proxy_default_gas: str = "1000000"
+    execution_provider_class: str = ""
+    execution_options: dict[str, Any] | None = None

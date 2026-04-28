@@ -92,5 +92,25 @@
         }
       }
     }
+  },
+  "execution": {
+    "paper": {
+      "mode": "paper"
+    },
+    "ava_proxy_wallet": {
+      "mode": "custodial",
+      "base_url": "https://bot-api.ave.ai",
+      "api_key_env": "AVE_API_KEY",
+      "secret_key_env": "AVE_SECRET_KEY",
+      "proxy_wallet_id_env": "AVE_PROXY_WALLET_ID"
+    },
+    "custom_python_executor": {
+      "mode": "custom",
+      "class": "my_app.execution.MyTradeExecutor",
+      "options": {
+        "base_url": "https://trade.example.com",
+        "api_key_env": "MY_TRADE_API_KEY"
+      }
+    }
   }
 }

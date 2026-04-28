@@ -250,13 +250,15 @@ def run_http_gateway(
     runtime_settings: RuntimeSettings | None = None,
 ) -> None:
     runtime_settings = runtime_settings or RuntimeSettings.load()
+    adapter_name = runtime_settings.chain_adapter if adapter.strip().lower() in {"", "auto"} and runtime_settings.chain_adapter else adapter
     factory = session_factory or (
         lambda: create_device_session(
             app_id=app_id,
             manifest_path=manifest_path,
-            adapter=adapter,
+            adapter=adapter_name,
             mock=mock,
             skill_store_path=skill_store_path,
+            adapter_options={**runtime_settings.chain_adapter_options, **({"class": runtime_settings.chain_adapter_class} if runtime_settings.chain_adapter_class else {})},
             skill_config=runtime_settings.ava_box_skill_config(store_path=skill_store_path),
         )
     )

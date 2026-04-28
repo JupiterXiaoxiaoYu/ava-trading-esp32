@@ -7,6 +7,7 @@ import base64
 import datetime
 import hashlib
 import hmac
+import importlib
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -16,6 +17,27 @@ class TradeExecutionProvider(Protocol):
 
     def execute(self, summary: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
+
+
+def load_trade_execution_provider(class_path: str, options: dict[str, Any] | None = None) -> TradeExecutionProvider:
+    """Load an app-level trade executor from a Python class path.
+
+    This is the extension point for non-AVE execution APIs. A custom executor
+    only needs an `execute(summary, params)` method; optional methods such as
+    `send_signed_solana_tx` can be added by apps that need them.
+    """
+
+    if not class_path:
+        raise ValueError("custom execution provider requires `class` or `class_path`")
+    module_name, sep, attr = class_path.replace(":", ".").rpartition(".")
+    if not sep or not module_name or not attr:
+        raise ValueError(f"invalid execution provider class path: {class_path}")
+    cls = getattr(importlib.import_module(module_name), attr)
+    kwargs = dict(options or {})
+    try:
+        return cls(**kwargs)
+    except TypeError:
+        return cls(kwargs)
 
 
 @dataclass(slots=True)

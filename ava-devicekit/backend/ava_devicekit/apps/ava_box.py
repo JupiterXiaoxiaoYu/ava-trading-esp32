@@ -79,6 +79,8 @@ class AvaBoxApp:
         if event and event.context:
             self._ingest_context(event.context.to_dict())
         action = event.semantic_action if event else ""
+        if action == "mcp":
+            return builders.notify("MCP", "Payload received", level="info", context=self.context)
         if action:
             return self._route_key(action, {**payload, "input_source": event.source if event else "", "input_kind": event.kind if event else ""})
         return builders.notify("Input", "Event received", level="info", context=self.context)

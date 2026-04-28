@@ -177,7 +177,9 @@
         "get_feed",
         "search_tokens",
         "get_token_detail"
-      ]
+      ],
+      "user_action": "implement_or_configure",
+      "description": "Can be selected by runtime config with adapters.chain.provider/class/options."
     },
     {
       "id": "market_stream_adapter",
@@ -241,7 +243,7 @@
       "interface": "backend/ava_devicekit/apps/ava_box_skills/execution.py::TradeExecutionProvider",
       "template": "apps/ava_box_skills/",
       "user_action": "app_layer_implement",
-      "description": "Creates app-specific wallet/trade execution requests; not part of framework core."
+      "description": "Creates app-specific wallet/trade execution requests; selectable through execution.mode/class/options and not part of framework core."
     },
     {
       "id": "live_market_stream",

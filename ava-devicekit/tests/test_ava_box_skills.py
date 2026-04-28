@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 from ava_devicekit.apps.ava_box_skills import AvaBoxSkillConfig, AvaBoxSkillService
 from ava_devicekit.core.types import AppContext, Selection
 
@@ -193,3 +196,39 @@ def test_skill_service_real_mode_uses_proxy_wallet_provider(monkeypatch, tmp_pat
     monkeypatch.setenv("TEST_PROXY_WALLET_ID", "assets-1")
     service = AvaBoxSkillService(AvaBoxSkillConfig(store_path=str(tmp_path / "s.json"), execution_mode="custodial", proxy_wallet_id_env="TEST_PROXY_WALLET_ID"))
     assert isinstance(service.executor, AveProxyWalletTradeProvider)
+
+
+def test_skill_service_loads_custom_execution_provider(tmp_path):
+    module = types.ModuleType("_ava_test_execution")
+
+    class CustomExecutor:
+        name = "custom-executor"
+
+        def __init__(self, endpoint: str = ""):
+            self.endpoint = endpoint
+
+        def execute(self, summary, params):
+            return {"status": "submitted", "endpoint": self.endpoint, "symbol": summary.get("symbol")}
+
+    module.CustomExecutor = CustomExecutor
+    sys.modules[module.__name__] = module
+
+    service = AvaBoxSkillService(
+        AvaBoxSkillConfig(
+            store_path=str(tmp_path / "custom.json"),
+            execution_mode="custom",
+            execution_provider_class="_ava_test_execution.CustomExecutor",
+            execution_options={"endpoint": "https://example.invalid/trade"},
+        )
+    )
+    context = AppContext(
+        app_id="ava_box",
+        chain="solana",
+        screen="spotlight",
+        selected=Selection(token_id="So111-solana", addr="So111", chain="solana", symbol="SOL"),
+    )
+    draft = service.create_action_draft("buy", {}, context=context)
+    result = service.confirm_action(draft.request_id, context=context)
+    assert result.ok is True
+    assert result.data["execution"]["endpoint"] == "https://example.invalid/trade"
+    assert result.data["execution"]["symbol"] == "SOL"

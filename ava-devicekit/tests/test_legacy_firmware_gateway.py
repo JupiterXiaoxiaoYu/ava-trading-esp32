@@ -65,6 +65,30 @@ def test_legacy_firmware_listen_detect_preserves_selection_context():
     assert replies[-1]["state"] == "stop"
 
 
+def test_legacy_firmware_accepts_generic_listen_detect_frame():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    replies = conn.handle_text(
+        json.dumps(
+            {
+                "type": "listen_detect",
+                "text": "buy",
+                "context": {
+                    "screen": "spotlight",
+                    "selected": {
+                        "token_id": "So11111111111111111111111111111111111111112-solana",
+                        "addr": "So11111111111111111111111111111111111111112",
+                        "chain": "solana",
+                        "symbol": "SOL",
+                    },
+                },
+            }
+        )
+    )
+    display = next(item for item in replies if item.get("type") == "display")
+    assert display["screen"] == "confirm"
+    assert display["action_draft"]["summary"]["symbol"] == "SOL"
+
+
 def test_legacy_firmware_listen_detect_accepts_screen_selection_shape():
     conn = LegacyFirmwareConnection(create_device_session(mock=True))
     replies = conn.handle_text(
@@ -119,6 +143,22 @@ def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
     assert display["action_result"]["ok"] is True
 
 
+def test_legacy_firmware_generic_confirm_and_cancel_preserve_request_id():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
+    request_id = draft["action_draft"]["request_id"]
+
+    cancelled = conn.handle_text(json.dumps({"type": "cancel", "trade_id": request_id}))[0]
+    assert cancelled["screen"] == "result"
+    assert cancelled["action_result"]["ok"] is True
+
+    draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
+    request_id = draft["action_draft"]["request_id"]
+    confirmed = conn.handle_text(json.dumps({"type": "confirm", "request_id": request_id}))[0]
+    assert confirmed["screen"] == "result"
+    assert confirmed["action_result"]["ok"] is True
+
+
 import asyncio
 
 from ava_devicekit.providers.asr.base import ASRResult
@@ -167,3 +207,30 @@ def test_legacy_firmware_partial_transcript_frame():
     conn = LegacyFirmwareConnection(create_device_session(mock=True))
     replies = conn.handle_text(json.dumps({"type": "listen", "state": "partial", "text": "buy sol"}))
     assert replies == [{"type": "stt", "state": "partial", "text": "buy sol", "session_id": conn.session_id}]
+
+
+def test_legacy_firmware_accepts_goodbye_frame():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    replies = conn.handle_text(json.dumps({"type": "goodbye"}))
+    assert replies == [{"type": "goodbye", "session_id": conn.session_id}]
+
+
+def test_legacy_firmware_accepts_screen_context_and_mcp_frames():
+    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+    context_reply = conn.handle_text(
+        json.dumps(
+            {
+                "type": "screen_context",
+                "context": {
+                    "screen": "spotlight",
+                    "selected": {"token_id": "So111-solana", "addr": "So111", "chain": "solana", "symbol": "SOL"},
+                },
+            }
+        )
+    )
+    assert context_reply[0]["screen"] == "notify"
+    assert conn.session.snapshot()["context"]["selected"]["symbol"] == "SOL"
+
+    mcp_reply = conn.handle_text(json.dumps({"type": "mcp", "payload": {"method": "noop"}}))
+    assert mcp_reply[0]["screen"] == "notify"
+    assert mcp_reply[0]["data"]["title"] == "MCP"
