@@ -73,6 +73,7 @@ def test_cli_validate_outputs_sanitized_runtime(tmp_path, capsys):
     assert body["providers"]["tts"]["base_url"] == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference/"
     assert body["providers"]["tts"]["format"] == "opus"
     assert body["providers"]["tts"]["timeout_sec"] == 30
+    assert "timeout_sec" not in body["providers"]["tts"]["options"]
     assert body["providers"]["tts"]["options"]["api_secret"] == "<redacted>"
 
 

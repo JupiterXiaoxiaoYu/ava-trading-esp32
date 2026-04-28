@@ -285,6 +285,7 @@ def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
         "proxy_default_gas",
         "language",
         "sample_rate",
+        "timeout_sec",
         "voice",
         "format",
         "options",
