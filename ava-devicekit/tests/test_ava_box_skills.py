@@ -118,6 +118,46 @@ def test_paper_execution_does_not_create_native_sol_position(tmp_path):
     assert state.get("paper_positions", []) == []
     assert state["paper_orders"][0]["symbol"] == "SOL"
 
+
+def test_paper_sell_cash_falls_back_to_token_amount_and_price(tmp_path):
+    store = JsonStore(tmp_path / "state.json")
+    store.write(
+        {
+            "paper_cash_sol": "0",
+            "paper_starting_sol": "1",
+            "paper_orders": [],
+            "paper_positions": [
+                {
+                    "symbol": "TOK",
+                    "chain": "solana",
+                    "token_id": "Tok111-solana",
+                    "amount": "10",
+                    "cost_basis_usd": "10",
+                    "last_price_usd": "2",
+                    "value_usd": "$20",
+                    "pnl": "$10",
+                    "source": "paper",
+                }
+            ],
+        }
+    )
+    provider = PaperExecutionProvider(store)
+    provider.execute(
+        {
+            "action": "trade.sell_draft",
+            "symbol": "TOK",
+            "token_id": "Tok111-solana",
+            "amount": "10 TOK",
+            "token_amount": "10",
+            "price_usd": "2",
+            "native_price_usd": "100",
+        },
+        {"request_id": "fallback-sell"},
+    )
+    state = store.read({})
+    assert state["paper_cash_sol"] == "0.2"
+    assert state["paper_positions"] == []
+
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
 
 

@@ -164,6 +164,10 @@ def _sell_cash_delta(order: dict[str, Any]) -> Decimal:
     native_price = _decimal(order.get("native_price_usd"))
     if amount_usd > 0 and native_price > 0:
         return amount_usd / native_price
+    token_amount = _decimal(order.get("token_amount")) or _extract_amount(order.get("amount"))
+    price_usd = _decimal(order.get("price_usd"))
+    if token_amount > 0 and price_usd > 0 and native_price > 0:
+        return (token_amount * price_usd) / native_price
     return Decimal("0")
 
 
