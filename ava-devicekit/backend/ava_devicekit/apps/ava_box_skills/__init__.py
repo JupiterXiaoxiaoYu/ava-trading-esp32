@@ -50,7 +50,13 @@ class AvaBoxSkillService:
         normalized = _normalize_trade_mode(mode or self.get_trade_mode())
         if normalized == "paper":
             return self.portfolio.orders(context=context, source_label="PAPER ORDERS")
-        return self._real_orders(context=context)
+        return self._real_orders(context=context, source_label="REAL ORDERS", status="open")
+
+    def get_history(self, *, mode: str = "", context: AppContext | None = None) -> ScreenPayload:
+        normalized = _normalize_trade_mode(mode or self.get_trade_mode())
+        if normalized == "paper":
+            return self.portfolio.history(context=context, source_label="PAPER HISTORY")
+        return self._real_orders(context=context, source_label="REAL HISTORY", status="")
 
     def get_watchlist(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.watchlist.open(context=context)
@@ -73,21 +79,23 @@ class AvaBoxSkillService:
     def submit_signed_action(self, request_id: str, signed_tx: str, *, context: AppContext | None = None) -> ActionResult:
         return self.trading.submit_signed(request_id, signed_tx, context=context)
 
-    def _real_orders(self, *, context: AppContext | None = None) -> ScreenPayload:
+    def _real_orders(self, *, context: AppContext | None = None, source_label: str = "REAL ORDERS", status: str = "open") -> ScreenPayload:
         get_limit_orders = getattr(self.executor, "get_limit_orders", None)
         if not callable(get_limit_orders):
             rows = [_empty_order_row("REAL", "Real execution provider has no order list")]
-            return builders.feed(rows, chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+            return builders.feed(rows, chain=SOLANA, source_label=source_label, mode="orders", context=context)
         assets_id = os.environ.get(self.config.proxy_wallet_id_env, "").strip()
         if not assets_id:
             rows = [_empty_order_row("REAL", "No proxy wallet configured")]
-            return builders.feed(rows, chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+            return builders.feed(rows, chain=SOLANA, source_label=source_label, mode="orders", context=context)
         try:
-            resp = get_limit_orders(SOLANA, assets_id, page_size=20, page_no=0)
+            resp = get_limit_orders(SOLANA, assets_id, status=status, page_size=20, page_no=0)
             rows = [_real_order_row(row) for row in _extract_rows(resp) if isinstance(row, dict)]
         except Exception as exc:
             rows = [_empty_order_row("REAL", f"Order fetch failed: {exc}")]
-        return builders.feed(rows[:20], chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+        if not rows:
+            rows = [_empty_order_row("ORDERS" if "ORDERS" in source_label else "HISTORY", "No matching rows")]
+        return builders.feed(rows[:20], chain=SOLANA, source_label=source_label, mode="orders", context=context)
 
     def _create_executor(self):
         mode = self.config.execution_mode.lower()

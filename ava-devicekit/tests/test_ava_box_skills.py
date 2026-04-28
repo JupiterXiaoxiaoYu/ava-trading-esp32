@@ -56,7 +56,18 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     orders = service.get_orders(context=context)
     assert orders.screen == "feed"
     assert orders.payload["mode"] == "orders"
+    assert orders.payload["tokens"][0]["symbol"] == "ORDERS"
+    history = service.get_history(context=context)
+    assert history.payload["source_label"] == "PAPER HISTORY"
+    assert history.payload["tokens"][0]["symbol"] == "BONK"
+
+    limit = service.create_action_draft("limit", {"limit_price": "0.00001"}, context=context)
+    limit_result = service.confirm_action(limit.request_id, context=context)
+    assert limit_result.ok is True
+    assert limit_result.data["execution"]["status"] == "paper_open"
+    orders = service.get_orders(context=context)
     assert orders.payload["tokens"][0]["symbol"] == "BONK"
+    assert orders.payload["tokens"][0]["change_24h"] == "paper_open"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
@@ -299,6 +310,8 @@ def test_skill_service_separates_paper_and_real_order_sources(monkeypatch, tmp_p
     )
     draft = service.create_action_draft("buy", {}, context=context)
     service.confirm_action(draft.request_id, context=context)
+    limit = service.create_action_draft("limit", {"limit_price": "100"}, context=context)
+    service.confirm_action(limit.request_id, context=context)
 
     def fake_limit_orders(self, chain, assets_id, *, status="", token="", page_size=20, page_no=0):
         return {
@@ -317,12 +330,18 @@ def test_skill_service_separates_paper_and_real_order_sources(monkeypatch, tmp_p
     monkeypatch.setattr(AveProxyWalletTradeProvider, "get_limit_orders", fake_limit_orders)
 
     paper = service.get_orders(mode="paper", context=context)
+    paper_history = service.get_history(mode="paper", context=context)
     real = service.get_orders(mode="real", context=context)
+    real_history = service.get_history(mode="real", context=context)
 
     assert paper.payload["source_label"] == "PAPER ORDERS"
     assert paper.payload["tokens"][0]["symbol"] == "SOL"
+    assert paper_history.payload["source_label"] == "PAPER HISTORY"
+    assert paper_history.payload["tokens"][0]["change_24h"] == "paper_filled"
     assert real.payload["source_label"] == "REAL ORDERS"
     assert real.payload["tokens"][0]["symbol"] == "REAL"
+    assert real_history.payload["source_label"] == "REAL HISTORY"
+    assert real_history.payload["tokens"][0]["symbol"] == "REAL"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, build_proxy_wallet_order_payload
 

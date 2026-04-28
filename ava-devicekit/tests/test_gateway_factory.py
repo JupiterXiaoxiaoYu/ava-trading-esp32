@@ -154,6 +154,7 @@ def test_ui_emitted_key_actions_are_routed_without_unknown_action(tmp_path):
         {"type": "key_action", "action": "portfolio_sell", **token_payload, "balance_raw": "1.0"},
         {"type": "key_action", "action": "portfolio_chain_cycle"},
         {"type": "key_action", "action": "orders"},
+        {"type": "key_action", "action": "order_history"},
         {"type": "key_action", "action": "portfolio"},
     ]
 

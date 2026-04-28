@@ -40,7 +40,23 @@ class PortfolioSkill:
         )
 
     def orders(self, *, context: AppContext | None = None, source_label: str = "PAPER ORDERS") -> ScreenPayload:
-        rows = [_order_row(row) for row in _state(self.store).get("paper_orders", []) if isinstance(row, dict)]
+        rows = [
+            _order_row(row)
+            for row in _state(self.store).get("paper_orders", [])
+            if isinstance(row, dict) and _is_open_limit_order(row)
+        ]
+        if not rows:
+            rows = [_empty_order_row("ORDERS", "No open limits")]
+        return builders.feed(rows, chain=SOLANA, source_label=source_label, mode="orders", context=context)
+
+    def history(self, *, context: AppContext | None = None, source_label: str = "PAPER HISTORY") -> ScreenPayload:
+        rows = [
+            _order_row(row)
+            for row in _state(self.store).get("paper_orders", [])
+            if isinstance(row, dict) and not _is_open_limit_order(row)
+        ]
+        if not rows:
+            rows = [_empty_order_row("HISTORY", "No order history")]
         return builders.feed(rows, chain=SOLANA, source_label=source_label, mode="orders", context=context)
 
 
@@ -119,6 +135,26 @@ def _order_row(row: dict[str, Any]) -> dict[str, Any]:
         "source": "orders",
         "source_tag": "order",
         "contract_tail": _contract_tail(addr),
+    }
+
+
+def _is_open_limit_order(row: dict[str, Any]) -> bool:
+    action = str(row.get("action") or "").lower()
+    status = str(row.get("status") or "").lower()
+    return action == "trade.limit_draft" and status in {"", "open", "pending", "paper_open", "created"}
+
+
+def _empty_order_row(symbol: str, message: str) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "chain": SOLANA,
+        "addr": "",
+        "token_id": "",
+        "price": "--",
+        "change_24h": message[:16],
+        "change_positive": False,
+        "source": "orders",
+        "source_tag": message,
     }
 
 

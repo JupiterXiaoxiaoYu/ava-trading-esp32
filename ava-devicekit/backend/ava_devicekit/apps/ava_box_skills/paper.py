@@ -24,11 +24,13 @@ class PaperExecutionProvider:
 
     def execute(self, summary: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
         state = _state(self.store)
+        action = str(summary.get("action") or "")
+        is_limit = action == "trade.limit_draft"
         order = {
             "id": str(params.get("request_id") or f"paper_{int(time.time() * 1000)}"),
             "ts": int(time.time()),
-            "status": "paper_filled",
-            "action": str(summary.get("action") or ""),
+            "status": "paper_open" if is_limit else "paper_filled",
+            "action": action,
             "symbol": str(summary.get("symbol") or "TOKEN"),
             "token_id": _normalize_token_id(summary.get("token_id") or params.get("token_id") or ""),
             "amount": str(summary.get("amount") or ""),
@@ -51,7 +53,7 @@ class PaperExecutionProvider:
             return order
         state.setdefault("paper_orders", []).insert(0, order)
         state["paper_orders"] = state["paper_orders"][:100]
-        if not _is_native_sol_order(order):
+        if not is_limit and not _is_native_sol_order(order):
             _apply_position(state, order)
             _apply_cash(state, order)
         self.store.write(state)

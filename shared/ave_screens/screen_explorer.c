@@ -43,6 +43,7 @@ typedef enum {
 typedef enum {
     EXPLORER_ITEM_SEARCH = 0,
     EXPLORER_ITEM_ORDERS,
+    EXPLORER_ITEM_HISTORY,
     EXPLORER_ITEM_TRADE_MODE,
     EXPLORER_ITEM_SOURCES,
     EXPLORER_ITEM_SIGNALS,
@@ -83,7 +84,8 @@ typedef struct {
 
 static const explorer_item_t MENU_ITEMS[EXPLORER_ITEM_COUNT] = {
     {EXPLORER_ITEM_SEARCH,    "Search",    "Say token"},
-    {EXPLORER_ITEM_ORDERS,    "Orders",    "Open current orders list"},
+    {EXPLORER_ITEM_ORDERS,    "Orders",    "Open limit orders"},
+    {EXPLORER_ITEM_HISTORY,   "History",   "Filled and rejected orders"},
     {EXPLORER_ITEM_TRADE_MODE,"Trading Mode", "Current: Real"},
     {EXPLORER_ITEM_SOURCES,   "Sources",   "Choose topic or platform"},
     {EXPLORER_ITEM_SIGNALS,   "Signals",   "Browse public signal flow"},
@@ -429,6 +431,11 @@ static void _activate_menu_item(void)
 
     if (item->id == EXPLORER_ITEM_ORDERS) {
         _show_feed_and_send("{\"type\":\"key_action\",\"action\":\"orders\"}");
+        return;
+    }
+
+    if (item->id == EXPLORER_ITEM_HISTORY) {
+        _show_feed_and_send("{\"type\":\"key_action\",\"action\":\"order_history\"}");
         return;
     }
 

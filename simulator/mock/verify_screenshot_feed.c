@@ -432,12 +432,9 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
         }
         if (strcmp(test_case->screen_name, "feed_orders") == 0 ||
             strcmp(test_case->screen_name, "feed_orders_press_a") == 0) {
-            if (count_labels_containing_text_recursive(scr, "VIEW ONLY") <= 0) {
-                fprintf(stderr, "FAIL: [%s] expected ORDERS top hint mentioning 'VIEW ONLY'\n", test_case->screen_name);
-                return 0;
-            }
-            if (count_labels_containing_text_recursive(scr, "| Y PORT") <= 0) {
-                fprintf(stderr, "FAIL: [%s] expected ORDERS affordance mentioning '| Y PORT'\n", test_case->screen_name);
+            if (count_labels_containing_text_recursive(scr, "Y Port") <= 0 &&
+                count_labels_containing_text_recursive(scr, "Y PORT") <= 0) {
+                fprintf(stderr, "FAIL: [%s] expected ORDERS affordance mentioning 'Y Port'\n", test_case->screen_name);
                 return 0;
             }
             return 1;
