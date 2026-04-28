@@ -373,13 +373,37 @@ static int _is_empty_payload(const char *json)
     return (!json || strcmp(json, "{}") == 0);
 }
 
+static int _source_tag_is_displayable(const char *src)
+{
+    char normalized[16];
+    int written = 0;
+
+    if (!src || !src[0]) return 0;
+    while (*src && written < (int)sizeof(normalized) - 1) {
+        char c = *src++;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+            if (c >= 'A' && c <= 'Z') c = (char)(c + ('a' - 'A'));
+            normalized[written++] = c;
+        }
+    }
+    normalized[written] = '\0';
+
+    /* Execution mode belongs in the portfolio title, not after each symbol. */
+    if (strcmp(normalized, "paper") == 0 ||
+        strcmp(normalized, "local") == 0 ||
+        strcmp(normalized, "mock") == 0) {
+        return 0;
+    }
+    return normalized[0] != '\0';
+}
+
 static void _compact_upper_tag(const char *src, char *out, size_t out_n, int max_chars)
 {
     int written = 0;
 
     if (!out || out_n == 0) return;
     out[0] = '\0';
-    if (!src || !src[0] || max_chars <= 0) return;
+    if (!src || !src[0] || max_chars <= 0 || !_source_tag_is_displayable(src)) return;
 
     while (*src && written < max_chars && (size_t)written < out_n - 1) {
         char c = *src++;

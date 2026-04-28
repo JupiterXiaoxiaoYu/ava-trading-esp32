@@ -406,6 +406,10 @@ AVE_HARNESS_WEAK int ave_sm_build_key_action_json(
 AVE_HARNESS_WEAK void ave_sm_go_back_fallback(void)
 {
 }
+
+AVE_HARNESS_WEAK void ave_sm_go_to_feed(void)
+{
+}
 #endif
 
 static void clear_last_json(void)
@@ -509,6 +513,20 @@ int main(void)
 int main(void)
 {
     int ok = 1;
+
+    memset(s_holdings, 0, sizeof(s_holdings));
+    s_holding_count = 1;
+    s_sel_idx = 0;
+    snprintf(s_holdings[0].addr, sizeof(s_holdings[0].addr), "%s", "addr\"1\\line");
+    snprintf(s_holdings[0].chain, sizeof(s_holdings[0].chain), "%s", "sol\"ana");
+    snprintf(s_holdings[0].symbol, sizeof(s_holdings[0].symbol), "%s", "SYM\"1");
+    snprintf(s_holdings[0].balance_raw, sizeof(s_holdings[0].balance_raw), "%s", "10\".25");
+
+    screen_portfolio_show("{\"holdings\":[{\"symbol\":\"BONK\",\"source_tag\":\"paper\",\"avg_cost_usd\":\"$1\",\"value_usd\":\"$2\",\"pnl\":\"$1\",\"pnl_positive\":true}],\"total_usd\":\"$2\",\"pnl\":\"$1\",\"mode_label\":\"Paper\",\"chain_label\":\"SOL\"}");
+    if (!s_row_sym[0] || strstr(s_row_sym[0]->text, "PAPE") || strcmp(s_row_sym[0]->text, "BONK") != 0) {
+        fprintf(stderr, "FAIL: portfolio paper mode source tag leaked into symbol: %s\n", s_row_sym[0] ? s_row_sym[0]->text : "<null>");
+        ok = 0;
+    }
 
     memset(s_holdings, 0, sizeof(s_holdings));
     s_holding_count = 1;
