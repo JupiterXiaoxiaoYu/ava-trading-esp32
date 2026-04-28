@@ -12,6 +12,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 8788
 DEFAULT_WEBSOCKET_PORT = 8787
 DEFAULT_FIRMWARE_BIN_DIR = "data/bin"
+DEFAULT_RUNTIME_STATE_DIR = "data/device_runtime_state"
 DEFAULT_TIMEZONE_OFFSET_HOURS = 8
 DEFAULT_WEBSOCKET_PING_INTERVAL = 30
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 10
@@ -31,6 +32,7 @@ class RuntimeSettings:
     public_base_url: str = ""
     websocket_url: str = ""
     firmware_bin_dir: str = DEFAULT_FIRMWARE_BIN_DIR
+    runtime_state_dir: str = DEFAULT_RUNTIME_STATE_DIR
     admin_token_env: str = "AVA_DEVICEKIT_ADMIN_TOKEN"
     device_token_env: str = "AVA_DEVICEKIT_DEVICE_TOKEN"
     timezone_offset_hours: int = DEFAULT_TIMEZONE_OFFSET_HOURS
@@ -94,6 +96,7 @@ class RuntimeSettings:
             public_base_url=str(data.get("public_base_url") or server.get("public_base_url") or ""),
             websocket_url=str(data.get("websocket_url") or server.get("websocket") or ""),
             firmware_bin_dir=str(data.get("firmware_bin_dir") or server.get("firmware_bin_dir") or DEFAULT_FIRMWARE_BIN_DIR),
+            runtime_state_dir=str(data.get("runtime_state_dir") or server.get("runtime_state_dir") or DEFAULT_RUNTIME_STATE_DIR),
             admin_token_env=str(data.get("admin_token_env") or server.get("admin_token_env") or "AVA_DEVICEKIT_ADMIN_TOKEN"),
             device_token_env=str(data.get("device_token_env") or server.get("device_token_env") or "AVA_DEVICEKIT_DEVICE_TOKEN"),
             timezone_offset_hours=int(data.get("timezone_offset_hours") or server.get("timezone_offset") or DEFAULT_TIMEZONE_OFFSET_HOURS),
@@ -165,6 +168,7 @@ class RuntimeSettings:
             "public_base_url": self.public_base_url,
             "websocket_url": self.websocket_url,
             "firmware_bin_dir": self.firmware_bin_dir,
+            "runtime_state_dir": self.runtime_state_dir,
             "admin_token_env": self.admin_token_env,
             "device_token_env": self.device_token_env,
             "websocket_ping_interval": self.websocket_ping_interval,

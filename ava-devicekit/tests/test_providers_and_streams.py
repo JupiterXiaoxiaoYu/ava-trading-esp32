@@ -426,7 +426,63 @@ def test_market_stream_runtime_fills_paper_limit_orders(tmp_path):
     emitted = runtime.apply_events(session, [MarketStreamEvent("price", token["token_id"], {"price": "0.000009"})])
     assert emitted
     assert emitted[0]["data"]["tokens"][0]["symbol"] == "ORDERS"
+    assert emitted[0]["data"]["order_refresh"]["targets"] == ["orders", "history", "portfolio"]
 
     history = session.handle({"type": "key_action", "action": "order_history"})
     assert history["data"]["tokens"][0]["symbol"] == token["symbol"]
     assert history["data"]["tokens"][0]["change_24h"] == "paper_filled"
+
+
+def test_market_stream_runtime_fills_paper_limit_history_without_navigation(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "limit", "limit_price": "0.00001", **token})
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["data"]["success"] is True
+
+    history = session.handle({"type": "key_action", "action": "order_history"})
+    assert history["data"]["tokens"][0]["symbol"] == "HISTORY"
+
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(session, [MarketStreamEvent("price", token["token_id"], {"price": "0.000009"})])
+    assert emitted
+    assert emitted[0]["data"]["source_label"] == "PAPER HISTORY"
+    assert emitted[0]["data"]["tokens"][0]["symbol"] == token["symbol"]
+    assert emitted[0]["data"]["tokens"][0]["change_24h"] == "paper_filled"
+    assert emitted[0]["data"]["order_refresh"]["reason"] == "paper_limit_filled"
+
+
+def test_market_stream_runtime_fills_paper_limit_portfolio_without_navigation(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "limit", "limit_price": "0.00001", **token})
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["data"]["success"] is True
+
+    portfolio = session.handle({"type": "key_action", "action": "portfolio"})
+    assert all(row["symbol"] != token["symbol"] for row in portfolio["data"]["holdings"])
+
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(session, [MarketStreamEvent("price", token["token_id"], {"price": "0.000009"})])
+    assert emitted
+    assert emitted[0]["screen"] == "portfolio"
+    assert any(row["symbol"] == token["symbol"] for row in emitted[0]["data"]["holdings"])
+    assert emitted[0]["data"]["order_refresh"]["targets"] == ["orders", "history", "portfolio"]
+
+
+def test_market_stream_runtime_emits_order_refresh_hook_when_screen_is_not_refreshable(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "limit", "limit_price": "0.00001", **token})
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["screen"] == "result"
+
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(session, [MarketStreamEvent("price", token["token_id"], {"price": "0.000009"})])
+    assert emitted
+    assert emitted[0]["screen"] == "result"
+    assert emitted[0]["data"]["order_refresh"]["reason"] == "paper_limit_filled"
+    assert emitted[0]["data"]["order_refresh"]["symbols"] == [token["symbol"]]

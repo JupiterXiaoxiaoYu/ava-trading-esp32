@@ -450,16 +450,15 @@ class AvaBoxApp:
         filled_limits = self.skills.fill_paper_limits(_price_map_from_events(events)) if self._trade_mode() == "paper" else []
         changed = False
         payload = dict(self.last_screen.payload)
+        refreshed = self._refresh_screen_after_order_events(filled_limits, payload)
+        if refreshed:
+            return refreshed
+        order_refresh = _order_refresh_payload(filled_limits)
         if self.last_screen.screen == "feed":
             rows = [dict(row) for row in payload.get("tokens", []) if isinstance(row, dict)]
             changed = _apply_events_to_rows(rows, events)
             if changed:
                 payload["tokens"] = rows
-            source_label = str(payload.get("source_label") or "").upper()
-            if filled_limits and "ORDERS" in source_label:
-                return self._remember_screen(self.skills.get_orders(mode=self._trade_mode(), context=self.context))
-            if filled_limits and "HISTORY" in source_label:
-                return self._remember_screen(self.skills.get_history(mode=self._trade_mode(), context=self.context))
         elif self.last_screen.screen == "spotlight":
             token_id = str(payload.get("token_id") or "")
             pair_id = str(payload.get("main_pair_id") or "")
@@ -484,12 +483,36 @@ class AvaBoxApp:
                         payload.update(_chart_payload(points))
                         payload["interval"] = selected_interval
                         changed = True
-        elif self.last_screen.screen == "portfolio" and filled_limits:
-            return self._remember_screen(self.skills.get_portfolio(context=self.context))
-        if not changed:
+        if not changed and not order_refresh:
             return None
         payload["live"] = True
+        if order_refresh:
+            payload["order_refresh"] = order_refresh
         return self._remember_screen(ScreenPayload(self.last_screen.screen, payload, context=self.context))
+
+    def _refresh_screen_after_order_events(
+        self,
+        filled_limits: list[dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> ScreenPayload | None:
+        if not filled_limits:
+            return None
+        order_refresh = _order_refresh_payload(filled_limits)
+        screen: ScreenPayload | None = None
+        if self.last_screen and self.last_screen.screen == "portfolio":
+            screen = self.skills.get_portfolio(context=self.context)
+        elif self.last_screen and self.last_screen.screen == "feed":
+            mode = str(payload.get("mode") or "").lower()
+            source_label = str(payload.get("source_label") or "").upper()
+            if mode == "history" or "HISTORY" in source_label:
+                screen = self.skills.get_history(mode=self._trade_mode(), context=self.context)
+            elif mode == "orders" or "ORDERS" in source_label:
+                screen = self.skills.get_orders(mode=self._trade_mode(), context=self.context)
+        if not screen:
+            return None
+        screen.payload["live"] = True
+        screen.payload["order_refresh"] = order_refresh
+        return self._remember_screen(screen)
 
 
 def _optional_int(value: Any) -> int | None:
@@ -535,6 +558,18 @@ def _price_map_from_events(events: list[MarketStreamEvent]) -> dict[str, Any]:
         if symbol:
             prices[symbol] = price
     return prices
+
+
+def _order_refresh_payload(filled_limits: list[dict[str, Any]]) -> dict[str, Any]:
+    if not filled_limits:
+        return {}
+    symbols = [str(order.get("symbol") or "").upper() for order in filled_limits]
+    return {
+        "reason": "paper_limit_filled",
+        "count": len(filled_limits),
+        "targets": ["orders", "history", "portfolio"],
+        "symbols": [symbol for symbol in symbols if symbol],
+    }
 
 
 def _event_matches_token(event_token_id: str, token_id: str, payload: dict[str, Any]) -> bool:

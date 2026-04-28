@@ -10,7 +10,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from ava_devicekit.gateway.factory import create_device_session
-from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id
+from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.ota.firmware import build_ota_response, resolve_firmware_download
 from ava_devicekit.runtime.settings import RuntimeSettings
@@ -18,9 +18,10 @@ from ava_devicekit.runtime.settings import RuntimeSettings
 SessionFactory = Callable[[], DeviceSession]
 
 
-def make_handler(session_factory: SessionFactory, runtime_settings: RuntimeSettings | None = None):
+def make_handler(session_factory: SessionFactory | None = None, runtime_settings: RuntimeSettings | None = None, manager: RuntimeManager | None = None):
     settings = runtime_settings or RuntimeSettings.load()
-    manager = RuntimeManager(lambda device_id: session_factory())
+    session_factory = session_factory or (lambda: create_device_session(mock=True))
+    manager = manager or RuntimeManager(lambda device_id: session_factory())
 
     class DeviceKitHandler(BaseHTTPRequestHandler):
         server_version = "AvaDeviceKitHTTP/0.1"
@@ -250,19 +251,16 @@ def run_http_gateway(
     runtime_settings: RuntimeSettings | None = None,
 ) -> None:
     runtime_settings = runtime_settings or RuntimeSettings.load()
-    adapter_name = runtime_settings.chain_adapter if adapter.strip().lower() in {"", "auto"} and runtime_settings.chain_adapter else adapter
-    factory = session_factory or (
-        lambda: create_device_session(
-            app_id=app_id,
-            manifest_path=manifest_path,
-            adapter=adapter_name,
-            mock=mock,
-            skill_store_path=skill_store_path,
-            adapter_options={**runtime_settings.chain_adapter_options, **({"class": runtime_settings.chain_adapter_class} if runtime_settings.chain_adapter_class else {})},
-            skill_config=runtime_settings.ava_box_skill_config(store_path=skill_store_path),
-        )
+    manager = runtime_manager_for_settings(
+        runtime_settings,
+        app_id=app_id,
+        manifest_path=manifest_path,
+        adapter=adapter,
+        mock=mock,
+        skill_store_path=skill_store_path,
     )
-    server = ThreadingHTTPServer((host, port), make_handler(factory, runtime_settings))
+    factory = session_factory or (lambda: manager.get("default"))
+    server = ThreadingHTTPServer((host, port), make_handler(factory, runtime_settings, manager=manager))
     print(f"Ava DeviceKit HTTP gateway listening on http://{host}:{port}")
     server.serve_forever()
 

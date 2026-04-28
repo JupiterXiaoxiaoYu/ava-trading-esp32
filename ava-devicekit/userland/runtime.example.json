@@ -5,6 +5,7 @@
   "public_base_url": "https://ava.example.com",
   "websocket_url": "wss://ava.example.com/ava/v1/",
   "firmware_bin_dir": "data/bin",
+  "runtime_state_dir": "data/device_runtime_state",
   "timezone_offset_hours": 8,
   "websocket_ping_interval": 30,
   "websocket_ping_timeout": 10,
