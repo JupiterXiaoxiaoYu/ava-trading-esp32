@@ -22,7 +22,7 @@ This status file separates framework responsibility from Ava Box reference-app r
 | OTA trigger command | Framework + firmware port contract | Complete at framework/template boundary | `/admin/devices/{device_id}/ota-check` queues a `device_command: ota_check`; board template handles it by calling `start_ota_check`. |
 | Developer backend service registry | Framework | Complete | `services/registry.py` and `/admin/developer/services` declare proxy wallets, API services, market data, payment services, and order routers without exposing secrets to devices. |
 | Developer service invocation boundary | Framework | Complete | `services/client.py` invokes only explicitly allowlisted backend services with `invocable: true` and `allowed_paths`. |
-| Explicit ACK protocol | Framework + firmware port contract | Complete at protocol/template boundary | Backend supports ACK; board template extracts `message_id` and ACKs after render/command acceptance. Existing Ava Box remains compatible through legacy auto-ack. |
+| Explicit ACK protocol | Framework + firmware port contract | Complete at protocol/template boundary | Backend supports ACK; board template extracts `message_id` and ACKs after render/command acceptance. Existing Ava Box remains compatible through compatibility auto-ack. |
 | Device protocol spec | Framework docs | Complete | `docs/device-protocol.md` defines all current JSON and binary protocol frames. |
 | Security hardening | Framework deploy policy | Complete | `production_mode` enforces configured admin/device bearer tokens; docs define allowlist and credential boundaries. |
 | Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is an operator dashboard with Dashboard, Apps, Fleet Setup, Customer Entry, Device Detail, Providers, Usage, Server Timeline, Firmware, Services, and Raw areas. |
@@ -31,8 +31,12 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Web provider configuration | Framework admin UI | Complete MVP | `/admin` can edit ASR, LLM, TTS, chain adapter, and execution provider config by provider/model/base URL/env key/options and apply it to the running gateway. |
 | Device diagnostics | Framework admin API | Complete MVP | `/admin/devices/{device_id}/diagnostics` returns control-plane device data, resolved config, runtime state, connection, and recent events. |
 | Usage and entitlements | Framework control plane | Complete MVP | Service plans, per-device entitlements, usage reports, admin usage recording, and authenticated device usage reports are supported. |
+| Provider usage metering | Framework control plane | Complete MVP | Provisioned devices record ASR seconds, LLM token usage, and TTS character usage through the provider pipeline and firmware-compatible gateway. |
 | Solana AI DePIN app template | Framework reference template | Complete MVP | `examples/apps/solana_ai_depin_device` and `ava-devicekit init-app --type depin` provide a hardware-app template for device identity, heartbeat, proof drafts, and physical confirmation. |
-| CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-legacy-ws, and run-server. |
+| Solana DePIN reference templates | Framework reference templates | Complete MVP | Payment terminal, DePIN reward device, sensor oracle, on-chain listener, and hardware signer approval templates are available through `init-app`. |
+| Device identity / telemetry contracts | Framework protocol | Complete MVP | `schemas/device_identity.schema.json`, `device_telemetry.schema.json`, `transport_profile.schema.json`, and `developer_service.schema.json` define the machine-readable contracts for identity, signed readings, WSS/HTTP fallback, and server services. |
+| Standard developer service kinds | Framework backend services | Complete MVP | Service registry standardizes Solana RPC, Solana Pay, oracle, reward distributor, data anchor, gasless transaction, and device ingest service types. |
+| CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-firmware-ws, and run-server. |
 | CI | Repo infra | Complete first pass | GitHub Actions workflow compiles, tests, and validates runtime config. |
 
 ## Explicit Runtime Assumptions
@@ -45,6 +49,6 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Multi-device sessions | Runtime state is keyed by `X-Ava-Device-Id` or message `device_id`; each device gets an independent app session and event log. |
 | Device registration | Production deployments should provision devices through the control plane and store the returned device token on the device. The global device token remains only for compatibility and lab deployments. |
 | Provider config editing | The web console stores provider config and env var names, not raw secrets. Actual API keys should remain in environment variables or a secret manager. |
-| Usage metering | Current metering records reports from devices or backend/admin calls. Automatic ASR/LLM/TTS provider instrumentation is a later provider-by-provider improvement. |
+| Usage metering | Devices and backend/admin calls can report usage directly. Firmware voice paths also meter ASR seconds, LLM token usage, and TTS characters for provisioned devices. |
 | C-end operations | The current scope is a self-hosted operator console for one builder serving hardware users. Hosted SaaS, billing, tenant isolation, and developer marketplaces remain outside this milestone. |
 | Chain-specific trading | AVE/Solana trade execution belongs to Ava Box app skills, not `ChainAdapter`. |

@@ -7,7 +7,7 @@ import types
 
 from ava_devicekit.core.types import AppContext, Selection
 from ava_devicekit.providers.asr.qwen_realtime import QwenRealtimeASRConfig
-from ava_devicekit.providers.llm.base import LLMMessage
+from ava_devicekit.providers.llm.base import LLMMessage, LLMResult
 from ava_devicekit.providers.llm.openai_compatible import OpenAICompatibleLLMConfig, OpenAICompatibleLLMProvider
 from ava_devicekit.providers.asr import AudioFrame, Pcm16PassthroughDecoder, QwenRealtimeASRProvider
 from ava_devicekit.providers.pipeline import VoicePipeline
@@ -35,6 +35,25 @@ def test_voice_pipeline_fallback_uses_selection_context():
     result = VoicePipeline().reply("what is selected", context=context)
     assert "SOL" in result.text
     assert result.tts and result.tts.text == result.text
+
+
+def test_voice_pipeline_records_llm_and_tts_usage():
+    events = []
+
+    class _LLM:
+        name = "demo_llm"
+
+        def complete(self, messages, *, temperature=0.2):
+            return LLMResult("answer", raw={"usage": {"total_tokens": 17}})
+
+    def recorder(device_id, metric, amount, source, metadata):
+        events.append((device_id, metric, amount, source, metadata))
+
+    result = VoicePipeline(llm=_LLM(), usage_recorder=recorder).reply("hello", device_id="dev_001")
+
+    assert result.text == "answer"
+    assert ("dev_001", "llm_tokens", 17.0, "llm", {"provider": "demo_llm"}) in events
+    assert any(item[1] == "tts_chars" and item[2] == len("answer") for item in events)
 
 
 def test_mock_market_stream_snapshots_prices():

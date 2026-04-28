@@ -14,7 +14,7 @@ Ava Box is the first reference app built on this framework. Framework code must 
 | Manage real device fleets | Provide users, projects, provisioned devices, device registration, per-device auth, events, OTA, and provider health. |
 | Keep devices safe | ESP32 acts as the physical interaction and confirmation surface; credentials and signing providers stay server-side or in external wallets. |
 | Stay chain and hardware extensible | Core contracts avoid fixed buttons, fixed displays, or fixed chain/business APIs. |
-| Support self-hosted first, SaaS later | Implement a local control-plane store and HTTP APIs now; keep entities aligned with future hosted multi-tenant service. |
+| Support self-hosted first, hosted service extension | Implement a local control-plane store and HTTP APIs now; keep entities aligned with hosted multi-tenant service. |
 
 ## Users And Jobs
 

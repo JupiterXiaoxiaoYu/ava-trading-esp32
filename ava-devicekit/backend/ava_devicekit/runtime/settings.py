@@ -23,8 +23,8 @@ DEFAULT_WEBSOCKET_PING_TIMEOUT = 10
 class RuntimeSettings:
     """Deployment-owned DeviceKit runtime settings.
 
-    This keeps legacy-style OTA/WebSocket configuration as data, without
-    importing the legacy config loader or manager API.
+    This keeps deployed-firmware OTA/WebSocket configuration as data, without
+    importing the source config loader or manager API.
     """
 
     host: str = DEFAULT_HOST

@@ -46,7 +46,7 @@ This note records which Solana hardware, DePIN, payment, and embedded SDK reposi
 | `Woody4618/talking-fish` | On-chain memo/event listener triggers speech and physical actuation. | No root LICENSE found. Reference architecture only. | Add `onchain_event_listener` template and event-listener service guidance. |
 | `priyanshpatel18/aeroscan-esp32` | ESP32 WSS telemetry, reconnect interval, heartbeat, token auth, HTTP fallback. | MIT LICENSE present. | Board-port transport docs/templates for WSS + HTTP fallback and heartbeat. |
 | `priyanshpatel18/aeroscan-ws` | Realtime device ingest, auth token, WebSocket clients, HTTP fallback endpoint, database, chain integration. | MIT LICENSE present. | `device_ingest` service kind and backend ingest design pattern. |
-| `termina-data-anchor` in collection | Blob upload/fetch/verify flow for batched sensor/reward data. | Collection-specific; confirm exact module licenses before integration. | `data_anchor` service kind and future provider adapter. |
+| `termina-data-anchor` in collection | Blob upload/fetch/verify flow for batched sensor/reward data. | Collection-specific; confirm exact module licenses before integration. | `data_anchor` service kind and provider adapter. |
 
 ## Optional Dependency Policy
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ava_devicekit.control_plane import ControlPlaneStore
+from ava_devicekit.control_plane import ControlPlaneStore, control_plane_usage_recorder
+from ava_devicekit.runtime.settings import RuntimeSettings
 
 
 def test_control_plane_bootstrap_and_device_registration(tmp_path):
@@ -75,3 +76,17 @@ def test_control_plane_service_plan_entitlement_and_usage(tmp_path):
     assert report["items"][0]["usage"]["llm_tokens"] == 110
     assert report["items"][0]["limit_status"]["exceeded"] == ["llm_tokens"]
     assert store.snapshot()["counts"]["service_plans"] >= 3
+
+
+def test_control_plane_usage_recorder_is_best_effort(tmp_path):
+    settings = RuntimeSettings.from_dict({"control_plane": {"store_path": str(tmp_path / "control.json")}})
+    store = ControlPlaneStore(settings.control_plane_store_path)
+    provisioned = store.provision_device({"device_id": "voice-box"})
+    store.register_device({"provisioning_token": provisioned["provisioning_token"], "device_id": "voice-box"})
+
+    recorder = control_plane_usage_recorder(settings)
+    recorder("voice_box", "tts_chars", 12, "tts", {"provider": "mock"})
+    recorder("unknown_device", "tts_chars", 99, "tts", {})
+
+    report = store.usage_report(device_id="voice_box")
+    assert report["items"][0]["usage"]["tts_chars"] == 12

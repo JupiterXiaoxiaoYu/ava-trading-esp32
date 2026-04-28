@@ -11,7 +11,7 @@ python3 -m pip install -e .[dev,websocket]
 
 ```bash
 PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 127.0.0.1 --port 8788 --config userland/runtime.example.json
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --host 127.0.0.1 --port 8787 --config userland/runtime.example.json
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-firmware-ws --host 127.0.0.1 --port 8787 --config userland/runtime.example.json
 ```
 
 Then send device messages to `POST /device/message` or inspect state at `GET /device/state`.

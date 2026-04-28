@@ -10,6 +10,7 @@ from ava_devicekit.providers.asr.qwen_realtime import QwenRealtimeASRConfig, Qwe
 from ava_devicekit.providers.llm.base import LLMProvider
 from ava_devicekit.providers.llm.openai_compatible import OpenAICompatibleLLMConfig, OpenAICompatibleLLMProvider
 from ava_devicekit.providers.pipeline import VoicePipeline
+from ava_devicekit.providers.pipeline import UsageRecorder
 from ava_devicekit.providers.tts.base import TTSProvider
 from ava_devicekit.providers.tts.alibl_stream import AliBLTTSConfig, AliBLTTSProvider
 from ava_devicekit.providers.tts.mock import MockTTSProvider
@@ -25,12 +26,12 @@ class ProviderBundle:
     pipeline: VoicePipeline
 
 
-def create_provider_bundle(settings: RuntimeSettings | None = None) -> ProviderBundle:
+def create_provider_bundle(settings: RuntimeSettings | None = None, usage_recorder: UsageRecorder | None = None) -> ProviderBundle:
     settings = settings or RuntimeSettings.load()
     asr = create_asr_provider(settings)
     llm = create_llm_provider(settings)
     tts = create_tts_provider(settings)
-    return ProviderBundle(asr=asr, llm=llm, tts=tts, pipeline=VoicePipeline(llm=llm, tts=tts))
+    return ProviderBundle(asr=asr, llm=llm, tts=tts, pipeline=VoicePipeline(llm=llm, tts=tts, usage_recorder=usage_recorder))
 
 
 def create_voice_pipeline(settings: RuntimeSettings | None = None) -> VoicePipeline:

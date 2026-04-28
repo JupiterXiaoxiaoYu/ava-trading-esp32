@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 
 from ava_devicekit.gateway.factory import create_device_session
-from ava_devicekit.gateway.legacy_firmware import LegacyFirmwareConnection
+from ava_devicekit.gateway.firmware_compat import FirmwareCompatConnection
 
 
-def test_legacy_firmware_hello_and_key_action_flow():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_hello_and_key_action_flow():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     hello = conn.handle_text(json.dumps({"type": "hello", "transport": "websocket", "audio_params": {"sample_rate": 16000}}))
     assert hello[0]["type"] == "hello"
     assert hello[0]["transport"] == "websocket"
@@ -30,9 +30,9 @@ def test_legacy_firmware_hello_and_key_action_flow():
     assert typo_compat[0]["data"]["interval"] == "1440"
 
 
-def test_legacy_firmware_hello_reports_boot_config_error(monkeypatch):
+def test_firmware_compat_hello_reports_boot_config_error(monkeypatch):
     monkeypatch.delenv("AVE_API_KEY", raising=False)
-    conn = LegacyFirmwareConnection(create_device_session())
+    conn = FirmwareCompatConnection(create_device_session())
     hello = conn.handle_text(json.dumps({"type": "hello", "transport": "websocket"}))
     assert hello[0]["type"] == "hello"
     assert hello[0]["devicekit"]["boot_screen"] == "notify"
@@ -41,8 +41,8 @@ def test_legacy_firmware_hello_reports_boot_config_error(monkeypatch):
     assert hello[1]["screen"] == "notify"
 
 
-def test_legacy_firmware_listen_detect_preserves_selection_context():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_listen_detect_preserves_selection_context():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     replies = conn.handle_text(
         json.dumps(
             {
@@ -65,8 +65,8 @@ def test_legacy_firmware_listen_detect_preserves_selection_context():
     assert replies[-1]["state"] == "stop"
 
 
-def test_legacy_firmware_accepts_generic_listen_detect_frame():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_accepts_generic_listen_detect_frame():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     replies = conn.handle_text(
         json.dumps(
             {
@@ -89,8 +89,8 @@ def test_legacy_firmware_accepts_generic_listen_detect_frame():
     assert display["action_draft"]["summary"]["symbol"] == "SOL"
 
 
-def test_legacy_firmware_listen_detect_accepts_screen_selection_shape():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_listen_detect_accepts_screen_selection_shape():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     replies = conn.handle_text(
         json.dumps(
             {
@@ -115,8 +115,8 @@ def test_legacy_firmware_listen_detect_accepts_screen_selection_shape():
     assert display["action_draft"]["summary"]["token_id"] == "So11111111111111111111111111111111111111112-solana"
 
 
-def test_legacy_firmware_trade_action_confirm_routes_pending_draft():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_trade_action_confirm_routes_pending_draft():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     token = {
         "token_id": "So11111111111111111111111111111111111111112-solana",
         "addr": "So11111111111111111111111111111111111111112",
@@ -134,8 +134,8 @@ def test_legacy_firmware_trade_action_confirm_routes_pending_draft():
     assert display["action_result"]["ok"] is True
 
 
-def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_trade_action_cancel_routes_pending_draft():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
     request_id = draft["action_draft"]["request_id"]
 
@@ -146,8 +146,8 @@ def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
     assert display["action_result"]["ok"] is True
 
 
-def test_legacy_firmware_generic_confirm_and_cancel_preserve_request_id(tmp_path):
-    conn = LegacyFirmwareConnection(create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json")))
+def test_firmware_compat_generic_confirm_and_cancel_preserve_request_id(tmp_path):
+    conn = FirmwareCompatConnection(create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json")))
     draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
     request_id = draft["action_draft"]["request_id"]
 
@@ -184,8 +184,8 @@ class _AudioTTS:
         return TTSResult(text=text, audio=b"voice", content_type="audio/opus")
 
 
-def test_legacy_firmware_audio_stop_transcribes_and_routes():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True), asr_provider=_FakeASR())
+def test_firmware_compat_audio_stop_transcribes_and_routes():
+    conn = FirmwareCompatConnection(create_device_session(mock=True), asr_provider=_FakeASR())
     conn.handle_text(json.dumps({"type": "hello", "audio_params": {"format": "pcm16", "sample_rate": 16000}}))
     conn.handle_text(json.dumps({"type": "listen", "state": "start"}))
     conn.handle_binary(b"buy")
@@ -196,30 +196,30 @@ def test_legacy_firmware_audio_stop_transcribes_and_routes():
     assert replies[0]["text"] == "buy"
 
 
-def test_legacy_firmware_tts_audio_frame_is_sent():
+def test_firmware_compat_tts_audio_frame_is_sent():
     from ava_devicekit.providers.pipeline import VoicePipeline
 
-    conn = LegacyFirmwareConnection(create_device_session(mock=True), voice_pipeline=VoicePipeline(tts=_AudioTTS()))
+    conn = FirmwareCompatConnection(create_device_session(mock=True), voice_pipeline=VoicePipeline(tts=_AudioTTS()))
     replies = conn.handle_text(json.dumps({"type": "listen", "state": "detect", "text": "portfolio"}))
     audio = next(item for item in replies if item.get("state") == "audio")
     assert audio["content_type"] == "audio/opus"
     assert audio["audio"]
 
 
-def test_legacy_firmware_partial_transcript_frame():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_partial_transcript_frame():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     replies = conn.handle_text(json.dumps({"type": "listen", "state": "partial", "text": "buy sol"}))
     assert replies == [{"type": "stt", "state": "partial", "text": "buy sol", "session_id": conn.session_id}]
 
 
-def test_legacy_firmware_accepts_goodbye_frame():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_accepts_goodbye_frame():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     replies = conn.handle_text(json.dumps({"type": "goodbye"}))
     assert replies == [{"type": "goodbye", "session_id": conn.session_id}]
 
 
-def test_legacy_firmware_market_subscription_syncs_feed_and_s1_spotlight():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_market_subscription_syncs_feed_and_s1_spotlight():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
 
     conn.market_runtime = __import__("ava_devicekit.streams.runtime", fromlist=["MarketStreamRuntime"]).MarketStreamRuntime(
         __import__("ava_devicekit.streams.mock", fromlist=["MockMarketStreamAdapter"]).MockMarketStreamAdapter()
@@ -234,8 +234,8 @@ def test_legacy_firmware_market_subscription_syncs_feed_and_s1_spotlight():
     assert any(sub.channel == "kline" and sub.token_ids == ["Pair111"] and sub.interval == "s1" for sub in conn.market_runtime.subscriptions)
 
 
-def test_legacy_firmware_accepts_screen_context_and_mcp_frames():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_firmware_compat_accepts_screen_context_and_mcp_frames():
+    conn = FirmwareCompatConnection(create_device_session(mock=True))
     context_reply = conn.handle_text(
         json.dumps(
             {

@@ -18,6 +18,8 @@ DeviceKit uses JSON text frames plus optional binary audio frames. The protocol 
 | `cancel` / `abort` | `type`, optional `request_id` | Cancels the pending action draft. |
 | `signed_tx` | `type`, transaction payload | Optional external-wallet/signer return path. |
 | `goodbye` | `type` | Gracefully closes the session. |
+| `device_identity` | `type`, `device_id`, optional `device_public_key`, `challenge`, `signature` | Sends device identity or challenge-response material during registration or attestation flows. |
+| `device_telemetry` | `type`, `device_id`, `readings`, optional `transport`, `signature` | Sends sensor/proof readings for DePIN, oracle, reward, and data-anchor apps. |
 
 ## Server To Device Frames
 
@@ -78,6 +80,19 @@ Whenever voice or AI-driven actions depend on what the user is looking at, attac
 ```
 
 This is the generic mechanism that lets apps and models know the current page, cursor, selected object, and visible data.
+
+## Identity, Telemetry, And Transport Contracts
+
+DeviceKit keeps machine-readable contracts for the Solana AI DePIN patterns added to the framework:
+
+| Contract | Schema | Runtime Use |
+|---|---|---|
+| Device identity | `schemas/device_identity.schema.json` | Per-device token auth, optional public-key identity, challenge-response hooks, and secure-element profiles. |
+| Device telemetry | `schemas/device_telemetry.schema.json` | Signed sensor readings, oracle proofs, reward claims, and HTTP fallback ingestion. |
+| Transport profile | `schemas/transport_profile.schema.json` | Board-port heartbeat, reconnect interval, HTTP fallback, ACK, OTA check, and context snapshot capabilities. |
+| Developer service | `schemas/developer_service.schema.json` | Server-side API services such as Solana RPC, Solana Pay, oracle, reward distributor, data anchor, gasless transaction, and device ingest. |
+
+Board ports should declare their transport profile in `board.profile.json`. Apps that submit readings should send `device_telemetry` frames with scalar `readings` and include a `signature` when the selected security profile requires signed device data.
 
 ## Security Boundary
 

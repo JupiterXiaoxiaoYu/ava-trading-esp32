@@ -136,6 +136,191 @@ class ValidationResult:
 
 
 @dataclass(slots=True)
+class DeviceIdentity:
+    """Device identity material exchanged with the control plane."""
+
+    device_id: str
+    device_public_key: str = ""
+    key_type: str = "none"
+    secure_element_profile: str = ""
+    challenge: JsonDict = field(default_factory=dict)
+    signature: str = ""
+    attestation: JsonDict = field(default_factory=dict)
+    metadata: JsonDict = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: JsonDict | None) -> "DeviceIdentity | None":
+        if not isinstance(data, dict):
+            return None
+        reserved = {
+            "device_id",
+            "device_public_key",
+            "key_type",
+            "secure_element_profile",
+            "challenge",
+            "signature",
+            "attestation",
+            "metadata",
+        }
+        metadata = dict(data.get("metadata")) if isinstance(data.get("metadata"), dict) else {}
+        metadata.update({k: v for k, v in data.items() if k not in reserved})
+        return cls(
+            device_id=str(data.get("device_id") or ""),
+            device_public_key=str(data.get("device_public_key") or data.get("public_key") or ""),
+            key_type=str(data.get("key_type") or ("ed25519" if data.get("device_public_key") else "none")),
+            secure_element_profile=str(data.get("secure_element_profile") or ""),
+            challenge=dict(data.get("challenge")) if isinstance(data.get("challenge"), dict) else {},
+            signature=str(data.get("signature") or ""),
+            attestation=dict(data.get("attestation")) if isinstance(data.get("attestation"), dict) else {},
+            metadata=metadata,
+        )
+
+    def validate(self, *, require_signed_challenge: bool = False) -> ValidationResult:
+        errors: list[str] = []
+        warnings: list[str] = []
+        if not self.device_id:
+            errors.append("device_id is required")
+        if self.key_type not in {"ed25519", "secp256k1", "unknown", "none"}:
+            errors.append("key_type must be one of ed25519, secp256k1, unknown, none")
+        if require_signed_challenge:
+            if not self.device_public_key:
+                errors.append("device_public_key is required for signed challenge")
+            if not self.challenge:
+                errors.append("challenge is required for signed challenge")
+            if not self.signature:
+                errors.append("signature is required for signed challenge")
+        elif self.device_public_key and not self.signature:
+            warnings.append("device_public_key is present without a challenge signature")
+        return ValidationResult.invalid(errors, warnings) if errors else ValidationResult.valid(warnings)
+
+    def to_dict(self) -> JsonDict:
+        return _drop_empty(asdict(self))
+
+
+@dataclass(slots=True)
+class DeviceTelemetry:
+    """Signed or unsigned readings sent by hardware apps and DePIN templates."""
+
+    device_id: str
+    readings: JsonDict
+    ts: int | float | str | None = None
+    unit: str = ""
+    location: JsonDict = field(default_factory=dict)
+    transport: str = "unknown"
+    signature: str = ""
+    device_public_key: str = ""
+    metadata: JsonDict = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: JsonDict | None) -> "DeviceTelemetry | None":
+        if not isinstance(data, dict):
+            return None
+        reserved = {"device_id", "readings", "ts", "timestamp", "unit", "location", "transport", "signature", "device_public_key", "metadata"}
+        metadata = dict(data.get("metadata")) if isinstance(data.get("metadata"), dict) else {}
+        metadata.update({k: v for k, v in data.items() if k not in reserved})
+        readings = data.get("readings") if isinstance(data.get("readings"), dict) else {}
+        return cls(
+            device_id=str(data.get("device_id") or ""),
+            ts=data.get("ts", data.get("timestamp")),
+            readings=dict(readings),
+            unit=str(data.get("unit") or ""),
+            location=dict(data.get("location")) if isinstance(data.get("location"), dict) else {},
+            transport=str(data.get("transport") or "unknown"),
+            signature=str(data.get("signature") or ""),
+            device_public_key=str(data.get("device_public_key") or ""),
+            metadata=metadata,
+        )
+
+    def validate(self, *, require_signature: bool = False) -> ValidationResult:
+        errors: list[str] = []
+        warnings: list[str] = []
+        if not self.device_id:
+            errors.append("device_id is required")
+        if not isinstance(self.readings, dict) or not self.readings:
+            errors.append("readings must be a non-empty object")
+        for key, value in self.readings.items():
+            if not isinstance(key, str) or not key:
+                errors.append("reading keys must be non-empty strings")
+            if isinstance(value, (dict, list)):
+                errors.append(f"readings.{key} must be a scalar value")
+        if self.transport not in {"websocket", "http_fallback", "serial", "test", "unknown"}:
+            errors.append("transport must be one of websocket, http_fallback, serial, test, unknown")
+        if require_signature and not self.signature:
+            errors.append("signature is required")
+        elif not self.signature:
+            warnings.append("telemetry is unsigned")
+        return ValidationResult.invalid(errors, warnings) if errors else ValidationResult.valid(warnings)
+
+    def to_dict(self) -> JsonDict:
+        return _drop_empty(asdict(self))
+
+
+@dataclass(slots=True)
+class TransportProfile:
+    """Transport behavior a board port promises to the gateway."""
+
+    protocol: str
+    websocket_primary: bool = False
+    http_fallback: bool = False
+    heartbeat_interval_ms: int = 0
+    reconnect_interval_ms: int = 0
+    uses_per_device_bearer_token: bool = False
+    acks_rendered_payloads: bool = False
+    supports_ota_check_command: bool = False
+    sends_context_snapshot: bool = False
+    metadata: JsonDict = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: JsonDict | None) -> "TransportProfile | None":
+        if not isinstance(data, dict):
+            return None
+        reserved = {
+            "protocol",
+            "websocket_primary",
+            "http_fallback",
+            "heartbeat_interval_ms",
+            "reconnect_interval_ms",
+            "uses_per_device_bearer_token",
+            "acks_rendered_payloads",
+            "supports_ota_check_command",
+            "sends_context_snapshot",
+            "metadata",
+        }
+        metadata = dict(data.get("metadata")) if isinstance(data.get("metadata"), dict) else {}
+        metadata.update({k: v for k, v in data.items() if k not in reserved})
+        return cls(
+            protocol=str(data.get("protocol") or ""),
+            websocket_primary=bool(data.get("websocket_primary")),
+            http_fallback=bool(data.get("http_fallback")),
+            heartbeat_interval_ms=max(0, _optional_int(data.get("heartbeat_interval_ms")) or 0),
+            reconnect_interval_ms=max(0, _optional_int(data.get("reconnect_interval_ms")) or 0),
+            uses_per_device_bearer_token=bool(data.get("uses_per_device_bearer_token")),
+            acks_rendered_payloads=bool(data.get("acks_rendered_payloads")),
+            supports_ota_check_command=bool(data.get("supports_ota_check_command")),
+            sends_context_snapshot=bool(data.get("sends_context_snapshot")),
+            metadata=metadata,
+        )
+
+    def validate(self) -> ValidationResult:
+        errors: list[str] = []
+        warnings: list[str] = []
+        if self.protocol not in {"websocket", "http", "websocket_or_http", "serial", "custom"}:
+            errors.append("protocol must be one of websocket, http, websocket_or_http, serial, custom")
+        if self.websocket_primary and self.protocol not in {"websocket", "websocket_or_http", "custom"}:
+            errors.append("websocket_primary requires websocket, websocket_or_http, or custom protocol")
+        if self.http_fallback and self.protocol not in {"websocket_or_http", "custom"}:
+            errors.append("http_fallback requires websocket_or_http or custom protocol")
+        if self.heartbeat_interval_ms == 0:
+            warnings.append("heartbeat_interval_ms is not configured")
+        if self.reconnect_interval_ms == 0 and self.protocol in {"websocket", "websocket_or_http"}:
+            warnings.append("reconnect_interval_ms is not configured")
+        return ValidationResult.invalid(errors, warnings) if errors else ValidationResult.valid(warnings)
+
+    def to_dict(self) -> JsonDict:
+        return _drop_empty(asdict(self))
+
+
+@dataclass(slots=True)
 class ScreenPayloadValidator:
     """Reusable validator bound to a screen set and optional contracts."""
 
@@ -386,6 +571,27 @@ def validate_board_profile(data: BoardProfile | JsonDict | None) -> ValidationRe
     profile = data if isinstance(data, BoardProfile) else BoardProfile.from_dict(data)
     if profile is None:
         return ValidationResult.invalid(["board profile must be an object"])
+    return profile.validate()
+
+
+def validate_device_identity(data: DeviceIdentity | JsonDict | None, *, require_signed_challenge: bool = False) -> ValidationResult:
+    identity = data if isinstance(data, DeviceIdentity) else DeviceIdentity.from_dict(data)
+    if identity is None:
+        return ValidationResult.invalid(["device identity must be an object"])
+    return identity.validate(require_signed_challenge=require_signed_challenge)
+
+
+def validate_device_telemetry(data: DeviceTelemetry | JsonDict | None, *, require_signature: bool = False) -> ValidationResult:
+    telemetry = data if isinstance(data, DeviceTelemetry) else DeviceTelemetry.from_dict(data)
+    if telemetry is None:
+        return ValidationResult.invalid(["device telemetry must be an object"])
+    return telemetry.validate(require_signature=require_signature)
+
+
+def validate_transport_profile(data: TransportProfile | JsonDict | None) -> ValidationResult:
+    profile = data if isinstance(data, TransportProfile) else TransportProfile.from_dict(data)
+    if profile is None:
+        return ValidationResult.invalid(["transport profile must be an object"])
     return profile.validate()
 
 

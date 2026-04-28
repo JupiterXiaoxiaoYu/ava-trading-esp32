@@ -66,11 +66,11 @@
       "description": "Runs DeviceKit sessions over WebSocket transport."
     },
     {
-      "id": "legacy_firmware_gateway",
-      "name": "Legacy Firmware Gateway",
-      "path": "backend/ava_devicekit/gateway/legacy_firmware.py",
+      "id": "firmware_compat_gateway",
+      "name": "Firmware Compatibility Gateway",
+      "path": "backend/ava_devicekit/gateway/firmware_compat.py",
       "user_action": "configure",
-      "description": "Bridges existing firmware hello/listen/key_action frames into DeviceKit sessions."
+      "description": "Bridges deployed firmware hello/listen/key_action frames into DeviceKit sessions."
     },
     {
       "id": "ota_runtime",
@@ -175,7 +175,7 @@
       "name": "Single Process Runtime Server",
       "path": "backend/ava_devicekit/gateway/server.py",
       "user_action": "deploy",
-      "description": "Runs HTTP, legacy WebSocket, runtime tasks, provider health, OTA, and admin APIs against one shared RuntimeManager."
+      "description": "Runs HTTP, firmware-compatible WebSocket, runtime tasks, provider health, OTA, and admin APIs against one shared RuntimeManager."
     },
     {
       "id": "device_protocol_spec",

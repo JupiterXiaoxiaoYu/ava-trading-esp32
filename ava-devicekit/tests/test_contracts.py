@@ -67,6 +67,19 @@ def test_json_files_parse():
         json.loads(path.read_text(encoding="utf-8"))
 
 
+def test_solana_depin_contract_schemas_have_required_fields():
+    schemas = {
+        path.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in (ROOT / "schemas").glob("*.schema.json")
+    }
+    assert {"device_identity.schema.json", "device_telemetry.schema.json", "developer_service.schema.json", "transport_profile.schema.json"} <= set(schemas)
+    assert {"device_id", "device_public_key", "challenge", "signature"} <= set(schemas["device_identity.schema.json"]["properties"])
+    assert {"readings", "transport", "signature"} <= set(schemas["device_telemetry.schema.json"]["properties"])
+    assert {"id", "kind", "options"} <= set(schemas["developer_service.schema.json"]["properties"])
+    assert "allowed_paths" in schemas["developer_service.schema.json"]["properties"]["options"]["properties"]
+    assert {"heartbeat_interval_ms", "reconnect_interval_ms", "http_fallback"} <= set(schemas["transport_profile.schema.json"]["properties"])
+
+
 def test_userland_capability_map_declares_extension_points():
     data = json.loads((ROOT / "userland" / "capabilities.json").read_text(encoding="utf-8"))
     extension_ids = {item["id"] for item in data["extension_points"]}
@@ -232,3 +245,55 @@ def test_selection_context_validation_is_generic_and_strict():
     malformed = validate_selection_context({"screen": "sensor_panel", "visible_rows": ["not-object"]})
     assert not malformed.ok
     assert "visible_rows must be a list of objects" in malformed.errors
+
+
+def test_device_identity_telemetry_and_transport_contracts_validate():
+    from ava_devicekit.core.contracts import (
+        DeviceIdentity,
+        DeviceTelemetry,
+        TransportProfile,
+        validate_device_identity,
+        validate_device_telemetry,
+        validate_transport_profile,
+    )
+
+    identity = DeviceIdentity.from_dict(
+        {
+            "device_id": "sensor_001",
+            "device_public_key": "ed25519:abc",
+            "key_type": "ed25519",
+            "challenge": {"nonce": "n1"},
+            "signature": "sig",
+            "secure_element_profile": "atecc608a",
+        }
+    )
+    assert identity is not None
+    assert identity.validate(require_signed_challenge=True).ok
+    assert not validate_device_identity({"device_public_key": "ed25519:abc"}, require_signed_challenge=True).ok
+
+    telemetry = DeviceTelemetry.from_dict(
+        {
+            "device_id": "sensor_001",
+            "readings": {"temperature_c": 24.5, "active": True},
+            "transport": "http_fallback",
+            "signature": "sig",
+        }
+    )
+    assert telemetry is not None
+    assert telemetry.validate(require_signature=True).ok
+    assert not validate_device_telemetry({"device_id": "sensor_001", "readings": {"bad": {"nested": True}}}).ok
+
+    profile = TransportProfile.from_dict(
+        {
+            "protocol": "websocket_or_http",
+            "websocket_primary": True,
+            "http_fallback": True,
+            "heartbeat_interval_ms": 15000,
+            "reconnect_interval_ms": 3000,
+            "uses_per_device_bearer_token": True,
+            "acks_rendered_payloads": True,
+        }
+    )
+    assert profile is not None
+    assert profile.validate().ok
+    assert not validate_transport_profile({"protocol": "http", "http_fallback": True}).ok

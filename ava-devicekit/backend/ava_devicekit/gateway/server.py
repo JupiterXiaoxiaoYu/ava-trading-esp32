@@ -7,8 +7,9 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ava_devicekit.control_plane.usage import control_plane_usage_recorder
 from ava_devicekit.gateway.http_server import make_handler
-from ava_devicekit.gateway.legacy_firmware import run_legacy_firmware_gateway
+from ava_devicekit.gateway.firmware_compat import run_firmware_compat_gateway
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, runtime_manager_for_settings
 from ava_devicekit.providers.health import provider_health_report
 from ava_devicekit.providers.registry import ProviderBundle, create_provider_bundle
@@ -33,9 +34,9 @@ class DeviceKitServer:
         self.http_thread.start()
         await self.task_manager.start()
         print(f"Ava DeviceKit HTTP gateway listening on http://{self.settings.host}:{self.settings.http_port}")
-        print(f"Ava DeviceKit legacy WS gateway listening on ws://{self.settings.host}:{self.settings.websocket_port}/ava/v1/")
+        print(f"Ava DeviceKit firmware-compatible WS gateway listening on ws://{self.settings.host}:{self.settings.websocket_port}/ava/v1/")
         try:
-            await run_legacy_firmware_gateway(
+            await run_firmware_compat_gateway(
                 self.settings.host,
                 self.settings.websocket_port,
                 runtime_settings=self.settings,
@@ -72,7 +73,7 @@ def create_devicekit_server(
         skill_store_path=skill_store_path,
         queue_outbound=False,
     )
-    providers = create_provider_bundle(settings)
+    providers = create_provider_bundle(settings, usage_recorder=control_plane_usage_recorder(settings))
     task_manager = _create_task_manager(manager, settings)
     handler = make_handler(
         runtime_settings=settings,

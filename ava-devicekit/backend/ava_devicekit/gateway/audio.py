@@ -42,6 +42,13 @@ class AudioInputBuffer:
         ]
         return b"".join(decoded)
 
+    def duration_seconds(self) -> float:
+        if not self.chunks or self.sample_rate <= 0 or self.channels <= 0:
+            return 0.0
+        if self.format == "pcm16":
+            return sum(len(chunk) for chunk in self.chunks) / float(self.sample_rate * self.channels * 2)
+        return 0.0
+
 
 async def transcribe_buffer(asr: ASRProvider | None, audio: AudioInputBuffer, *, language: str = "") -> ASRResult | None:
     if asr is None or not audio.chunks:

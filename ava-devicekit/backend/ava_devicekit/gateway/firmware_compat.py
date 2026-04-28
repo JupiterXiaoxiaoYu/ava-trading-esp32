@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ava_devicekit.control_plane.usage import control_plane_usage_recorder
 from ava_devicekit.gateway.audio import AudioInputBuffer, create_audio_decoder, run_async, transcribe_buffer, tts_frames
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
@@ -20,10 +21,10 @@ from ava_devicekit.streams.base import MarketStreamEvent, StreamSubscription
 from ava_devicekit.streams.runtime import MarketStreamRuntime
 
 
-class LegacyFirmwareConnection:
-    """legacy firmware WebSocket protocol shim backed by a DeviceKit session.
+class FirmwareCompatConnection:
+    """firmware compatibility WebSocket protocol shim backed by a DeviceKit session.
 
-    Existing ESP32 firmware expects legacy-style text frames (`hello`,
+    Existing ESP32 firmware expects deployed-firmware text frames (`hello`,
     `listen`, `key_action`) and display payloads. This adapter preserves that
     wire shape while routing app behavior through Ava DeviceKit.
     """
@@ -51,7 +52,7 @@ class LegacyFirmwareConnection:
 
     async def open(self, ws: Any) -> None:
         if self.manager:
-            self.manager.register_connection(self.device_id, transport="legacy_ws", session_id=self.session_id)
+            self.manager.register_connection(self.device_id, transport="firmware_compat_ws", session_id=self.session_id)
         self._start_market_stream(ws)
         self._start_outbound_queue(ws)
         try:
@@ -155,8 +156,17 @@ class LegacyFirmwareConnection:
         if state == "stop":
             if not allow_async_asr:
                 return []
+            audio_seconds = self.audio.duration_seconds()
             try:
                 result = await transcribe_buffer(self.asr_provider, self.audio, language=str(msg.get("language") or ""))
+                if result and result.text:
+                    self.voice_pipeline.record_usage(
+                        self.device_id,
+                        "asr_seconds",
+                        audio_seconds,
+                        source="asr",
+                        metadata={"provider": getattr(self.asr_provider, "name", "asr") if self.asr_provider else "disabled"},
+                    )
             except Exception as exc:
                 return [_system_error(f"asr_failed:{exc}")]
             finally:
@@ -175,7 +185,7 @@ class LegacyFirmwareConnection:
         tts_result = None
         if _is_model_fallback(result):
             try:
-                reply = self.voice_pipeline.reply(text, context=self.session.app.context)
+                reply = self.voice_pipeline.reply(text, context=self.session.app.context, device_id=self.device_id)
                 spoken = reply.text
                 tts_result = reply.tts
             except Exception as exc:
@@ -183,6 +193,13 @@ class LegacyFirmwareConnection:
         else:
             try:
                 tts_result = self.voice_pipeline.tts.synthesize(spoken)
+                self.voice_pipeline.record_usage(
+                    self.device_id,
+                    "tts_chars",
+                    len(spoken),
+                    source="tts",
+                    metadata={"provider": getattr(self.voice_pipeline.tts, "name", "tts"), "content_type": tts_result.content_type},
+                )
             except Exception:
                 tts_result = None
         return [
@@ -345,7 +362,7 @@ def _websocket_device_id(ws: Any) -> str:
     return "default"
 
 
-async def run_legacy_firmware_gateway(
+async def run_firmware_compat_gateway(
     host: str = "0.0.0.0",
     port: int = 8787,
     *,
@@ -361,10 +378,10 @@ async def run_legacy_firmware_gateway(
     try:
         import websockets
     except ImportError as exc:  # pragma: no cover - optional dependency boundary
-        raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the legacy-firmware-compatible gateway") from exc
+        raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the firmware-compatible gateway") from exc
 
     settings = runtime_settings or RuntimeSettings.load()
-    providers = providers or create_provider_bundle(settings)
+    providers = providers or create_provider_bundle(settings, usage_recorder=control_plane_usage_recorder(settings))
     manager = manager or runtime_manager_for_settings(
         settings,
         app_id=app_id,
@@ -378,7 +395,7 @@ async def run_legacy_firmware_gateway(
         device_id = _websocket_device_id(ws)
         session = manager.get(device_id)
         audio = AudioInputBuffer(decoder=create_audio_decoder(settings.audio_decoder_class, settings.audio_decoder_options))
-        await LegacyFirmwareConnection(session, voice_pipeline=providers.pipeline, asr_provider=providers.asr, audio=audio, manager=manager, device_id=device_id).open(ws)
+        await FirmwareCompatConnection(session, voice_pipeline=providers.pipeline, asr_provider=providers.asr, audio=audio, manager=manager, device_id=device_id).open(ws)
 
     async with websockets.serve(
         handler,
@@ -391,7 +408,7 @@ async def run_legacy_firmware_gateway(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the legacy-firmware-compatible Ava DeviceKit WebSocket gateway.")
+    parser = argparse.ArgumentParser(description="Run the firmware-compatible Ava DeviceKit WebSocket gateway.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--app-id", default="ava_box")
@@ -402,7 +419,7 @@ def main() -> None:
     parser.add_argument("--mock", action="store_true")
     args = parser.parse_args()
     asyncio.run(
-        run_legacy_firmware_gateway(
+        run_firmware_compat_gateway(
             args.host,
             args.port,
             app_id=args.app_id,

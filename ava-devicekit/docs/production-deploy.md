@@ -6,7 +6,7 @@ Run the HTTP gateway and WebSocket gateway behind a reverse proxy. The WebSocket
 
 ```bash
 PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 0.0.0.0 --port 8788 --config runtime.local.json
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-firmware-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
 ```
 
 Use long proxy read timeouts for hardware sessions and keep WebSocket ping enabled through `websocket_ping_interval` and `websocket_ping_timeout`.

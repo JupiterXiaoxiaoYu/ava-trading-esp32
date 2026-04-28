@@ -40,7 +40,7 @@ The machine-readable capability map is `userland/capabilities.json`.
 
 ## App Logic Boundary
 
-`ChainAdapter` stays limited to basic chain data: feed, search, and token detail. Trading drafts, watchlists, portfolio composition, and skill routing live in the reference app layer (`apps/ava_box.py` plus `apps/ava_box_skills/`). This keeps future chain/helper adapters replaceable without turning the framework into an Ava Box trading server.
+`ChainAdapter` stays limited to basic chain data: feed, search, and token detail. Trading drafts, watchlists, portfolio composition, and skill routing live in the reference app layer (`apps/ava_box.py` plus `apps/ava_box_skills/`). This keeps additional chain/helper adapters replaceable without turning the framework into an Ava Box trading server.
 
 ## Numeric Display Policy
 
@@ -68,7 +68,7 @@ Ava Box can run through DeviceKit without importing the previous assistant backe
 | HTTP gateway | `gateway/http_server.py` exposes boot/message/state/outbox endpoints |
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
 | Control plane | `control_plane/store.py` manages local users, projects, provisioned devices, one-time registration, and per-device tokens |
-| firmware compatibility bridge | `gateway/legacy_firmware.py` accepts deployed firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
+| firmware compatibility bridge | `gateway/firmware_compat.py` accepts deployed firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
 | OTA/settings runtime | `runtime/settings.py` and `ota/` emit the deployed firmware OTA contract without importing the previous server implementation |
 | Model providers | `providers/` defines ASR, LLM, TTS, and voice fallback boundaries |
 | Market streams | `streams/` defines live/polling market update boundaries |
@@ -139,7 +139,7 @@ ESP32 input / voice
 | Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
 | C-end hardware ops | Framework control plane | Customer records, activation codes, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
 | Usage and entitlements | Framework control plane | Service plans, per-device entitlements, usage reports, and usage recording endpoints for C-end hardware service cost control |
-| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
+| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-firmware-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
 | Device protocol | Framework contract | `docs/device-protocol.md` defines hello, input, context, display, TTS, ACK, command, and OTA-trigger frames |
@@ -169,6 +169,7 @@ ESP32 input / voice
 | `docs/ai-depin-cloud-prd.md` | Product requirements for the self-hosted AI DePIN control plane and Solana app template |
 | `docs/c-end-hardware-ops-prd.md` | Product requirements for operating C-end hardware users from a self-hosted console |
 | `docs/hardware-service-product-closure.md` | Stakeholder and product-flow closure for the operator console vs customer/device model |
+| `docs/compatibility-capability-inventory.md` | Adapted capability inventory for firmware, backend, providers, UI, OTA, and dashboard boundaries |
 
 ## Existing Firmware Compatibility
 
@@ -177,7 +178,7 @@ The current production firmware can be moved over incrementally by pointing its 
 ```bash
 cd ava-devicekit
 PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 0.0.0.0 --port 8788 --config runtime.local.json
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-legacy-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
+PYTHONPATH=backend python3 -m ava_devicekit.cli run-firmware-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
 ```
 
 Example runtime config:
@@ -213,7 +214,7 @@ This preserves the deployed firmware wire protocol while keeping the implementat
 
 ## Migration Capability Review
 
-Before migrating more code from the parent repo, review `docs/legacy-capability-inventory.md`. Every carried-over capability must be explicitly marked `keep`, `replace`, `drop`, or `later` before implementation. This prevents accidental dependency on the previous assistant runtime while still preserving useful production capabilities such as Wi-Fi provisioning, OTA, audio, model providers, and live market streams.
+Before migrating more code from the parent repo, review `docs/compatibility-capability-inventory.md`. Every carried-over capability is mapped to `keep`, `replace`, `drop`, or `optional` so DeviceKit keeps clean ownership while preserving useful production behavior such as Wi-Fi provisioning, OTA, audio, model providers, and live market streams.
 
 ## Run Local Checks
 

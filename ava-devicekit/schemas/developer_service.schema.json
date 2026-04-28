@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/developer_service.schema.json",
+  "title": "Ava DeviceKit Developer Service",
+  "type": "object",
+  "required": ["id", "kind"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "service_id": {"type": "string"},
+    "kind": {"type": "string"},
+    "base_url": {"type": "string"},
+    "api_key_env": {"type": "string"},
+    "secret_key_env": {"type": "string"},
+    "wallet_id_env": {"type": "string"},
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "options": {
+      "type": "object",
+      "properties": {
+        "invocable": {"type": "boolean"},
+        "allowed_paths": {"type": "array", "items": {"type": "string"}},
+        "timeout_sec": {"type": ["integer", "number"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -15,9 +15,9 @@ def build_ota_response(
     body: dict[str, Any] | None = None,
     host_hint: str = "127.0.0.1",
 ) -> dict[str, Any]:
-    """Build the legacy-firmware-compatible OTA response used by existing firmware.
+    """Build the firmware-compatible OTA response used by existing firmware.
 
-    The shape follows the legacy OTA contract, but the implementation is owned
+    The shape follows the deployed-firmware OTA contract, but the implementation is owned
     by DeviceKit and only emits the runtime config Ava Box needs.
     """
 

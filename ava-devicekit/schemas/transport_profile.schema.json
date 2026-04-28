@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/transport_profile.schema.json",
+  "title": "Ava DeviceKit Transport Profile",
+  "type": "object",
+  "required": ["protocol"],
+  "properties": {
+    "protocol": {"type": "string", "enum": ["websocket", "http", "websocket_or_http", "serial", "custom"]},
+    "websocket_primary": {"type": "boolean"},
+    "http_fallback": {"type": "boolean"},
+    "heartbeat_interval_ms": {"type": "integer", "minimum": 0},
+    "reconnect_interval_ms": {"type": "integer", "minimum": 0},
+    "uses_per_device_bearer_token": {"type": "boolean"},
+    "acks_rendered_payloads": {"type": "boolean"},
+    "supports_ota_check_command": {"type": "boolean"},
+    "sends_context_snapshot": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

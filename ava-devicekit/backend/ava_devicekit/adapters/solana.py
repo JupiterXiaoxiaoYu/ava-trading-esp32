@@ -72,7 +72,7 @@ class SolanaDataClient:
 class SolanaAdapter(ChainAdapter):
     """Solana ChainAdapter for Ava DeviceKit.
 
-    This module has no dependency on the legacy assistant runtime. It owns only
+    This module has no dependency on the source assistant runtime. It owns only
     basic Solana market/token data. App skills such as watchlist, portfolio, and
     trade drafts live in the app layer.
     """

@@ -96,8 +96,8 @@ Configuration is resolved as default config -> project config -> device override
 | Area | Why It Matters |
 |---|---|
 | Automatic provider usage instrumentation | MVP accepts usage reports; deeper ASR/LLM/TTS instrumentation should be added provider by provider. |
-| Payment/billing automation | Manual plans and entitlements exist; automated payment collection and renewal is later. |
+| Payment/billing automation | Manual plans and entitlements are implemented; payment collection can be connected through the service registry. |
 | OTA rollout cohorts | Reduces risk when pushing firmware to C-end devices. |
 | OTA result reporting | Operator must know whether C-end devices updated successfully. |
-| Customer-facing portal | Optional later; admin console is enough for the builder/operator MVP. |
+| Customer-facing portal | The admin console is the operator entry point for the current self-hosted product shape. |
 | Real Solana proof provider | Required to move from Solana-ready hardware framework to complete on-chain DePIN proof flow. |

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ava-devicekit.dev/schemas/device_telemetry.schema.json",
+  "title": "Ava DeviceKit Device Telemetry",
+  "type": "object",
+  "required": ["device_id", "readings"],
+  "properties": {
+    "device_id": {"type": "string", "minLength": 1},
+    "ts": {"type": ["integer", "number", "string"]},
+    "readings": {"type": "object", "additionalProperties": {"type": ["number", "string", "boolean", "null"]}},
+    "unit": {"type": "string"},
+    "location": {"type": "object", "additionalProperties": true},
+    "transport": {"type": "string", "enum": ["websocket", "http_fallback", "serial", "test", "unknown"]},
+    "signature": {"type": "string"},
+    "device_public_key": {"type": "string"},
+    "metadata": {"type": "object", "additionalProperties": true}
+  },
+  "additionalProperties": true
+}

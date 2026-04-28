@@ -121,9 +121,9 @@ def test_runtime_manager_connection_registry(tmp_path):
     state_store = tmp_path / "runtime-state"
     manager = RuntimeManager.for_app(mock=True, state_store_path=state_store)
 
-    state = manager.register_connection("device-a", transport="legacy_ws", session_id="s1")
+    state = manager.register_connection("device-a", transport="firmware_compat_ws", session_id="s1")
     assert state["connected"] is True
-    assert manager.connection_state("device-a")["transport"] == "legacy_ws"
+    assert manager.connection_state("device-a")["transport"] == "firmware_compat_ws"
     assert manager.list_devices()[0]["connection"]["connected"] is True
 
     manager.unregister_connection("device-a", reason="closed")

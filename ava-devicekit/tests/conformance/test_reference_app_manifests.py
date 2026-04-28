@@ -22,6 +22,20 @@ def test_reference_app_manifests_load_and_declare_contracts():
         assert any(contract and contract.screen_id for contract in contracts)
 
 
+def test_solana_depin_reference_templates_are_packaged():
+    app_ids = {
+        json.loads(path.read_text(encoding="utf-8")).get("app_id")
+        for path in sorted((ROOT / "examples" / "apps").glob("*/manifest.json"))
+    }
+    assert {
+        "payment_terminal",
+        "depin_reward_device",
+        "sensor_oracle_device",
+        "onchain_event_listener",
+        "hardware_signer_approval",
+    } <= app_ids
+
+
 def test_screen_payload_validator_accepts_reference_screen_ids():
     for path in sorted((ROOT / "examples" / "apps").glob("*/manifest.json")):
         raw = json.loads(path.read_text(encoding="utf-8"))
