@@ -1,6 +1,7 @@
 #include "board_port.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static ava_board_config_t g_config;
 static ava_board_io_t g_io;
@@ -53,5 +54,35 @@ void ava_board_on_listen_stop(void) {
 
 void ava_board_on_server_json(const char *json) {
     if (!json) return;
+    if (strstr(json, "\"type\":\"device_command\"") && strstr(json, "\"command\":\"ota_check\"")) {
+        if (g_io.start_ota_check) g_io.start_ota_check();
+        const char *message_id = ava_board_extract_message_id(json);
+        if (message_id) ava_board_send_ack(message_id);
+        return;
+    }
     if (g_io.render_json) g_io.render_json(json);
+    const char *message_id = ava_board_extract_message_id(json);
+    if (message_id) ava_board_send_ack(message_id);
+}
+
+void ava_board_send_ack(const char *message_id) {
+    if (!g_io.send_json || !message_id || !message_id[0]) return;
+    char msg[192];
+    snprintf(msg, sizeof(msg), "{\"type\":\"ack\",\"message_id\":\"%s\"}", message_id);
+    g_io.send_json(msg);
+}
+
+const char *ava_board_extract_message_id(const char *json) {
+    static char id[96];
+    const char *key = "\"message_id\":\"";
+    const char *start = strstr(json, key);
+    if (!start) return NULL;
+    start += strlen(key);
+    const char *end = strchr(start, '"');
+    if (!end) return NULL;
+    size_t n = (size_t)(end - start);
+    if (n == 0 || n >= sizeof(id)) return NULL;
+    memcpy(id, start, n);
+    id[n] = '\0';
+    return id;
 }

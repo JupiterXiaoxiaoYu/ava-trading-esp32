@@ -52,6 +52,7 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli firmware list --config runtime.l
 |---|---|---|---|
 | `GET` | `/admin/ota/firmware` | none | List firmware binaries visible to OTA. |
 | `POST` | `/admin/ota/firmware` | `model`, `version`, `source_path` or `content_base64` | Publish a firmware binary. |
+| `POST` | `/admin/devices/{device_id}/ota-check` | none | Queue a device command asking online firmware to run its normal OTA check. |
 | `POST` | `/ava/ota/` | device model/version | Device OTA check. |
 | `GET` | `/ava/ota/download/{filename}` | none | Firmware download. |
 
@@ -101,6 +102,31 @@ curl http://127.0.0.1:8788/admin/developer/services
 ```
 
 The response is redacted and reports whether required env vars are present. It never returns the secret values.
+
+Optional backend-side service invocation is available only for services that explicitly opt in:
+
+```json
+{
+  "id": "quote_api",
+  "kind": "quote",
+  "base_url": "https://quotes.example.com",
+  "api_key_env": "QUOTE_API_KEY",
+  "options": {
+    "invocable": true,
+    "allowed_paths": ["/quote"]
+  }
+}
+```
+
+Then admin/app-side tooling may call:
+
+```bash
+curl -X POST http://127.0.0.1:8788/admin/developer/services/quote_api/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/quote","method":"POST","body":{"symbol":"SOL"}}'
+```
+
+Do not expose this as a raw device proxy. The allowlist is the safety boundary.
 
 ## Should DeviceKit Provide Proxy Wallet/API Services?
 

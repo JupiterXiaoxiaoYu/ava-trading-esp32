@@ -17,6 +17,7 @@ from ava_devicekit.ota.publish import firmware_catalog, publish_firmware
 from ava_devicekit.providers.health import provider_health_report
 from ava_devicekit.runtime.settings import RuntimeSettings
 from ava_devicekit.runtime.tasks import BackgroundTaskManager
+from ava_devicekit.services.client import invoke_developer_service
 from ava_devicekit.services.registry import developer_service_report
 
 SessionFactory = Callable[[], DeviceSession]
@@ -131,6 +132,11 @@ def make_handler(
                 device_id = path.split("/")[3]
                 self._send_json(manager.outbox(device_id))
                 return
+            if path == "/admin/dashboard.json":
+                if not self._authorized_admin():
+                    return
+                self._send_json(_dashboard_payload(settings, manager, task_manager, provider_health))
+                return
             if path == "/ava/ota/":
                 host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]
                 message = f"OTA OK. WebSocket: {settings.websocket_endpoint(host_hint)}"
@@ -209,6 +215,24 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path.startswith("/admin/devices/") and path.endswith("/ota-check"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(manager.queue_ota_check(device_id))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/developer/services/") and path.endswith("/invoke"):
+                if not self._authorized_admin():
+                    return
+                service_id = path.split("/")[4]
+                try:
+                    self._send_json(invoke_developer_service(settings.developer_services, service_id, self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             self._send_json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
 
         def log_message(self, fmt: str, *args) -> None:
@@ -235,6 +259,9 @@ def make_handler(
         def _authorized(self, token_env: str) -> bool:
             expected = os.environ.get(token_env, "")
             if not expected:
+                if settings.production_mode:
+                    self._send_json({"ok": False, "error": "token_required", "token_env": token_env}, HTTPStatus.UNAUTHORIZED)
+                    return False
                 return True
             supplied = self.headers.get("Authorization", "")
             token = supplied.removeprefix("Bearer ").strip()
@@ -274,6 +301,25 @@ def _query_value(query: dict[str, list[str]], key: str) -> str:
     return str(values[0]) if values else ""
 
 
+def _dashboard_payload(
+    settings: RuntimeSettings,
+    manager: RuntimeManager,
+    task_manager: BackgroundTaskManager | None,
+    provider_health: Callable[[], dict[str, Any]] | None,
+) -> dict[str, Any]:
+    providers = provider_health() if provider_health else provider_health_report(settings)
+    return {
+        "ok": True,
+        "runtime": settings.sanitized_dict(),
+        "providers": providers,
+        "developer_services": developer_service_report(settings.developer_services),
+        "firmware": firmware_catalog(settings),
+        "devices": {"items": manager.list_devices(), "count": len(manager.list_devices())},
+        "tasks": task_manager.snapshot() if task_manager else {"items": [], "count": 0, "running_count": 0},
+        "events": manager.event_log(limit=50),
+    }
+
+
 def _admin_page() -> str:
     return """<!doctype html>
 <html lang="en">
@@ -282,17 +328,21 @@ def _admin_page() -> str:
 <title>Ava DeviceKit Admin</title>
 <style>
 body{margin:0;background:#101418;color:#edf2f7;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-main{max-width:960px;margin:0 auto;padding:32px}
+main{max-width:1160px;margin:0 auto;padding:32px}
 h1{font-size:28px;margin:0 0 8px}
 p{color:#a8b3c2}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:24px 0}
 a{display:block;padding:18px;border:1px solid #2d3748;border-radius:14px;color:#edf2f7;text-decoration:none;background:#151c24}
 a:hover{border-color:#64d2ff}
 code{color:#64d2ff}
+pre{white-space:pre-wrap;background:#0b0f13;border:1px solid #26313c;border-radius:14px;padding:16px;max-height:520px;overflow:auto}
+button{background:#64d2ff;color:#061018;border:0;border-radius:10px;padding:10px 14px;font-weight:700}
 </style>
 <main>
 <h1>Ava DeviceKit Admin</h1>
 <p>Deployment inspection surface. Secret values are never returned by these endpoints.</p>
+<button onclick="refresh()">Refresh Dashboard</button>
+<pre id="dashboard">loading...</pre>
 <div class="grid">
 <a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
 <a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
@@ -305,6 +355,16 @@ code{color:#64d2ff}
 <a href="/admin/events">Events<br><code>/admin/events</code></a>
 <a href="/device/state">Device State<br><code>/device/state</code></a>
 </div>
+<script>
+async function refresh(){
+  const target=document.getElementById('dashboard');
+  try{
+    const response=await fetch('/admin/dashboard.json');
+    target.textContent=JSON.stringify(await response.json(), null, 2);
+  }catch(err){target.textContent=String(err);}
+}
+refresh();
+</script>
 </main>
 """
 

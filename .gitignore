@@ -45,3 +45,6 @@ data/ava_box_app_state.json
 data/*.lock
 data/device_runtime_state/
 ava-devicekit/data/
+
+ava-devicekit/dist/
+ava-devicekit/backend/*.egg-info/

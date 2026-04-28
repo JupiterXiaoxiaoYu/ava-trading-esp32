@@ -60,6 +60,15 @@ def developer_service_report(services: list[dict[str, Any]] | list[DeveloperServ
     return {"ok": all(item["configured"] for item in items), "items": items, "count": len(items)}
 
 
+def find_developer_service(services: list[dict[str, Any]] | list[DeveloperService] | None, service_id: str) -> DeveloperService | None:
+    needle = str(service_id or "").strip()
+    for item in services or []:
+        service = item if isinstance(item, DeveloperService) else DeveloperService.from_dict(item)
+        if service.service_id == needle:
+            return service
+    return None
+
+
 def _sanitize_options(options: dict[str, Any]) -> dict[str, Any]:
     blocked = ("key", "secret", "token", "password")
     return {k: ("<redacted>" if any(word in k.lower() for word in blocked) else v) for k, v in options.items()}

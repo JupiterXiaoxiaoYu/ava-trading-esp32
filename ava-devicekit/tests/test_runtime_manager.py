@@ -104,6 +104,19 @@ def test_runtime_manager_outbound_ack_and_retry(tmp_path):
     assert manager.lease_queued_outbound("device-a", visibility_timeout_sec=0) == []
 
 
+def test_runtime_manager_queues_ota_check_command(tmp_path):
+    state_store = tmp_path / "runtime-state"
+    manager = RuntimeManager.for_app(mock=True, state_store_path=state_store)
+
+    queued = manager.queue_ota_check("device-a")
+    leased = manager.lease_queued_outbound("device-a", visibility_timeout_sec=0)
+
+    assert queued["ok"] is True
+    assert leased[0]["type"] == "device_command"
+    assert leased[0]["command"] == "ota_check"
+    assert leased[0]["ack_required"] is True
+
+
 def test_runtime_manager_connection_registry(tmp_path):
     state_store = tmp_path / "runtime-state"
     manager = RuntimeManager.for_app(mock=True, state_store_path=state_store)

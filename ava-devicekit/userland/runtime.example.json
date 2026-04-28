@@ -88,7 +88,13 @@
         "order.status"
       ],
       "options": {
-        "confirmation_required": "device_screen"
+        "confirmation_required": "device_screen",
+        "allowed_paths": [
+          "/orders",
+          "/orders/status",
+          "/wallet/balance"
+        ],
+        "invocable": false
       }
     },
     {
@@ -101,7 +107,11 @@
         "token.search",
         "token.detail",
         "price.stream"
-      ]
+      ],
+      "options": {
+        "invocable": false
+      }
     }
-  ]
+  ],
+  "production_mode": false
 }

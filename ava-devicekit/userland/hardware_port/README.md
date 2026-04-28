@@ -15,6 +15,8 @@ implementation details.
 | Wake word | `ava_dk_runtime_send_wake_detect()` |
 | Buttons/touch/joystick/encoder | Emit `input_event` frames or direct `key_action` frames |
 | Screen rendering | Register `ava_dk_screen_vtable_t` handlers in shared UI runtime |
+| Render ACK | Send `{"type":"ack","message_id":"..."}` after applying a payload with `ack_required` |
+| OTA trigger | Handle `device_command: ota_check` by calling the board OTA check routine |
 | AI page grounding | Include `ContextSnapshot` JSON from the current screen when emitting listen/input events |
 
 ## Input Mapping Rule

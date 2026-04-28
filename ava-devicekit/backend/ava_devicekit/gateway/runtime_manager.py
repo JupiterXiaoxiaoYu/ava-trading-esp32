@@ -148,6 +148,24 @@ class RuntimeManager:
         device_id = normalize_device_id(device_id)
         self._persist_session_state(device_id, self.get(device_id))
 
+    def queue_device_command(self, device_id: str = "default", command: str = "", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        device_id = normalize_device_id(device_id)
+        command = str(command or "").strip()
+        if not command:
+            raise ValueError("device command is required")
+        message = {
+            "type": "device_command",
+            "command": command,
+            "payload": dict(payload or {}),
+            "created_at": time.time(),
+        }
+        message_id = self._append_outbound_payload(device_id, message)
+        self.record(device_id, "device.command.queued", {"command": command, "message_id": message_id})
+        return {"ok": True, "device_id": device_id, "message_id": message_id, "command": command}
+
+    def queue_ota_check(self, device_id: str = "default") -> dict[str, Any]:
+        return self.queue_device_command(device_id, "ota_check", {"reason": "admin_request"})
+
     def lease_queued_outbound(self, device_id: str = "default", *, visibility_timeout_sec: float = 5.0, max_attempts: int = 3) -> list[dict[str, Any]]:
         path = _device_outbox_path(self.state_store_path, device_id)
         if not path:
@@ -318,11 +336,16 @@ class RuntimeManager:
         JsonStore(target).write(state)
         self._state_mtimes[normalize_device_id(device_id)] = _path_mtime(target)
 
-    def _append_outbound_payload(self, device_id: str, payload: dict[str, Any]) -> None:
+    def _append_outbound_payload(self, device_id: str, payload: dict[str, Any]) -> str:
+        message_id = f"msg_{uuid.uuid4().hex}"
         path = _device_outbox_path(self.state_store_path, device_id)
         if not path:
-            return
-        message_id = f"msg_{uuid.uuid4().hex}"
+            item = dict(payload)
+            item["message_id"] = message_id
+            item["ack_required"] = True
+            self.get(device_id).outbox.append(item)
+            self.event_bus.outbound_queued(device_id, payload, message_id=message_id, screen=payload.get("screen", ""))
+            return message_id
 
         def append(state: dict[str, Any]) -> dict[str, Any]:
             items = state.get("items") if isinstance(state.get("items"), list) else []
@@ -342,6 +365,7 @@ class RuntimeManager:
 
         JsonStore(path).update({"items": []}, append)
         self.event_bus.outbound_queued(device_id, payload, message_id=message_id, screen=payload.get("screen", ""))
+        return message_id
 
     def _restore_session_state(self, device_id: str, session: DeviceSession) -> dict[str, Any] | None:
         path = _device_store_path(self.state_store_path, device_id)

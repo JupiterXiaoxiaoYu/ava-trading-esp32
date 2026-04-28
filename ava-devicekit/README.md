@@ -100,6 +100,8 @@ ESP32 input / voice
 | `GET` | `/admin/ota/firmware` | List versioned firmware binaries available for OTA |
 | `POST` | `/admin/ota/firmware` | Publish a `.bin` into the OTA directory by `model` and `version` |
 | `GET` | `/admin/developer/services` | Inspect backend services such as proxy wallets, market-data APIs, payment APIs, and order routers without exposing secrets |
+| `POST` | `/admin/devices/{device_id}/ota-check` | Queue an `ota_check` command so an online device runs its normal OTA pull flow |
+| `POST` | `/admin/developer/services/{service_id}/invoke` | Backend-only allowlisted service invocation for app/admin tooling |
 
 
 ## Production Components Added
@@ -115,6 +117,8 @@ ESP32 input / voice
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
+| Device protocol | Framework contract | `docs/device-protocol.md` defines hello, input, context, display, TTS, ACK, command, and OTA-trigger frames |
+| Security hardening | Framework deploy policy | `production_mode`, bearer-token enforcement, and service invocation allowlists protect admin/device surfaces |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
 | Generic page/input/context | Framework contract | Custom `ScreenContract`, `InputEvent`, and `ContextSnapshot` schemas let new pages and new hardware controls attach AI-readable state without changing core |
 
@@ -132,6 +136,8 @@ ESP32 input / voice
 | `docs/production-deploy.md` | Gateway deployment, proxy/heartbeat, OTA, wallet safety |
 | `docs/package-release.md` | CLI/package release and versioning notes |
 | `docs/ota-and-developer-services.md` | Pull-based firmware updates and server-side developer service registry |
+| `docs/device-protocol.md` | Firmware/backend protocol frames including explicit ACK and OTA trigger |
+| `docs/security-hardening.md` | Production mode, auth tokens, allowlists, and wallet/API safety |
 
 ## Existing Firmware Compatibility
 

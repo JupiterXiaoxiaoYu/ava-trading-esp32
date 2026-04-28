@@ -23,6 +23,10 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q ava-devicekit/backend ava-devicekit/examples ava-devicekit/tests
       - name: Run tests
-        run: python -m pytest -q ava-devicekit/tests
+        run: python -m pytest -q ava-devicekit/tests ava-devicekit/tests/conformance
       - name: Validate example runtime config
         run: ava-devicekit validate --config ava-devicekit/userland/runtime.example.json
+      - name: Build package
+        run: |
+          python -m pip install build
+          python -m build ava-devicekit

@@ -12,6 +12,18 @@ def test_cli_init_board_creates_port_template(tmp_path, capsys):
     assert body["ok"] is True
     assert (target / "board_port.h").exists()
     assert (target / "board_port.c").exists()
+    assert (target / "board.profile.json").exists()
+
+
+def test_cli_init_app_type_creates_reference_template(tmp_path, capsys):
+    target = tmp_path / "payment"
+    main(["init-app", str(target), "--type", "payment"])
+    body = json.loads(capsys.readouterr().out)
+    assert body["ok"] is True
+    assert body["type"] == "payment"
+    assert (target / "manifest.json").exists()
+    assert (target / "app.py").exists()
+    assert (target / "tests" / "test_manifest.py").exists()
 
 
 def test_cli_validate_outputs_sanitized_runtime(tmp_path, capsys):

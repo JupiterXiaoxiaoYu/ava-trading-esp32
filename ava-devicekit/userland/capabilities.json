@@ -176,6 +176,27 @@
       "path": "backend/ava_devicekit/gateway/server.py",
       "user_action": "deploy",
       "description": "Runs HTTP, legacy WebSocket, runtime tasks, provider health, OTA, and admin APIs against one shared RuntimeManager."
+    },
+    {
+      "id": "device_protocol_spec",
+      "name": "Device Protocol Spec",
+      "path": "docs/device-protocol.md",
+      "user_action": "implement",
+      "description": "Defines hello, ACK, display, TTS, input, context, command, and OTA-trigger frames for board ports."
+    },
+    {
+      "id": "ota_trigger_command",
+      "name": "OTA Trigger Command",
+      "path": "backend/ava_devicekit/gateway/runtime_manager.py",
+      "user_action": "use",
+      "description": "Queues an `ota_check` device command so online hardware can run its normal OTA pull flow."
+    },
+    {
+      "id": "security_hardening",
+      "name": "Security Hardening",
+      "path": "docs/security-hardening.md",
+      "user_action": "configure",
+      "description": "Production mode, bearer-token requirements, and service invocation allowlist guidance."
     }
   ],
   "extension_points": [

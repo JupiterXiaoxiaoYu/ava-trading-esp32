@@ -19,7 +19,12 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Concrete Ava Box UI package | Ava Box app | Complete as reference-app package | Current LVGL screens are copied into `reference_apps/ava_box/ui`; DeviceKit core keeps only generic UI contracts. |
 | Admin APIs | Framework | Complete | `/admin`, `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/providers/health`, `/admin/tasks`, `/admin/ota/firmware`, and `/admin/developer/services` with optional bearer auth. |
 | Firmware publish / OTA catalog | Framework | Complete | `ota/publish.py`, `ava-devicekit firmware publish/list`, and `/admin/ota/firmware` manage versioned pull-based OTA binaries. |
+| OTA trigger command | Framework + firmware port contract | Complete at framework/template boundary | `/admin/devices/{device_id}/ota-check` queues a `device_command: ota_check`; board template handles it by calling `start_ota_check`. |
 | Developer backend service registry | Framework | Complete | `services/registry.py` and `/admin/developer/services` declare proxy wallets, API services, market data, payment services, and order routers without exposing secrets to devices. |
+| Developer service invocation boundary | Framework | Complete | `services/client.py` invokes only explicitly allowlisted backend services with `invocable: true` and `allowed_paths`. |
+| Explicit ACK protocol | Framework + firmware port contract | Complete at protocol/template boundary | Backend supports ACK; board template extracts `message_id` and ACKs after render/command acceptance. Existing Ava Box remains compatible through legacy auto-ack. |
+| Device protocol spec | Framework docs | Complete | `docs/device-protocol.md` defines all current JSON and binary protocol frames. |
+| Security hardening | Framework deploy policy | Complete | `production_mode` enforces configured admin/device bearer tokens; docs define allowlist and credential boundaries. |
 | CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-legacy-ws, and run-server. |
 | CI | Repo infra | Complete first pass | GitHub Actions workflow compiles, tests, and validates runtime config. |
 

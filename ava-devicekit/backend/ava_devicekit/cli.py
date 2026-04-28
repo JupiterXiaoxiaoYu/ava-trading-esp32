@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ def main(argv: list[str] | None = None) -> None:
 
     init_app = sub.add_parser("init-app", help="Create a starter hardware app directory from userland templates")
     init_app.add_argument("path")
+    init_app.add_argument("--type", choices=["starter", "payment", "alert", "sensor"], default="starter")
     init_app.add_argument("--force", action="store_true")
 
     init_board = sub.add_parser("init-board", help="Create a starter ESP32 board port from userland templates")
@@ -62,22 +64,22 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     if args.command == "capabilities":
-        _print_json(json.loads((USERLAND / "capabilities.json").read_text(encoding="utf-8")))
+        _print_json(json.loads((_userland_root() / "capabilities.json").read_text(encoding="utf-8")))
         return
     if args.command == "validate":
         _print_json(RuntimeSettings.load(args.config).sanitized_dict())
         return
     if args.command == "init-app":
-        _init_app(Path(args.path), force=args.force)
+        _init_app(Path(args.path), app_type=args.type, force=args.force)
         return
     if args.command == "init-board":
         _init_board(Path(args.path), force=args.force)
         return
     if args.command == "init-adapter":
-        _copy_tree(USERLAND / "adapter", Path(args.path), force=args.force)
+        _copy_tree(_userland_root() / "adapter", Path(args.path), force=args.force)
         return
     if args.command == "init-provider":
-        _copy_tree(USERLAND / "provider", Path(args.path), force=args.force)
+        _copy_tree(_userland_root() / "provider", Path(args.path), force=args.force)
         return
     if args.command == "firmware":
         settings = RuntimeSettings.load(args.config)
@@ -117,22 +119,39 @@ def _add_runtime_args(parser: argparse.ArgumentParser, *, default_port: int) -> 
     parser.add_argument("--mock", action="store_true")
 
 
-def _init_app(path: Path, *, force: bool = False) -> None:
+def _init_app(path: Path, *, app_type: str = "starter", force: bool = False) -> None:
     if path.exists() and any(path.iterdir()) and not force:
         raise SystemExit(f"target exists and is not empty: {path}")
     path.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(USERLAND / "app" / "manifest.template.json", path / "manifest.json")
-    shutil.copy2(USERLAND / "app" / "app_template.py", path / "app.py")
-    shutil.copy2(USERLAND / "runtime.example.json", path / "runtime.example.json")
-    (path / "README.md").write_text("# DeviceKit App\n\nStart from `manifest.json`, `app.py`, and `runtime.example.json`.\n", encoding="utf-8")
-    _print_json({"ok": True, "path": str(path)})
+    userland = _userland_root()
+    if app_type == "starter":
+        shutil.copy2(userland / "app" / "manifest.template.json", path / "manifest.json")
+        shutil.copy2(userland / "app" / "app_template.py", path / "app.py")
+    else:
+        example = _examples_root() / "apps" / {"payment": "payment_terminal", "alert": "token_alert", "sensor": "sensor_registry"}[app_type]
+        _copy_tree_contents(example, path)
+        if not (path / "app.py").exists():
+            shutil.copy2(userland / "app" / "app_template.py", path / "app.py")
+    shutil.copy2(userland / "runtime.example.json", path / "runtime.example.json")
+    tests = path / "tests"
+    tests.mkdir(exist_ok=True)
+    (tests / "test_manifest.py").write_text(
+        "import json\nfrom pathlib import Path\nfrom ava_devicekit.core.manifest import HardwareAppManifest\n\n"
+        "def test_manifest_loads():\n"
+        "    manifest = HardwareAppManifest.from_dict(json.loads((Path(__file__).parents[1] / 'manifest.json').read_text()))\n"
+        "    assert manifest.app_id\n"
+        "    assert manifest.screens\n",
+        encoding="utf-8",
+    )
+    (path / "README.md").write_text(f"# DeviceKit App\n\nType: `{app_type}`.\n\nStart from `manifest.json`, `app.py`, `runtime.example.json`, and `tests/`.\n", encoding="utf-8")
+    _print_json({"ok": True, "path": str(path), "type": app_type})
 
 
 def _init_board(path: Path, *, force: bool = False) -> None:
     if path.exists() and any(path.iterdir()) and not force:
         raise SystemExit(f"target exists and is not empty: {path}")
     path.mkdir(parents=True, exist_ok=True)
-    for src in (USERLAND / "hardware_port" / "templates").iterdir():
+    for src in (_userland_root() / "hardware_port" / "templates").iterdir():
         if src.is_file():
             shutil.copy2(src, path / src.name)
     _print_json({"ok": True, "path": str(path)})
@@ -142,6 +161,11 @@ def _copy_tree(source: Path, path: Path, *, force: bool = False) -> None:
     if path.exists() and any(path.iterdir()) and not force:
         raise SystemExit(f"target exists and is not empty: {path}")
     path.mkdir(parents=True, exist_ok=True)
+    _copy_tree_contents(source, path, force=force)
+    _print_json({"ok": True, "path": str(path)})
+
+
+def _copy_tree_contents(source: Path, path: Path, *, force: bool = True) -> None:
     for src in source.iterdir():
         dst = path / src.name
         if src.is_file():
@@ -150,11 +174,33 @@ def _copy_tree(source: Path, path: Path, *, force: bool = False) -> None:
             if dst.exists() and force:
                 shutil.rmtree(dst)
             shutil.copytree(src, dst, dirs_exist_ok=force)
-    _print_json({"ok": True, "path": str(path)})
 
 
 def _print_json(data: dict[str, Any]) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _userland_root() -> Path:
+    return _first_existing(
+        USERLAND,
+        Path(sys.prefix) / "share" / "ava-devicekit" / "userland",
+        Path.cwd() / "ava-devicekit" / "userland",
+    )
+
+
+def _examples_root() -> Path:
+    return _first_existing(
+        ROOT / "examples",
+        Path(sys.prefix) / "share" / "ava-devicekit" / "examples",
+        Path.cwd() / "ava-devicekit" / "examples",
+    )
+
+
+def _first_existing(*paths: Path) -> Path:
+    for path in paths:
+        if path.exists():
+            return path
+    return paths[0]
 
 
 if __name__ == "__main__":

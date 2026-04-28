@@ -38,6 +38,7 @@ class RuntimeSettings:
     timezone_offset_hours: int = DEFAULT_TIMEZONE_OFFSET_HOURS
     websocket_ping_interval: int = DEFAULT_WEBSOCKET_PING_INTERVAL
     websocket_ping_timeout: int = DEFAULT_WEBSOCKET_PING_TIMEOUT
+    production_mode: bool = False
     chain_adapter: str = ""
     chain_adapter_class: str = ""
     chain_adapter_options: dict[str, Any] = field(default_factory=dict)
@@ -104,6 +105,7 @@ class RuntimeSettings:
             timezone_offset_hours=int(data.get("timezone_offset_hours") or server.get("timezone_offset") or DEFAULT_TIMEZONE_OFFSET_HOURS),
             websocket_ping_interval=int(data.get("websocket_ping_interval") or data.get("websocket_transport_ping_interval") or DEFAULT_WEBSOCKET_PING_INTERVAL),
             websocket_ping_timeout=int(data.get("websocket_ping_timeout") or data.get("websocket_transport_ping_timeout") or DEFAULT_WEBSOCKET_PING_TIMEOUT),
+            production_mode=bool(data.get("production_mode") or server.get("production_mode") or False),
             chain_adapter=str(data.get("chain_adapter") or chain_adapter_name or chain_adapter.get("provider") or chain_adapter.get("name") or ""),
             chain_adapter_class=str(data.get("chain_adapter_class") or chain_adapter.get("class") or chain_adapter.get("class_path") or ""),
             chain_adapter_options=_provider_options(chain_adapter),
@@ -176,6 +178,7 @@ class RuntimeSettings:
             "device_token_env": self.device_token_env,
             "websocket_ping_interval": self.websocket_ping_interval,
             "websocket_ping_timeout": self.websocket_ping_timeout,
+            "production_mode": self.production_mode,
             "adapters": {
                 "chain": {
                     "provider": self.chain_adapter,

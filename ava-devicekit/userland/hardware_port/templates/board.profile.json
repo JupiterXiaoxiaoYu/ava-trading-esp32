@@ -1,0 +1,25 @@
+{
+  "board_id": "my_esp32_board",
+  "name": "My ESP32 Board",
+  "display": {
+    "width": 320,
+    "height": 240,
+    "color_depth": 16
+  },
+  "input_map": {
+    "capabilities": [
+      {"source": "button_a", "kinds": ["press"], "semantic_actions": ["action.confirm"]},
+      {"source": "button_b", "kinds": ["press"], "semantic_actions": ["action.cancel"]},
+      {"source": "joystick", "kinds": ["move"], "codes": ["up", "down", "left", "right"]},
+      {"source": "microphone", "kinds": ["listen_start", "listen_stop"], "semantic_actions": ["voice.listen"]}
+    ],
+    "required_actions": ["action.confirm", "action.cancel"]
+  },
+  "outputs": ["display", "speaker"],
+  "transport": {
+    "protocol": "websocket",
+    "acks_rendered_payloads": true,
+    "supports_ota_check_command": true,
+    "sends_context_snapshot": true
+  }
+}

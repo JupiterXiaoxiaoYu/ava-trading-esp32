@@ -22,6 +22,20 @@ def _post(base_url: str, path: str, payload: dict | None = None) -> dict:
         return json.loads(resp.read().decode())
 
 
+def _post_status(base_url: str, path: str, payload: dict | None = None, headers: dict | None = None) -> tuple[int, dict]:
+    req = urllib.request.Request(
+        base_url + path,
+        data=json.dumps(payload or {}).encode(),
+        headers={"Content-Type": "application/json", **(headers or {})},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode())
+
+
 def _get(base_url: str, path: str) -> dict:
     with urllib.request.urlopen(base_url + path, timeout=10) as resp:
         return json.loads(resp.read().decode())
@@ -68,6 +82,7 @@ def test_http_gateway_admin_endpoints():
         assert "items" in _get(base_url, "/admin/ota/firmware")
         assert _get(base_url, "/admin/tasks")["count"] == 0
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+        assert _get(base_url, "/admin/dashboard.json")["ok"] is True
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -97,6 +112,81 @@ def test_http_gateway_reports_developer_services(monkeypatch):
         assert body["ok"] is True
         assert body["items"][0]["id"] == "proxy_wallet"
         assert body["items"][0]["status"] == "configured"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_invokes_allowlisted_developer_service():
+    from http.server import BaseHTTPRequestHandler
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            payload = json.dumps({"path": self.path}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, fmt, *args):
+            return
+
+    service_server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    service_thread = threading.Thread(target=service_server.serve_forever, daemon=True)
+    service_thread.start()
+    settings = RuntimeSettings.from_dict(
+        {
+            "services": [
+                {
+                    "id": "quote",
+                    "kind": "api",
+                    "base_url": f"http://127.0.0.1:{service_server.server_port}",
+                    "options": {"invocable": True, "allowed_paths": ["/quote"]},
+                }
+            ]
+        }
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        body = _post(base_url, "/admin/developer/services/quote/invoke", {"path": "/quote", "body": {"symbol": "SOL"}})
+        assert body["ok"] is True
+        assert body["body"]["path"] == "/quote"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        service_server.shutdown()
+        service_thread.join(timeout=5)
+
+
+def test_http_gateway_admin_queues_ota_check(tmp_path):
+    settings = RuntimeSettings(runtime_state_dir=str(tmp_path / "runtime-state"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        body = _post(base_url, "/admin/devices/device-a/ota-check", {})
+        assert body["command"] == "ota_check"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_production_mode_requires_tokens(monkeypatch):
+    monkeypatch.delenv("AVA_DEVICEKIT_ADMIN_TOKEN", raising=False)
+    settings = RuntimeSettings(production_mode=True)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, body = _get_status(base_url, "/admin/runtime")
+        assert status == 401
+        assert body["error"] == "token_required"
     finally:
         server.shutdown()
         thread.join(timeout=5)
