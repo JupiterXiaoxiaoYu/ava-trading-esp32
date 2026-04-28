@@ -47,6 +47,33 @@ def test_control_plane_customer_activation_config_and_revoke(tmp_path):
     assert not store.validate_device_token("box_3", registered["device_token"])
 
 
+def test_control_plane_customer_registration_and_app_users(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+    project = store.create_project({"name": "Ava Box App", "app_id": "ava_box"})["project"]
+    provisioned = store.provision_device({"device_id": "box-9", "project_id": project["project_id"], "app_id": "ava_box"})
+
+    registered = store.register_customer(
+        {
+            "email": "buyer@example.com",
+            "display_name": "Buyer",
+            "wallet": "Wallet111",
+            "app_id": "ava_box",
+            "activation_code": provisioned["activation_code"],
+        }
+    )
+
+    assert registered["customer"]["email"] == "buyer@example.com"
+    assert registered["device"]["status"] == "active"
+    assert "ava_box" in registered["customer"]["app_ids"]
+    app_users = store.app_customers("ava_box")
+    assert app_users["count"] == 1
+    assert app_users["items"][0]["device_count"] == 1
+    assert store.app_devices("ava_box")["items"][0]["device_id"] == "box_9"
+
+    same = store.register_customer({"email": "buyer@example.com", "app_id": "ava_box"})
+    assert same["customer"]["customer_id"] == registered["customer"]["customer_id"]
+
+
 def test_control_plane_runtime_config_is_persisted_and_redacted(tmp_path):
     store = ControlPlaneStore(tmp_path / "control.json")
     result = store.update_runtime_config({"providers": {"llm": {"provider": "openai-compatible", "model": "x", "api_key_env": "OPENAI_API_KEY", "api_key": "raw"}}})

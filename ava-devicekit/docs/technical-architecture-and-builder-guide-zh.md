@@ -183,6 +183,17 @@ Operator creates project/app record
   -> Operator monitors logs/usage/OTA/provider health
 ```
 
+C 端用户闭环：
+
+| 步骤 | API / 后台入口 | 结果 |
+|---|---|---|
+| 创建 app/project | Apps -> Create app/project record 或 `POST /admin/projects` | 生成 app/project 运营记录 |
+| 预制硬件 | Fleet Setup -> Provision device 或 `POST /admin/devices/register` | 生成 provisioning token 和 activation code |
+| 设备注册 | `POST /device/register` | 设备换取 per-device bearer token |
+| 用户一次注册 | Customer Entry -> One-step user registration 或 `POST /customer/register` | 创建/复用 customer，并可同时绑定 activation code |
+| App 用户管理 | Apps -> App users 或 `GET /admin/apps/{app_id}/customers` | 查看该 app 下的 C 端用户和已绑定设备 |
+| 运营支持 | Device Detail / Usage / Events | 查看单设备 config、usage、logs、OTA 状态 |
+
 框架级 DePIN/设备合约：
 
 | 合约 | 文件 | 作用 |

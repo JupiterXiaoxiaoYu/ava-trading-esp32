@@ -106,6 +106,18 @@ def make_handler(
                 active = self._session().app.manifest.to_dict()
                 self._send_json({"active": active, "items": [active]})
                 return
+            if path.startswith("/admin/apps/") and path.endswith("/customers"):
+                if not self._authorized_admin():
+                    return
+                app_id = path.split("/")[3]
+                self._send_json(control_plane.app_customers(app_id))
+                return
+            if path.startswith("/admin/apps/") and path.endswith("/devices"):
+                if not self._authorized_admin():
+                    return
+                app_id = path.split("/")[3]
+                self._send_json(control_plane.app_devices(app_id))
+                return
             if path == "/admin/devices":
                 if not self._authorized_admin():
                     return
@@ -249,6 +261,12 @@ def make_handler(
             if path == "/device/activate":
                 try:
                     self._send_json(control_plane.activate_device(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/customer/register":
+                try:
+                    self._send_json(control_plane.register_customer(self._read_json()))
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return

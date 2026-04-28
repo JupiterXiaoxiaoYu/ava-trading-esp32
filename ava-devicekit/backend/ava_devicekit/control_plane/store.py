@@ -190,6 +190,8 @@ class ControlPlaneStore:
         email = str(body.get("email") or "").strip().lower()
         display_name = str(body.get("display_name") or body.get("name") or email or "customer")
         wallet = str(body.get("wallet") or body.get("wallet_address") or "")
+        app_id = str(body.get("app_id") or "").strip()
+        project_id = str(body.get("project_id") or "").strip()
         now = _now()
         created: dict[str, Any] = {}
 
@@ -204,6 +206,8 @@ class ControlPlaneStore:
                 "display_name": display_name,
                 "wallet": wallet,
                 "status": str(body.get("status") or "active"),
+                "app_ids": [app_id] if app_id else [],
+                "project_ids": [project_id] if project_id else [],
                 "created_at": now,
                 "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
             }
@@ -211,6 +215,88 @@ class ControlPlaneStore:
 
         self.store.update(_default_state(), mutate)
         return {"ok": True, "customer": created}
+
+    def register_customer(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Self-service C-end customer registration with optional device binding."""
+
+        email = str(body.get("email") or "").strip().lower()
+        if not email:
+            raise ValueError("email_required")
+        display_name = str(body.get("display_name") or body.get("name") or email)
+        wallet = str(body.get("wallet") or body.get("wallet_address") or "")
+        app_id = str(body.get("app_id") or "").strip()
+        project_id = str(body.get("project_id") or "").strip()
+        customer: dict[str, Any] = {}
+        now = _now()
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal customer
+            _ensure_shape(data)
+            existing = next((item for item in data["customers"] if item.get("email") == email), None)
+            if existing:
+                if display_name and existing.get("display_name") in {"", existing.get("email"), "customer"}:
+                    existing["display_name"] = display_name
+                if wallet:
+                    existing["wallet"] = wallet
+                _ensure_customer_app_link(existing, app_id=app_id, project_id=project_id)
+                customer = dict(existing)
+                return
+            customer = {
+                "customer_id": _id("cus"),
+                "email": email,
+                "display_name": display_name,
+                "wallet": wallet,
+                "status": "active",
+                "app_ids": [app_id] if app_id else [],
+                "project_ids": [project_id] if project_id else [],
+                "created_at": now,
+                "registered_at": now,
+                "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+            }
+            data["customers"].append(customer)
+
+        self.store.update(_default_state(), mutate)
+        result: dict[str, Any] = {"ok": True, "customer": customer, "created": bool(customer.get("registered_at") == now)}
+        activation_code = str(body.get("activation_code") or "").strip()
+        if activation_code:
+            activation = self.activate_device(
+                {
+                    "activation_code": activation_code,
+                    "customer_id": customer["customer_id"],
+                    "customer": {"email": email, "display_name": display_name, "wallet": wallet},
+                }
+            )
+            result["activation"] = activation
+            result["device"] = activation["device"]
+            result["customer"] = self.customer(customer["customer_id"])["customer"]
+        return result
+
+    def customer(self, customer_id: str) -> dict[str, Any]:
+        data = self.bootstrap()
+        customer = _find_customer(data, customer_id)
+        if not customer:
+            raise ValueError("customer_not_found")
+        devices = [_safe_device(item) for item in data.get("devices", []) if item.get("customer_id") == customer.get("customer_id")]
+        return {"ok": True, "customer": dict(customer), "devices": devices, "device_count": len(devices)}
+
+    def app_customers(self, app_id: str) -> dict[str, Any]:
+        data = self.bootstrap()
+        app_id = str(app_id or "").strip()
+        devices = [item for item in data.get("devices", []) if not app_id or item.get("app_id") == app_id]
+        customer_ids = {str(item.get("customer_id") or "") for item in devices if item.get("customer_id")}
+        rows: list[dict[str, Any]] = []
+        for customer in data.get("customers", []):
+            if app_id and app_id not in set(customer.get("app_ids") or []) and customer.get("customer_id") not in customer_ids:
+                continue
+            linked_devices = [_safe_device(item) for item in devices if item.get("customer_id") == customer.get("customer_id")]
+            rows.append({**dict(customer), "devices": linked_devices, "device_count": len(linked_devices)})
+        return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
+
+    def app_devices(self, app_id: str) -> dict[str, Any]:
+        data = self.bootstrap()
+        app_id = str(app_id or "").strip()
+        rows = [_safe_device(item) for item in data.get("devices", []) if not app_id or item.get("app_id") == app_id]
+        return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
 
     def create_service_plan(self, body: dict[str, Any]) -> dict[str, Any]:
         plan_id = str(body.get("plan_id") or _slug(str(body.get("name") or _id("plan")))).replace("-", "_")
@@ -373,6 +459,8 @@ class ControlPlaneStore:
                         "display_name": str(customer_body.get("display_name") or customer_body.get("name") or email or "customer"),
                         "wallet": str(customer_body.get("wallet") or customer_body.get("wallet_address") or ""),
                         "status": "active",
+                        "app_ids": [],
+                        "project_ids": [],
                         "created_at": now,
                         "metadata": {},
                     }
@@ -383,6 +471,9 @@ class ControlPlaneStore:
             device["customer_id"] = customer_id
             device["status"] = "active"
             device["activated_at"] = now
+            linked_customer = _find_customer(state, customer_id)
+            if linked_customer:
+                _ensure_customer_app_link(linked_customer, app_id=str(device.get("app_id") or ""), project_id=str(device.get("project_id") or ""))
             activated = dict(device)
 
         self.store.update(_default_state(), mutate)
@@ -618,6 +709,13 @@ def _ensure_shape(data: dict[str, Any]) -> None:
         data["usage_counters"] = {}
     if not isinstance(data.get("usage_events"), list):
         data["usage_events"] = []
+    for customer in data["customers"]:
+        if not isinstance(customer, dict):
+            continue
+        if not isinstance(customer.get("app_ids"), list):
+            customer["app_ids"] = [str(customer["app_id"])] if customer.get("app_id") else []
+        if not isinstance(customer.get("project_ids"), list):
+            customer["project_ids"] = [str(customer["project_id"])] if customer.get("project_id") else []
     data["version"] = int(data.get("version") or 1)
 
 
@@ -635,6 +733,27 @@ def _find_device(data: dict[str, Any], device_id: str) -> dict[str, Any] | None:
         if normalize_control_device_id(str(item.get("device_id") or "")) == normalized:
             return item
     return None
+
+
+def _find_customer(data: dict[str, Any], customer_id: str) -> dict[str, Any] | None:
+    needle = str(customer_id or "")
+    for item in data.get("customers", []):
+        if str(item.get("customer_id") or "") == needle:
+            return item
+    return None
+
+
+def _ensure_customer_app_link(customer: dict[str, Any], *, app_id: str = "", project_id: str = "") -> None:
+    app_id = str(app_id or "").strip()
+    project_id = str(project_id or "").strip()
+    app_ids = customer.get("app_ids") if isinstance(customer.get("app_ids"), list) else []
+    project_ids = customer.get("project_ids") if isinstance(customer.get("project_ids"), list) else []
+    if app_id and app_id not in app_ids:
+        app_ids.append(app_id)
+    if project_id and project_id not in project_ids:
+        project_ids.append(project_id)
+    customer["app_ids"] = app_ids
+    customer["project_ids"] = project_ids
 
 
 def normalize_control_device_id(device_id: str) -> str:

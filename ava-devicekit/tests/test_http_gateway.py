@@ -92,6 +92,8 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "data-tab=\"usage\"" in html
         assert "Hardware Service Console" in html
         assert "id=\"app-log-form\"" in html
+        assert "id=\"customer-register-form\"" in html
+        assert "id=\"app-users-table\"" in html
         assert "id=\"device-detail-form\"" in html
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/control-plane")["counts"]["projects"] >= 1
@@ -103,6 +105,8 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "items" in _get(base_url, "/admin/ota/firmware")
         assert _get(base_url, "/admin/tasks")["count"] == 0
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+        assert _get(base_url, "/admin/apps/ava_box/customers")["ok"] is True
+        assert _get(base_url, "/admin/apps/ava_box/devices")["ok"] is True
         assert _get(base_url, "/admin/dashboard.json")["ok"] is True
     finally:
         server.shutdown()
@@ -323,6 +327,36 @@ def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
         assert _get(base_url, "/admin/devices/ava_box_ops/diagnostics")["ok"] is True
         revoked = _post(base_url, "/admin/devices/ava_box_ops/status", {"status": "revoked"})
         assert revoked["device"]["status"] == "revoked"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_customer_register_binds_app_device(tmp_path):
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        provisioned = _post(base_url, "/admin/devices/register", {"device_id": "signup-box", "app_id": "ava_box"})
+        registered = _post(
+            base_url,
+            "/customer/register",
+            {
+                "email": "signup@example.com",
+                "display_name": "Signup User",
+                "app_id": "ava_box",
+                "activation_code": provisioned["activation_code"],
+            },
+        )
+        assert registered["customer"]["email"] == "signup@example.com"
+        assert registered["device"]["status"] == "active"
+        users = _get(base_url, "/admin/apps/ava_box/customers")
+        assert users["count"] == 1
+        assert users["items"][0]["device_count"] == 1
+        devices = _get(base_url, "/admin/apps/ava_box/devices")
+        assert devices["items"][0]["customer_id"] == registered["customer"]["customer_id"]
     finally:
         server.shutdown()
         thread.join(timeout=5)

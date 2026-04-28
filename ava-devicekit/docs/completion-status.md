@@ -28,6 +28,8 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is an operator dashboard with Dashboard, Apps, Fleet Setup, Customer Entry, Device Detail, Providers, Usage, Server Timeline, Firmware, Services, and Raw areas. |
 | Users/projects/devices registry | Framework control plane | Complete MVP | Local JSON-backed control plane bootstraps users/projects, provisions devices, exchanges one-time registration tokens, and validates per-device bearer tokens. |
 | C-end customer activation | Framework control plane | Complete MVP | Local customers, activation codes, `/device/activate`, device status changes, suspend/revoke, and per-device config are supported. |
+| C-end user registration | Framework control plane | Complete MVP | `/customer/register` creates/reuses a customer and can bind an activation code in one request. |
+| App user management | Framework admin/API | Complete MVP | `/admin/apps/{app_id}/customers` and `/admin/apps/{app_id}/devices` expose app-scoped customers and hardware units; `/admin` shows app users. |
 | Web provider configuration | Framework admin UI | Complete MVP | `/admin` can edit ASR, LLM, TTS, chain adapter, and execution provider config by provider/model/base URL/env key/options and apply it to the running gateway. |
 | Device diagnostics | Framework admin API | Complete MVP | `/admin/devices/{device_id}/diagnostics` returns control-plane device data, resolved config, runtime state, connection, and recent events. |
 | Usage and entitlements | Framework control plane | Complete MVP | Service plans, per-device entitlements, usage reports, admin usage recording, and authenticated device usage reports are supported. |
