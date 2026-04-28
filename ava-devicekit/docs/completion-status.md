@@ -27,6 +27,9 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Security hardening | Framework deploy policy | Complete | `production_mode` enforces configured admin/device bearer tokens; docs define allowlist and credential boundaries. |
 | Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is a lightweight developer console with Overview, Control Plane, Runtime Devices, Firmware, Providers, Services, Events, and Raw tabs. |
 | Users/projects/devices registry | Framework control plane | Complete MVP | Local JSON-backed control plane bootstraps users/projects, provisions devices, exchanges one-time registration tokens, and validates per-device bearer tokens. |
+| C-end customer activation | Framework control plane | Complete MVP | Local customers, activation codes, `/device/activate`, device status changes, suspend/revoke, and per-device config are supported. |
+| Web provider configuration | Framework admin UI | Complete MVP | `/admin` can edit ASR, LLM, TTS, chain adapter, and execution provider config by provider/model/base URL/env key/options and apply it to the running gateway. |
+| Device diagnostics | Framework admin API | Complete MVP | `/admin/devices/{device_id}/diagnostics` returns control-plane device data, resolved config, runtime state, connection, and recent events. |
 | Solana AI DePIN app template | Framework reference template | Complete MVP | `examples/apps/solana_ai_depin_device` and `ava-devicekit init-app --type depin` provide a hardware-app template for device identity, heartbeat, proof drafts, and physical confirmation. |
 | CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-legacy-ws, and run-server. |
 | CI | Repo infra | Complete first pass | GitHub Actions workflow compiles, tests, and validates runtime config. |
@@ -40,4 +43,6 @@ This status file separates framework responsibility from Ava Box reference-app r
 | App-specific UI | Product pages belong to `reference_apps/ava_box/ui`, not framework core. |
 | Multi-device sessions | Runtime state is keyed by `X-Ava-Device-Id` or message `device_id`; each device gets an independent app session and event log. |
 | Device registration | Production deployments should provision devices through the control plane and store the returned device token on the device. The global device token remains only for compatibility and lab deployments. |
+| Provider config editing | The web console stores provider config and env var names, not raw secrets. Actual API keys should remain in environment variables or a secret manager. |
+| C-end operations | The current scope is a self-hosted operator console for one builder serving hardware users. Hosted SaaS, billing, tenant isolation, and developer marketplaces remain outside this milestone. |
 | Chain-specific trading | AVE/Solana trade execution belongs to Ava Box app skills, not `ChainAdapter`. |

@@ -35,6 +35,7 @@ def make_handler(
     session_factory = session_factory or (lambda: create_device_session(mock=True))
     manager = manager or RuntimeManager(lambda device_id: session_factory())
     control_plane = ControlPlaneStore(settings.control_plane_store_path)
+    _apply_runtime_config(settings, control_plane.runtime_config())
 
     class DeviceKitHandler(BaseHTTPRequestHandler):
         server_version = "AvaDeviceKitHTTP/0.1"
@@ -59,6 +60,14 @@ def make_handler(
                     return
                 self._send_json(manager.outbox(self._device_id()))
                 return
+            if path == "/device/config":
+                if not self._authorized_device():
+                    return
+                try:
+                    self._send_json({"ok": True, "device_id": self._device_id(), "config": control_plane.device_config(self._device_id())})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
             if path == "/admin/capabilities":
                 if not self._authorized_admin():
                     return
@@ -73,6 +82,11 @@ def make_handler(
                 if not self._authorized_admin():
                     return
                 self._send_json(settings.sanitized_dict())
+                return
+            if path == "/admin/runtime/config":
+                if not self._authorized_admin():
+                    return
+                self._send_json({"ok": True, "runtime_config": control_plane.runtime_config(), "effective": settings.sanitized_dict()})
                 return
             if path == "/admin/apps":
                 if not self._authorized_admin():
@@ -95,6 +109,12 @@ def make_handler(
                     return
                 snapshot = control_plane.snapshot()
                 self._send_json({"ok": True, "items": snapshot["users"], "count": len(snapshot["users"])})
+                return
+            if path == "/admin/customers":
+                if not self._authorized_admin():
+                    return
+                snapshot = control_plane.snapshot()
+                self._send_json({"ok": True, "items": snapshot["customers"], "count": len(snapshot["customers"])})
                 return
             if path == "/admin/projects":
                 if not self._authorized_admin():
@@ -145,6 +165,34 @@ def make_handler(
                 device_id = path.split("/")[3]
                 self._send_json(manager.state(device_id))
                 return
+            if path.startswith("/admin/devices/") and path.endswith("/config"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json({"ok": True, "device_id": device_id, "config": control_plane.device_config(device_id)})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/diagnostics"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                snapshot = control_plane.snapshot()
+                device = next((item for item in snapshot["devices"] if item.get("device_id") == device_id), {})
+                payload = {
+                    "ok": True,
+                    "device": device,
+                    "runtime_state": manager.state(device_id),
+                    "connection": manager.connection_state(device_id),
+                    "events": manager.event_log(device_id=device_id, limit=100),
+                }
+                try:
+                    payload["config"] = control_plane.device_config(device_id)
+                except Exception:
+                    payload["config"] = {}
+                self._send_json(payload)
+                return
             if path.startswith("/admin/devices/") and path.endswith("/connection"):
                 if not self._authorized_admin():
                     return
@@ -185,6 +233,12 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path == "/device/activate":
+                try:
+                    self._send_json(control_plane.activate_device(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/device/boot":
                 if not self._authorized_device():
                     return
@@ -209,11 +263,41 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path == "/admin/customers":
+                if not self._authorized_admin():
+                    return
+                try:
+                    self._send_json(control_plane.create_customer(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/admin/projects":
                 if not self._authorized_admin():
                     return
                 try:
                     self._send_json(control_plane.create_project(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/runtime/config":
+                if not self._authorized_admin():
+                    return
+                try:
+                    body = self._read_json()
+                    result = control_plane.update_runtime_config(body)
+                    _apply_runtime_config(settings, result["runtime_config"])
+                    self._send_json({"ok": True, "runtime_config": result["runtime_config"], "effective": settings.sanitized_dict()})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/runtime/providers":
+                if not self._authorized_admin():
+                    return
+                try:
+                    body = self._read_json()
+                    result = control_plane.update_runtime_config(_runtime_provider_patch(body))
+                    _apply_runtime_config(settings, result["runtime_config"])
+                    self._send_json({"ok": True, "runtime_config": result["runtime_config"], "providers": provider_health_report(settings)})
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -231,6 +315,24 @@ def make_handler(
                 device_id = path.split("/")[3]
                 try:
                     self._send_json(control_plane.rotate_provisioning_token(device_id))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/config"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(control_plane.update_device_config(device_id, self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/status"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(control_plane.update_device_status(device_id, str(self._read_json().get("status") or "")))
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -380,6 +482,81 @@ def _query_value(query: dict[str, list[str]], key: str) -> str:
     return str(values[0]) if values else ""
 
 
+def _runtime_provider_patch(body: dict[str, Any]) -> dict[str, Any]:
+    kind = str(body.get("kind") or "").strip().lower()
+    if kind not in {"asr", "llm", "tts", "chain", "execution"}:
+        raise ValueError("invalid_provider_kind")
+    payload = {k: v for k, v in body.items() if k not in {"kind"} and v is not None}
+    if "options_json" in payload:
+        text = str(payload.pop("options_json") or "").strip()
+        payload["options"] = json.loads(text) if text else {}
+    if kind == "chain":
+        return {"adapters": {"chain": payload}}
+    if kind == "execution":
+        return {"execution": payload}
+    return {"providers": {kind: payload}}
+
+
+def _apply_runtime_config(settings: RuntimeSettings, config: dict[str, Any]) -> None:
+    if not config:
+        return
+    providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
+    _apply_provider(settings, "asr", providers.get("asr") if isinstance(providers.get("asr"), dict) else {})
+    _apply_provider(settings, "llm", providers.get("llm") if isinstance(providers.get("llm"), dict) else {})
+    _apply_provider(settings, "tts", providers.get("tts") if isinstance(providers.get("tts"), dict) else {})
+    adapters = config.get("adapters") if isinstance(config.get("adapters"), dict) else {}
+    chain = adapters.get("chain") if isinstance(adapters.get("chain"), dict) else {}
+    if chain:
+        settings.chain_adapter = str(chain.get("provider") or chain.get("name") or settings.chain_adapter)
+        settings.chain_adapter_class = str(chain.get("class") or chain.get("class_path") or settings.chain_adapter_class)
+        if isinstance(chain.get("options"), dict):
+            settings.chain_adapter_options = dict(chain["options"])
+    execution = config.get("execution") if isinstance(config.get("execution"), dict) else {}
+    if execution:
+        settings.execution_mode = str(execution.get("mode") or execution.get("provider") or settings.execution_mode)
+        settings.execution_base_url = str(execution.get("base_url") or settings.execution_base_url)
+        settings.execution_api_key_env = str(execution.get("api_key_env") or settings.execution_api_key_env)
+        settings.execution_secret_key_env = str(execution.get("secret_key_env") or settings.execution_secret_key_env)
+        settings.proxy_wallet_id_env = str(execution.get("proxy_wallet_id_env") or settings.proxy_wallet_id_env)
+        settings.proxy_default_gas = str(execution.get("proxy_default_gas") or settings.proxy_default_gas)
+        settings.execution_provider_class = str(execution.get("class") or execution.get("class_path") or settings.execution_provider_class)
+        if isinstance(execution.get("options"), dict):
+            settings.execution_options = dict(execution["options"])
+    if isinstance(config.get("services"), list):
+        settings.developer_services = [dict(item) for item in config["services"] if isinstance(item, dict)]
+
+
+def _apply_provider(settings: RuntimeSettings, kind: str, data: dict[str, Any]) -> None:
+    if not data:
+        return
+    prefix = f"{kind}_"
+    mapping = {
+        "provider": "provider",
+        "base_url": "base_url",
+        "model": "model",
+        "api_key_env": "api_key_env",
+        "class": "class",
+        "class_path": "class",
+        "voice": "voice",
+        "format": "format",
+        "language": "language",
+        "sample_rate": "sample_rate",
+        "timeout_sec": "timeout_sec",
+    }
+    for key, suffix in mapping.items():
+        if key not in data:
+            continue
+        attr = prefix + suffix
+        if hasattr(settings, attr):
+            current = getattr(settings, attr)
+            value = data[key]
+            if isinstance(current, int):
+                value = int(value)
+            setattr(settings, attr, value)
+    if isinstance(data.get("options"), dict):
+        setattr(settings, prefix + "options", dict(data["options"]))
+
+
 def _dashboard_payload(
     settings: RuntimeSettings,
     manager: RuntimeManager,
@@ -435,14 +612,15 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.shell{width:min
     </div>
   </section>
   <nav class="toolbar" aria-label="Admin sections">
-    <button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="control">Control Plane</button><button class="tab" data-tab="devices">Runtime Devices</button><button class="tab" data-tab="firmware">Firmware</button><button class="tab" data-tab="providers">Providers</button><button class="tab" data-tab="services">Services</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="raw">Raw</button>
+    <button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="control">Control Plane</button><button class="tab" data-tab="customers">Customers</button><button class="tab" data-tab="devices">Runtime Devices</button><button class="tab" data-tab="firmware">Firmware</button><button class="tab" data-tab="providers">Providers</button><button class="tab" data-tab="services">Services</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="raw">Raw</button>
     <span class="spacer"></span><input id="admin-token" class="token" placeholder="Admin bearer token"><button class="btn alt" id="save-token">Save token</button><button class="btn" id="refresh">Refresh</button>
   </nav>
   <section id="overview" class="panel active"><div class="grid"><div class="card wide"><h2>Runtime posture</h2><div id="overview-body" class="stack"></div></div><div class="card"><h3>Recent events</h3><div id="overview-events" class="log"></div></div><div class="card"><h3>Quick actions</h3><div class="stack"><a class="btn alt" href="/admin/runtime">Runtime JSON</a><a class="btn alt" href="/admin/capabilities">Capabilities</a><a class="btn alt" href="/manifest">Manifest</a></div><p class="sub">Use the tabs for device OTA checks, firmware publishing, service invoke tests, and event filtering.</p></div></div></section>
-  <section id="control" class="panel"><div class="grid"><div class="card wide"><h2>Users, projects, provisioned devices</h2><p class="sub">Self-hosted registry for operators, projects, and per-device credentials. Devices register once with a provisioning token, then use their own bearer token.</p><div id="control-summary" class="stack"></div></div><div class="card"><h3>Create user</h3><form id="user-form" class="form"><div class="field"><label>Username</label><input name="username" placeholder="alice" required></div><div class="field"><label>Display name</label><input name="display_name" placeholder="Alice"></div><div class="field"><label>Role</label><select name="role"><option>developer</option><option>operator</option><option>viewer</option><option>admin</option></select></div><button class="btn" type="submit">Create</button></form></div><div class="card"><h3>Create project</h3><form id="project-form" class="form"><div class="field"><label>Name</label><input name="name" placeholder="Solana device app" required></div><div class="field"><label>Chain</label><input name="chain" value="solana"></div><div class="field"><label>Owner user id</label><input name="owner_user_id" placeholder="usr_default_admin"></div><button class="btn" type="submit">Create</button></form></div><div class="card wide"><h3>Provision device</h3><form id="device-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="ava-box-001" required></div><div class="field"><label>Name</label><input name="name" placeholder="Ava Box 001"></div><div class="field"><label>Project id</label><input name="project_id" placeholder="prj_default_solana"></div><div class="field"><label>Board model</label><input name="board_model" placeholder="esp32s3"></div><div class="field"><label>App id</label><input name="app_id" value="ava_box"></div><button class="btn warn" type="submit">Provision</button></form><pre id="provision-result" class="raw">Provisioning tokens are shown once here.</pre></div><div class="card wide"><h3>Registered devices</h3><div id="registered-devices-table"></div></div></div></section>
+  <section id="control" class="panel"><div class="grid"><div class="card wide"><h2>Users, projects, provisioned devices</h2><p class="sub">Self-hosted registry for operators, projects, customers, per-device credentials, and C-end device configuration.</p><div id="control-summary" class="stack"></div></div><div class="card"><h3>Create user</h3><form id="user-form" class="form"><div class="field"><label>Username</label><input name="username" placeholder="alice" required></div><div class="field"><label>Display name</label><input name="display_name" placeholder="Alice"></div><div class="field"><label>Role</label><select name="role"><option>developer</option><option>operator</option><option>viewer</option><option>admin</option></select></div><button class="btn" type="submit">Create</button></form></div><div class="card"><h3>Create project</h3><form id="project-form" class="form"><div class="field"><label>Name</label><input name="name" placeholder="Solana device app" required></div><div class="field"><label>Chain</label><input name="chain" value="solana"></div><div class="field"><label>Owner user id</label><input name="owner_user_id" placeholder="usr_default_admin"></div><button class="btn" type="submit">Create</button></form></div><div class="card wide"><h3>Provision device</h3><form id="device-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="ava-box-001" required></div><div class="field"><label>Name</label><input name="name" placeholder="Ava Box 001"></div><div class="field"><label>Project id</label><input name="project_id" placeholder="prj_default_solana"></div><div class="field"><label>Board model</label><input name="board_model" placeholder="esp32s3"></div><div class="field"><label>App id</label><input name="app_id" value="ava_box"></div><button class="btn warn" type="submit">Provision</button></form><pre id="provision-result" class="raw">Provisioning and activation codes are shown once here.</pre></div><div class="card wide"><h3>Device config</h3><form id="device-config-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="ava_box_001" required></div><div class="field"><label>AI name</label><input name="ai_name" placeholder="Ava"></div><div class="field"><label>Language</label><input name="language" placeholder="zh"></div><div class="field"><label>Wake phrases</label><input name="wake_phrases" placeholder="hey ava,hi ava,你好ava"></div><div class="field"><label>Voice</label><input name="tts_voice" placeholder="longanyang"></div><div class="field"><label>Volume</label><input name="volume" type="number" min="0" max="100" placeholder="100"></div><div class="field"><label>App id</label><input name="app_id" placeholder="ava_box"></div><div class="field"><label>Firmware channel</label><input name="firmware_channel" placeholder="stable"></div><div class="field"><label>Wallet mode</label><select name="wallet_mode"><option value="">keep</option><option>proxy</option><option>external</option><option>paper</option></select></div><div class="field"><label>Risk mode</label><select name="risk_mode"><option value="">keep</option><option>confirm_all</option><option>confirm_risky</option><option>read_only</option></select></div><button class="btn" type="submit">Save config</button><button class="btn alt" type="button" id="load-device-config">Load config</button></form><pre id="device-config-result" class="raw">Device config appears here.</pre></div><div class="card wide"><h3>Registered devices</h3><div id="registered-devices-table"></div></div></div></section>
+  <section id="customers" class="panel"><div class="grid"><div class="card"><h2>Create customer</h2><form id="customer-form" class="form"><div class="field"><label>Email</label><input name="email" placeholder="user@example.com"></div><div class="field"><label>Name</label><input name="display_name" placeholder="Ava user"></div><div class="field"><label>Wallet</label><input name="wallet" placeholder="optional Solana wallet"></div><button class="btn" type="submit">Create</button></form></div><div class="card"><h2>Activate device</h2><form id="activation-form" class="form"><div class="field"><label>Activation code</label><input name="activation_code" placeholder="AVA-XXXX-XXXX" required></div><div class="field"><label>Customer id</label><input name="customer_id" placeholder="optional existing customer"></div><div class="field"><label>Email</label><input name="email" placeholder="new customer email"></div><button class="btn warn" type="submit">Activate</button></form><pre id="activation-result" class="raw">Activation result appears here.</pre></div><div class="card wide"><h2>Customers</h2><div id="customers-table"></div></div></div></section>
   <section id="devices" class="panel"><div class="card wide"><h2>Devices</h2><div id="devices-table"></div></div></section>
   <section id="firmware" class="panel"><div class="grid"><div class="card"><h2>Publish firmware</h2><form id="firmware-form" class="form"><div class="field"><label>Model</label><input name="model" placeholder="scratch-arcade" required></div><div class="field"><label>Version</label><input name="version" placeholder="1.4.0" required></div><div class="field" style="grid-column:span 2"><label>Server source path</label><input name="source_path" placeholder="/path/to/build.bin" required></div><button class="btn warn" type="submit">Publish</button></form><p class="sub">This copies an existing server-side .bin into the configured OTA directory.</p></div><div class="card"><h2>Firmware catalog</h2><div id="firmware-table"></div></div></div></section>
-  <section id="providers" class="panel"><div class="card wide"><h2>AI and chain providers</h2><div id="providers-table"></div></div></section>
+  <section id="providers" class="panel"><div class="grid"><div class="card wide"><h2>AI and chain providers</h2><div id="providers-table"></div></div><div class="card wide"><h3>Edit provider config</h3><form id="provider-form" class="form"><div class="field"><label>Kind</label><select name="kind"><option>asr</option><option>llm</option><option>tts</option><option>chain</option><option>execution</option></select></div><div class="field"><label>Provider / mode</label><input name="provider" placeholder="qwen / openai-compatible / solana / custodial"></div><div class="field"><label>Model</label><input name="model" placeholder="qwen3.5-flash"></div><div class="field"><label>Base URL</label><input name="base_url" placeholder="https://..."></div><div class="field"><label>API key env</label><input name="api_key_env" placeholder="DASHSCOPE_API_KEY"></div><div class="field"><label>Secret env</label><input name="secret_key_env" placeholder="AVE_SECRET_KEY"></div><div class="field"><label>Class path</label><input name="class" placeholder="my_pkg.Provider"></div><div class="field"><label>Voice</label><input name="voice" placeholder="longanyang"></div><div class="field"><label>Language</label><input name="language" placeholder="zh"></div><div class="field"><label>Format</label><input name="format" placeholder="opus"></div><div class="field" style="grid-column:span 4"><label>Options JSON</label><textarea name="options_json" placeholder='{\"temperature\":0.7}'></textarea></div><button class="btn warn" type="submit">Save provider</button><button class="btn alt" type="button" id="load-provider">Load selected</button></form><pre id="provider-result" class="raw">Provider config changes apply immediately to this running gateway and persist in the control-plane store.</pre></div></div></section>
   <section id="services" class="panel"><div class="grid"><div class="card wide"><h2>Developer services</h2><div id="services-table"></div></div><div class="card wide"><h3>Allowlisted invoke test</h3><form id="invoke-form" class="form"><div class="field"><label>Service id</label><input name="service_id" placeholder="quote_api" required></div><div class="field"><label>Path</label><input name="path" placeholder="/quote" required></div><div class="field"><label>Method</label><select name="method"><option>POST</option><option>GET</option></select></div><div class="field"><label>Body JSON</label><textarea name="body" placeholder='{"symbol":"SOL"}'></textarea></div><button class="btn" type="submit">Invoke</button></form><pre id="invoke-result" class="raw">No invocation yet.</pre></div></div></section>
   <section id="events" class="panel"><div class="card wide"><h2>Events</h2><form id="events-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="default"></div><div class="field"><label>Event type</label><input name="event" placeholder="runtime.error"></div><div class="field"><label>Limit</label><input name="limit" value="100"></div><button class="btn" type="submit">Filter</button></form><div id="events-log" class="log"></div></div></section>
   <section id="raw" class="panel"><div class="card wide"><h2>Dashboard payload</h2><pre id="raw-json" class="raw">loading...</pre></div></section>
@@ -456,11 +634,12 @@ async function api(path, opts={}){const res=await fetch(path,{...opts,headers:he
 function pill(ok,text){return `<span class="pill ${ok?'ok':'bad'}">${escapeHtml(text)}</span>`} function info(text){return `<span class="pill info">${escapeHtml(text)}</span>`}
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function table(cols, rows, empty='No data yet.'){if(!rows||!rows.length)return `<div class="empty">${empty}</div>`;return `<table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(c=>`<td>${c.render?c.render(row):escapeHtml(row[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
-function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?.items||[], fw=d.firmware?.items||[], providers=d.providers?.items||[], services=d.developer_services?.items||[], events=d.events?.items||[], cp=d.control_plane||{}; const online=devices.filter(x=>x.connection&&x.connection.connected).length; $('#m-devices').textContent=cp.counts?.provisioned_devices??devices.length; $('#m-online').textContent=online; $('#m-firmware').textContent=fw.length; $('#m-providers').textContent=d.providers?.ok?'yes':'check'; $('#raw-json').textContent=JSON.stringify(d,null,2);
- $('#overview-body').innerHTML=[pill(d.providers?.ok,'providers '+(d.providers?.ok?'healthy':'need config')),pill(d.developer_services?.ok,'services '+(d.developer_services?.ok?'ready':'need env')),info('users '+(cp.counts?.users??0)),info('projects '+(cp.counts?.projects??0)),info('runtime '+(d.runtime?.production_mode?'production':'development')),info('ws '+(d.runtime?.websocket_port||'-')),info('http '+(d.runtime?.http_port||'-'))].join(' ');
- $('#control-summary').innerHTML=[info('users '+(cp.counts?.users??0)),info('projects '+(cp.counts?.projects??0)),info('provisioned '+(cp.counts?.provisioned_devices??0)),info('registered '+(cp.counts?.registered_devices??0))].join(' ');
+function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?.items||[], fw=d.firmware?.items||[], providers=d.providers?.items||[], services=d.developer_services?.items||[], events=d.events?.items||[], cp=d.control_plane||{}, customers=cp.customers||[]; const online=devices.filter(x=>x.connection&&x.connection.connected).length; $('#m-devices').textContent=cp.counts?.provisioned_devices??devices.length; $('#m-online').textContent=online; $('#m-firmware').textContent=fw.length; $('#m-providers').textContent=d.providers?.ok?'yes':'check'; $('#raw-json').textContent=JSON.stringify(d,null,2);
+ $('#overview-body').innerHTML=[pill(d.providers?.ok,'providers '+(d.providers?.ok?'healthy':'need config')),pill(d.developer_services?.ok,'services '+(d.developer_services?.ok?'ready':'need env')),info('customers '+(cp.counts?.customers??0)),info('users '+(cp.counts?.users??0)),info('projects '+(cp.counts?.projects??0)),info('runtime '+(d.runtime?.production_mode?'production':'development')),info('ws '+(d.runtime?.websocket_port||'-')),info('http '+(d.runtime?.http_port||'-'))].join(' ');
+ $('#control-summary').innerHTML=[info('users '+(cp.counts?.users??0)),info('customers '+(cp.counts?.customers??0)),info('projects '+(cp.counts?.projects??0)),info('provisioned '+(cp.counts?.provisioned_devices??0)),info('registered '+(cp.counts?.registered_devices??0)),info('active '+(cp.counts?.active_devices??0))].join(' ');
  $('#overview-events').innerHTML=renderEvents(events.slice(-8)); $('#events-log').innerHTML=renderEvents(events);
- $('#registered-devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Project',render:r=>`<span class="mono">${escapeHtml(r.project_id)}</span>`},{label:'Owner',render:r=>`<span class="mono">${escapeHtml(r.owner_user_id)}</span>`},{label:'Board',key:'board_model'},{label:'App',key:'app_id'},{label:'Status',render:r=>info(r.status||'-')},{label:'Action',render:r=>`<button class="btn alt" onclick="rotateProvision('${escapeHtml(r.device_id)}')">New provisioning token</button>`}],cp.devices||[],'No provisioned devices yet.');
+ $('#customers-table').innerHTML=table([{label:'Customer',render:r=>`<span class="mono">${escapeHtml(r.customer_id)}</span>`},{label:'Name',key:'display_name'},{label:'Email',key:'email'},{label:'Wallet',render:r=>`<span class="mono">${escapeHtml(r.wallet||'-')}</span>`},{label:'Status',render:r=>info(r.status||'-')}],customers,'No customers yet.');
+ $('#registered-devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Customer',render:r=>`<span class="mono">${escapeHtml(r.customer_id||'-')}</span>`},{label:'Project',render:r=>`<span class="mono">${escapeHtml(r.project_id)}</span>`},{label:'Board',key:'board_model'},{label:'App',key:'app_id'},{label:'Status',render:r=>info(r.status||'-')},{label:'Action',render:r=>`<button class="btn alt" onclick="rotateProvision('${escapeHtml(r.device_id)}')">New token</button> <button class="btn alt" onclick="loadDeviceConfig('${escapeHtml(r.device_id)}')">Config</button> <button class="btn alt" onclick="diagnoseDevice('${escapeHtml(r.device_id)}')">Diagnose</button> <button class="btn danger" onclick="setDeviceStatus('${escapeHtml(r.device_id)}','revoked')">Revoke</button>`}],cp.devices||[],'No provisioned devices yet.');
  $('#devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Status',render:r=>pill(!!(r.connection&&r.connection.connected),r.connection&&r.connection.connected?'online':'offline')},{label:'App',render:r=>escapeHtml(r.app_name||r.app_id||'-')},{label:'Screen',render:r=>info(r.screen||'-')},{label:'Last seen',render:r=>escapeHtml(r.connection?.last_seen?new Date(r.connection.last_seen*1000).toLocaleString():'-')},{label:'Action',render:r=>`<button class="btn warn" onclick="otaCheck('${escapeHtml(r.device_id)}')">OTA check</button> <button class="btn alt" onclick="viewDevice('${escapeHtml(r.device_id)}')">State</button>`}],devices,'No devices have connected yet.');
  $('#firmware-table').innerHTML=table([{label:'Model',key:'model'},{label:'Version',render:r=>info(r.version)},{label:'File',render:r=>`<span class="mono">${escapeHtml(r.filename)}</span>`},{label:'Size',render:r=>escapeHtml(r.size||0)}],fw,'No firmware binaries published.');
  $('#providers-table').innerHTML=table([{label:'Kind',key:'kind'},{label:'Provider',key:'provider'},{label:'Status',render:r=>pill(r.configured,r.status)},{label:'Model',key:'model'},{label:'Env',render:r=>`<span class="mono">${escapeHtml(r.api_key_env||'-')}</span>`}],providers,'No providers reported.');
@@ -470,12 +649,21 @@ async function refresh(){try{state.dashboard=await api('/admin/dashboard.json');
 async function otaCheck(id){try{await api(`/admin/devices/${encodeURIComponent(id)}/ota-check`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('OTA check queued for '+id); await refresh()}catch(e){toast('OTA check failed: '+e.message)}}
 async function rotateProvision(id){try{const result=await api(`/admin/devices/${encodeURIComponent(id)}/provision-token`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});$('#provision-result').textContent=JSON.stringify(result,null,2);toast('Provisioning token rotated');await refresh()}catch(e){toast('Token rotation failed: '+e.message)}}
 async function viewDevice(id){try{const body=await api(`/admin/devices/${encodeURIComponent(id)}/state`); $('#raw-json').textContent=JSON.stringify(body,null,2); activate('raw')}catch(e){toast('State failed: '+e.message)}}
+async function diagnoseDevice(id){try{const body=await api(`/admin/devices/${encodeURIComponent(id)}/diagnostics`); $('#raw-json').textContent=JSON.stringify(body,null,2); activate('raw')}catch(e){toast('Diagnostics failed: '+e.message)}}
+async function setDeviceStatus(id,status){try{await api(`/admin/devices/${encodeURIComponent(id)}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}); toast('Device '+id+' set to '+status); await refresh()}catch(e){toast('Status update failed: '+e.message)}}
+async function loadDeviceConfig(id){try{const body=await api(`/admin/devices/${encodeURIComponent(id)}/config`); const form=$('#device-config-form'); form.device_id.value=id; Object.entries(body.config||{}).forEach(([k,v])=>{if(form[k]) form[k].value=Array.isArray(v)?v.join(','):v}); $('#device-config-result').textContent=JSON.stringify(body,null,2); activate('control')}catch(e){toast('Load config failed: '+e.message)}}
 function activate(id){$$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===id)); $$('.panel').forEach(x=>x.classList.toggle('active',x.id===id))}
 $$('.tab').forEach(btn=>btn.addEventListener('click',()=>activate(btn.dataset.tab))); $('#refresh').addEventListener('click',refresh); $('#admin-token').value=token(); $('#save-token').addEventListener('click',()=>{localStorage.setItem('ava_admin_token',$('#admin-token').value.trim());toast('Token saved locally');refresh()});
 $('#firmware-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/ota/firmware',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Firmware published');e.target.reset();await refresh()}catch(err){toast('Publish failed: '+err.message)}});
 $('#user-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('User created');e.target.reset();await refresh()}catch(err){toast('Create user failed: '+err.message)}});
+$('#customer-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/customers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Customer created');e.target.reset();await refresh()}catch(err){toast('Create customer failed: '+err.message)}});
+$('#activation-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const body={activation_code:fd.get('activation_code'),customer_id:fd.get('customer_id')||'',customer:{email:fd.get('email')||''}};try{const result=await api('/device/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('#activation-result').textContent=JSON.stringify(result,null,2);toast('Device activated');e.target.reset();await refresh()}catch(err){toast('Activation failed: '+err.message)}});
 $('#project-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Project created');e.target.reset();await refresh()}catch(err){toast('Create project failed: '+err.message)}});
 $('#device-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const body=Object.fromEntries(fd);Object.keys(body).forEach(k=>{if(body[k]==='')delete body[k]});try{const result=await api('/admin/devices/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('#provision-result').textContent=JSON.stringify(result,null,2);toast('Device provisioned');await refresh()}catch(err){toast('Provision failed: '+err.message)}});
+$('#device-config-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const id=fd.get('device_id');const body=Object.fromEntries(fd);delete body.device_id;Object.keys(body).forEach(k=>{if(body[k]==='')delete body[k]});try{const result=await api(`/admin/devices/${encodeURIComponent(id)}/config`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('#device-config-result').textContent=JSON.stringify(result,null,2);toast('Device config saved');await refresh()}catch(err){toast('Config save failed: '+err.message)}});
+$('#load-device-config').addEventListener('click',()=>{const id=$('#device-config-form').device_id.value.trim(); if(id) loadDeviceConfig(id)});
+$('#provider-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const body=Object.fromEntries(fd);Object.keys(body).forEach(k=>{if(body[k]==='')delete body[k]});try{const result=await api('/admin/runtime/providers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('#provider-result').textContent=JSON.stringify(result,null,2);toast('Provider saved and applied');await refresh()}catch(err){toast('Provider save failed: '+err.message)}});
+$('#load-provider').addEventListener('click',()=>{const form=$('#provider-form'), el=n=>form.elements.namedItem(n);const kind=el('kind').value;const runtime=state.dashboard?.runtime||{};let block={}; if(kind==='chain') block=runtime.adapters?.chain||{}; else if(kind==='execution') block=runtime.execution||{}; else block=runtime.providers?.[kind]||{}; el('provider').value=block.provider||block.mode||''; el('model').value=block.model||''; el('base_url').value=block.base_url||''; el('api_key_env').value=block.api_key_env||''; el('secret_key_env').value=block.secret_key_env||''; el('class').value=block.class||''; el('voice').value=block.voice||''; el('language').value=block.language||''; el('format').value=block.format||''; el('options_json').value=JSON.stringify(block.options||{},null,2);});
 $('#invoke-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);let body={};try{body=fd.get('body')?JSON.parse(fd.get('body')):{}}catch(err){toast('Body JSON invalid');return}try{const result=await api(`/admin/developer/services/${encodeURIComponent(fd.get('service_id'))}/invoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:fd.get('path'),method:fd.get('method'),body})});$('#invoke-result').textContent=JSON.stringify(result,null,2);toast('Service invoked')}catch(err){$('#invoke-result').textContent=err.message;toast('Invoke failed: '+err.message)}});
 $('#events-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const qs=new URLSearchParams();['device_id','event','limit'].forEach(k=>{if(fd.get(k))qs.set(k,fd.get(k))});try{$('#events-log').innerHTML=renderEvents((await api('/admin/events?'+qs)).items||[])}catch(err){toast('Event filter failed: '+err.message)}});
 refresh();

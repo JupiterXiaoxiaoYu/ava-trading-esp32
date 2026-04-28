@@ -49,6 +49,9 @@ Ava Box is the first reference app built on this framework. Framework code must 
 | Device provisioning | Implement now | Admin receives one-time provisioning token; device exchanges it at `/device/register`. |
 | Per-device auth | Implement now | Device endpoints accept per-device bearer token and keep global token compatibility. |
 | Admin console | Implement now | `/admin` includes control-plane tab, provisioning forms, and registered-device table. |
+| C-end customer activation | Implement now | Customers, activation codes, `/device/activate`, suspend/revoke, and device-level config. |
+| Web provider configuration | Implement now | Admin can edit ASR/LLM/TTS/chain/execution provider model/base URL/env key/options from `/admin`. |
+| Device diagnostics | Implement now | Per-device diagnostics endpoint and UI actions expose state, connection, config, and recent events. |
 | DePIN app template | Implement now | `examples/apps/solana_ai_depin_device` and `init-app --type depin`. |
 | Password login | Later | Self-hosted admin bearer token remains the access boundary for this phase. |
 | Hosted SaaS billing/tenant isolation | Later | Data model is SaaS-ready, but this repo remains self-hosted. |

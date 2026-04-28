@@ -29,6 +29,7 @@ Framework users should start in `userland/`, not by editing core files. That dir
 | Deploy an existing app | `userland/runtime.example.json`, `userland/env.example` | Public URL, WS URL, ports, firmware bin dir, API keys |
 | Build a new hardware app | `userland/app/` | App manifest, app routing, app skills, screen choices |
 | Build a Solana AI DePIN device | `ava-devicekit init-app ./my-device --type depin` | Device identity, heartbeat/proof actions, physical confirmation, Solana backend boundary |
+| Operate C-end hardware users | `/admin`, `docs/c-end-hardware-ops-prd.md` | Customers, activation, device status/config, provider config, diagnostics |
 | Add a chain or data source | `userland/adapter/chain_adapter_template.py` | `ChainAdapter` implementation and registry entry |
 | Add live market updates | `userland/adapter/market_stream_adapter_template.py` | `MarketStreamAdapter` implementation |
 | Add AI providers | `userland/provider/` | ASR, LLM, TTS provider implementations |
@@ -104,13 +105,21 @@ ESP32 input / voice
 | `GET` | `/admin/developer/services` | Inspect backend services such as proxy wallets, market-data APIs, payment APIs, and order routers without exposing secrets |
 | `GET` | `/admin/control-plane` | Inspect local users, projects, and registered devices |
 | `GET/POST` | `/admin/users` | List or create local control-plane users |
+| `GET/POST` | `/admin/customers` | List or create C-end hardware customers |
 | `GET/POST` | `/admin/projects` | List or create projects, defaulting to Solana |
 | `GET` | `/admin/registered-devices` | List provisioned and registered devices |
 | `POST` | `/admin/devices/register` | Provision a device and return a one-time provisioning token |
 | `POST` | `/admin/devices/{device_id}/provision-token` | Rotate a device provisioning token |
+| `GET/POST` | `/admin/devices/{device_id}/config` | View or update device-level app/voice/wake/OTA/wallet config |
+| `POST` | `/admin/devices/{device_id}/status` | Suspend, activate, or revoke a device |
+| `GET` | `/admin/devices/{device_id}/diagnostics` | Inspect device state, connection, config, and recent events |
+| `GET/POST` | `/admin/runtime/config` | View or update persisted runtime provider/service config |
+| `POST` | `/admin/runtime/providers` | Update one ASR/LLM/TTS/chain/execution provider from the web console |
 | `POST` | `/admin/devices/{device_id}/ota-check` | Queue an `ota_check` command so an online device runs its normal OTA pull flow |
 | `POST` | `/admin/developer/services/{service_id}/invoke` | Backend-only allowlisted service invocation for app/admin tooling |
 | `POST` | `/device/register` | Exchange a one-time provisioning token for a per-device bearer token |
+| `POST` | `/device/activate` | Bind a physical device to a C-end customer using its activation code |
+| `GET` | `/device/config` | Device pulls its resolved language/voice/wake/app/OTA/wallet config |
 
 
 ## Production Components Added
@@ -124,6 +133,7 @@ ESP32 input / voice
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider, optional self-custody transaction provider, and custom execution provider classes in `apps/ava_box_skills/execution.py` |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/ota/firmware`, `/admin/developer/services`, optional bearer auth |
 | Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
+| C-end hardware ops | Framework control plane | Customer records, activation codes, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
@@ -150,6 +160,7 @@ ESP32 input / voice
 | `docs/device-protocol.md` | Firmware/backend protocol frames including explicit ACK and OTA trigger |
 | `docs/security-hardening.md` | Production mode, auth tokens, allowlists, and wallet/API safety |
 | `docs/ai-depin-cloud-prd.md` | Product requirements for the self-hosted AI DePIN control plane and Solana app template |
+| `docs/c-end-hardware-ops-prd.md` | Product requirements for operating C-end hardware users from a self-hosted console |
 
 ## Existing Firmware Compatibility
 

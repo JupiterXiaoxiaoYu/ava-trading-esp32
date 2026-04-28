@@ -280,3 +280,30 @@ def test_http_gateway_control_plane_registration_and_per_device_auth(tmp_path, m
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        provider = _post(base_url, "/admin/runtime/providers", {"kind": "llm", "provider": "openai-compatible", "model": "qwen-test", "base_url": "https://example.test/v1", "api_key_env": "DASHSCOPE_API_KEY"})
+        assert provider["providers"]["items"][1]["model"] == "qwen-test"
+        runtime = _get(base_url, "/admin/runtime")
+        assert runtime["providers"]["llm"]["model"] == "qwen-test"
+
+        customer = _post(base_url, "/admin/customers", {"email": "u@example.com", "display_name": "U"})["customer"]
+        provisioned = _post(base_url, "/admin/devices/register", {"device_id": "ava-box-ops", "customer_id": customer["customer_id"]})
+        activation = _post(base_url, "/device/activate", {"activation_code": provisioned["activation_code"], "customer_id": customer["customer_id"]})
+        assert activation["device"]["status"] == "active"
+        config = _post(base_url, "/admin/devices/ava_box_ops/config", {"ai_name": "Ava", "wake_phrases": "hey ava,hi ava", "volume": 88})
+        assert config["config"]["volume"] == 88
+        assert _get(base_url, "/admin/devices/ava_box_ops/config")["config"]["wake_phrases"] == ["hey ava", "hi ava"]
+        assert _get(base_url, "/admin/devices/ava_box_ops/diagnostics")["ok"] is True
+        revoked = _post(base_url, "/admin/devices/ava_box_ops/status", {"status": "revoked"})
+        assert revoked["device"]["status"] == "revoked"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
