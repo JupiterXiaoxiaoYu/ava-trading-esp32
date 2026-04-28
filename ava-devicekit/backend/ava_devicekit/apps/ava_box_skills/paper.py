@@ -7,6 +7,7 @@ from typing import Any
 from ava_devicekit.storage.json_store import JsonStore
 
 DEFAULT_PAPER_CASH_SOL = Decimal("1")
+NATIVE_SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 class PaperExecutionProvider:
@@ -41,8 +42,9 @@ class PaperExecutionProvider:
         }
         state.setdefault("paper_orders", []).insert(0, order)
         state["paper_orders"] = state["paper_orders"][:100]
-        _apply_position(state, order)
-        _apply_cash(state, order)
+        if not _is_native_sol_order(order):
+            _apply_position(state, order)
+            _apply_cash(state, order)
         self.store.write(state)
         return order
 
@@ -145,6 +147,13 @@ def _normalize_token_id(value: Any) -> str:
     if not token:
         return ""
     return token if token.endswith("-solana") else f"{token}-solana"
+
+
+def _is_native_sol_order(order: dict[str, Any]) -> bool:
+    symbol = str(order.get("symbol") or "").strip().upper()
+    token_id = _normalize_token_id(order.get("token_id") or "")
+    addr = token_id.replace("-solana", "")
+    return symbol == "SOL" or addr == NATIVE_SOL_MINT
 
 
 def _sell_cash_delta(order: dict[str, Any]) -> Decimal:

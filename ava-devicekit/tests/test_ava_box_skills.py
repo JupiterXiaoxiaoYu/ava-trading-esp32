@@ -59,6 +59,8 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert orders.payload["tokens"][0]["symbol"] == "BONK"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
+from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
+from ava_devicekit.storage.json_store import JsonStore
 
 
 def test_ave_solana_trade_provider_builds_external_signing_payload(monkeypatch):
@@ -93,6 +95,28 @@ def test_ave_solana_trade_provider_builds_external_signing_payload(monkeypatch):
     response = provider.create_solana_tx(payload)
     assert captured["url"].endswith("/v1/thirdParty/chainWallet/createSolanaTx")
     assert response["tx"] == "unsigned"
+
+
+def test_paper_execution_does_not_create_native_sol_position(tmp_path):
+    store = JsonStore(tmp_path / "state.json")
+    provider = PaperExecutionProvider(store)
+    provider.execute(
+        {
+            "action": "trade.market_draft",
+            "symbol": "SOL",
+            "token_id": "So11111111111111111111111111111111111111112-solana",
+            "amount": "0.1 SOL",
+            "native_amount": "0.1",
+            "amount_usd_raw": "15",
+            "token_amount": "0.1",
+            "price_usd": "150",
+        },
+        {"request_id": "native-sol"},
+    )
+    state = store.read({})
+    assert state["paper_cash_sol"] == "1"
+    assert state.get("paper_positions", []) == []
+    assert state["paper_orders"][0]["symbol"] == "SOL"
 
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
 

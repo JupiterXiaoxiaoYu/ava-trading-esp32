@@ -254,6 +254,50 @@ def test_portfolio_sell_legacy_na_position_removes_and_returns_to_portfolio(tmp_
     assert all(row["symbol"] != "OLD" for row in back["data"]["holdings"])
 
 
+def test_portfolio_hides_native_sol_token_position(tmp_path):
+    import json
+
+    store_path = tmp_path / "skills.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "trade_mode": "paper",
+                "paper_cash_sol": "1",
+                "paper_starting_sol": "1",
+                "paper_orders": [],
+                "paper_positions": [
+                    {
+                        "symbol": "SOL",
+                        "chain": "solana",
+                        "token_id": "So11111111111111111111111111111111111111112-solana",
+                        "amount": "4.4",
+                        "value_usd": "$660.00",
+                        "pnl": "$540.00",
+                        "source": "paper",
+                    },
+                    {
+                        "symbol": "BONK",
+                        "chain": "solana",
+                        "token_id": "Bonk111-solana",
+                        "amount": "1",
+                        "value_usd": "$2.00",
+                        "pnl": "$1.00",
+                        "source": "paper",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = create_device_session(mock=True, skill_store_path=str(store_path))
+    portfolio = session.handle({"type": "key_action", "action": "portfolio"})
+    rows = portfolio["data"]["holdings"]
+    assert [row["symbol"] for row in rows] == ["SOL", "BONK"]
+    assert rows[0]["source_tag"] == "native"
+    assert rows[0]["value_usd"] == "1 SOL"
+    assert portfolio["data"]["pnl"] == "$1"
+
+
 def test_legacy_screen_context_token_is_treated_as_selected():
     session = create_device_session(mock=True)
     reply = session.handle(

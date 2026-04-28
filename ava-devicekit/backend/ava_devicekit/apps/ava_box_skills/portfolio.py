@@ -9,6 +9,8 @@ from ava_devicekit.formatting.numbers import format_money, format_percent, parse
 from ava_devicekit.screen import builders
 from ava_devicekit.storage.json_store import JsonStore
 
+NATIVE_SOL_MINT = "So11111111111111111111111111111111111111112"
+
 
 class PortfolioSkill:
     def __init__(self, store: JsonStore):
@@ -18,7 +20,11 @@ class PortfolioSkill:
         state = _state(self.store)
         cash_sol = _sol_label(state.get("paper_cash_sol", DEFAULT_PAPER_CASH_SOL))
         rows = [_platform_sol_row(cash_sol)]
-        rows.extend(_portfolio_row(row) for row in state.get("paper_positions", []) if isinstance(row, dict))
+        rows.extend(
+            _portfolio_row(row)
+            for row in state.get("paper_positions", [])
+            if isinstance(row, dict) and not _is_native_sol_position(row)
+        )
         pnl = _sum_money(row.get("pnl") for row in rows)
         starting_sol = _sol_label(state.get("paper_starting_sol", DEFAULT_PAPER_CASH_SOL))
         return builders.portfolio(
@@ -71,6 +77,13 @@ def _portfolio_row(row: dict[str, Any]) -> dict[str, Any]:
         "last_price_usd": str(row.get("last_price_usd") or row.get("price_usd") or ""),
         "cost_basis_usd": str(row.get("cost_basis_usd") or ""),
     }
+
+
+def _is_native_sol_position(row: dict[str, Any]) -> bool:
+    symbol = str(row.get("symbol") or "").strip().upper()
+    token_id = str(row.get("token_id") or row.get("addr") or "").strip()
+    addr = str(row.get("addr") or token_id.replace(f"-{SOLANA}", "")).strip()
+    return symbol == "SOL" or addr == NATIVE_SOL_MINT or token_id == f"{NATIVE_SOL_MINT}-{SOLANA}"
 
 
 def _platform_sol_row(cash_sol: str) -> dict[str, Any]:
