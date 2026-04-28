@@ -180,3 +180,9 @@ def test_control_plane_usage_recorder_is_best_effort(tmp_path):
 
     report = store.usage_report(device_id="voice_box")
     assert report["items"][0]["usage"]["tts_chars"] == 12
+
+
+def test_control_plane_provision_device_trims_project_id(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+    provisioned = store.provision_device({"device_id": "trim-box", "project_id": " prj_default_solana ", "app_id": "ava_box"})
+    assert provisioned["device"]["project_id"] == "prj_default_solana"

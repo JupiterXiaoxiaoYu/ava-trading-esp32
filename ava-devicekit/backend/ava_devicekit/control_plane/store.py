@@ -609,8 +609,8 @@ class ControlPlaneStore:
 
     def provision_device(self, body: dict[str, Any]) -> dict[str, Any]:
         data = self.bootstrap()
-        project_id = str(body.get("project_id") or data["projects"][0]["project_id"])
-        owner_user_id = str(body.get("owner_user_id") or _project_owner(data, project_id) or data["users"][0]["user_id"])
+        project_id = str(body.get("project_id") or data["projects"][0]["project_id"]).strip()
+        owner_user_id = str(body.get("owner_user_id") or _project_owner(data, project_id) or data["users"][0]["user_id"]).strip()
         device_id = _slug(str(body.get("device_id") or _id("dev"))).replace("-", "_")
         now = _now()
         token = _token("avaprov")
