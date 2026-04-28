@@ -39,10 +39,40 @@ def test_cli_init_app_depin_template(tmp_path, capsys):
 
 def test_cli_validate_outputs_sanitized_runtime(tmp_path, capsys):
     cfg = tmp_path / "runtime.json"
-    cfg.write_text('{"admin_token_env":"ADMIN_TOKEN","providers":{"tts":{"provider":"mock","options":{"api_secret":"hidden"}}}}', encoding="utf-8")
+    cfg.write_text(
+        json.dumps(
+            {
+                "admin_token_env": "ADMIN_TOKEN",
+                "providers": {
+                    "asr": {
+                        "provider": "qwen",
+                        "base_url": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime",
+                        "model": "qwen3-asr-flash-realtime",
+                        "api_key_env": "DASHSCOPE_API_KEY",
+                        "language": "zh",
+                        "sample_rate": 16000,
+                    },
+                    "tts": {
+                        "provider": "alibl",
+                        "base_url": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference/",
+                        "format": "opus",
+                        "timeout_sec": 30,
+                        "options": {"api_secret": "hidden"},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     main(["validate", "--config", str(cfg)])
     body = json.loads(capsys.readouterr().out)
     assert body["admin_token_env"] == "ADMIN_TOKEN"
+    assert body["providers"]["asr"]["base_url"] == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
+    assert body["providers"]["asr"]["language"] == "zh"
+    assert body["providers"]["asr"]["sample_rate"] == 16000
+    assert body["providers"]["tts"]["base_url"] == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference/"
+    assert body["providers"]["tts"]["format"] == "opus"
+    assert body["providers"]["tts"]["timeout_sec"] == 30
     assert body["providers"]["tts"]["options"]["api_secret"] == "<redacted>"
 
 

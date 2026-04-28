@@ -296,8 +296,22 @@ def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
     try:
         provider = _post(base_url, "/admin/runtime/providers", {"kind": "llm", "provider": "openai-compatible", "model": "qwen-test", "base_url": "https://example.test/v1", "api_key_env": "DASHSCOPE_API_KEY"})
         assert provider["providers"]["items"][1]["model"] == "qwen-test"
+        _post(
+            base_url,
+            "/admin/runtime/providers",
+            {
+                "kind": "asr",
+                "provider": "qwen",
+                "model": "qwen3-asr-flash-realtime",
+                "base_url": "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime",
+                "api_key_env": "DASHSCOPE_API_KEY",
+                "language": "zh",
+            },
+        )
         runtime = _get(base_url, "/admin/runtime")
         assert runtime["providers"]["llm"]["model"] == "qwen-test"
+        assert runtime["providers"]["asr"]["base_url"] == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
+        assert runtime["providers"]["asr"]["language"] == "zh"
 
         customer = _post(base_url, "/admin/customers", {"email": "u@example.com", "display_name": "U"})["customer"]
         provisioned = _post(base_url, "/admin/devices/register", {"device_id": "ava-box-ops", "customer_id": customer["customer_id"]})
