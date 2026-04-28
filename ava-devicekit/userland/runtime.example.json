@@ -72,5 +72,36 @@
     "proxy_wallet_id_env": "AVE_PROXY_WALLET_ID",
     "proxy_default_gas": "1000000",
     "options": {}
-  }
+  },
+  "services": [
+    {
+      "id": "proxy_wallet",
+      "kind": "custodial_wallet",
+      "base_url": "https://bot-api.ave.ai",
+      "api_key_env": "AVE_API_KEY",
+      "secret_key_env": "AVE_SECRET_KEY",
+      "wallet_id_env": "AVE_PROXY_WALLET_ID",
+      "capabilities": [
+        "wallet.balance",
+        "trade.market",
+        "trade.limit",
+        "order.status"
+      ],
+      "options": {
+        "confirmation_required": "device_screen"
+      }
+    },
+    {
+      "id": "market_data",
+      "kind": "market_data_api",
+      "base_url": "https://data.ave-api.xyz/v2",
+      "api_key_env": "AVE_API_KEY",
+      "capabilities": [
+        "token.feed",
+        "token.search",
+        "token.detail",
+        "price.stream"
+      ]
+    }
+  ]
 }

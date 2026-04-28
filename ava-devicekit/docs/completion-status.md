@@ -17,8 +17,10 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Custodial/proxy wallet execution | Ava Box app | Complete at provider boundary | AVE proxy-wallet provider submits market/limit orders with HMAC auth after physical device confirmation. |
 | Custom trade execution | Ava Box app | Complete at provider boundary | Runtime config can load a custom `TradeExecutionProvider` class for non-AVE execution APIs. |
 | Concrete Ava Box UI package | Ava Box app | Complete as reference-app package | Current LVGL screens are copied into `reference_apps/ava_box/ui`; DeviceKit core keeps only generic UI contracts. |
-| Admin APIs | Framework | Complete | `/admin`, `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events` with optional bearer auth. |
-| CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, run-http, and run-legacy-ws. |
+| Admin APIs | Framework | Complete | `/admin`, `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/providers/health`, `/admin/tasks`, `/admin/ota/firmware`, and `/admin/developer/services` with optional bearer auth. |
+| Firmware publish / OTA catalog | Framework | Complete | `ota/publish.py`, `ava-devicekit firmware publish/list`, and `/admin/ota/firmware` manage versioned pull-based OTA binaries. |
+| Developer backend service registry | Framework | Complete | `services/registry.py` and `/admin/developer/services` declare proxy wallets, API services, market data, payment services, and order routers without exposing secrets to devices. |
+| CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-legacy-ws, and run-server. |
 | CI | Repo infra | Complete first pass | GitHub Actions workflow compiles, tests, and validates runtime config. |
 
 ## Explicit Runtime Assumptions

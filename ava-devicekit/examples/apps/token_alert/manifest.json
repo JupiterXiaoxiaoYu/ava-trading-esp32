@@ -1,0 +1,61 @@
+{
+  "app_id": "token_alert",
+  "name": "Token Alert Device",
+  "description": "Reference app for price/signal alerts on a small ESP32 display.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32",
+    "display": "any",
+    "inputs": [
+      "button",
+      "microphone"
+    ],
+    "outputs": [
+      "display",
+      "speaker"
+    ]
+  },
+  "screens": [
+    "alert_list",
+    "alert_detail",
+    "confirm",
+    "result",
+    "notify"
+  ],
+  "actions": [
+    "alert.create",
+    "alert.mute",
+    "alert.detail",
+    "action.confirm",
+    "action.cancel"
+  ],
+  "screen_contracts": [
+    {
+      "screen_id": "alert_list",
+      "description": "List of watched token alerts with cursor and selected alert context.",
+      "payload_schema": {
+        "type": "object",
+        "required": [
+          "alerts"
+        ]
+      },
+      "context_schema": {
+        "type": "object",
+        "required": [
+          "screen",
+          "cursor",
+          "selected"
+        ]
+      },
+      "actions": [
+        "alert.detail",
+        "alert.mute"
+      ]
+    }
+  ],
+  "safety": {
+    "custody_mode": "no_custody_alert_only",
+    "primary_asset_keys_on_esp32": false,
+    "requires_physical_confirmation": []
+  }
+}

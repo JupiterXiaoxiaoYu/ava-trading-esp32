@@ -7,8 +7,9 @@ from http.server import ThreadingHTTPServer
 
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.http_server import make_handler
-from ava_devicekit.ota.version import is_higher_version, scan_firmware
 from ava_devicekit.ota.firmware import build_ota_response
+from ava_devicekit.ota.publish import firmware_catalog, publish_firmware
+from ava_devicekit.ota.version import is_higher_version, scan_firmware
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 
@@ -61,6 +62,45 @@ def test_http_gateway_serves_ava_ota_contract(tmp_path):
             payload = json.loads(resp.read().decode())
         assert payload["websocket"]["url"] == "ws://unit.test/ava/v1/"
         assert payload["firmware"]["version"] == "1.2.0"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_publish_firmware_and_catalog(tmp_path):
+    source = tmp_path / "build.bin"
+    source.write_bytes(b"new-bin")
+    settings = RuntimeSettings(firmware_bin_dir=str(tmp_path / "bin"))
+
+    published = publish_firmware(settings, model="scratch arcade", version="1.3.0", source_path=source)
+    catalog = firmware_catalog(settings)
+
+    assert published["ok"] is True
+    assert published["firmware"]["filename"] == "scratch-arcade_1.3.0.bin"
+    assert catalog["count"] == 1
+    assert catalog["items"][0]["version"] == "1.3.0"
+
+
+def test_http_gateway_admin_ota_firmware_endpoints(tmp_path):
+    source = tmp_path / "firmware.bin"
+    source.write_bytes(b"bin")
+    settings = RuntimeSettings(firmware_bin_dir=str(tmp_path / "bin"))
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        req = urllib.request.Request(
+            base_url + "/admin/ota/firmware",
+            data=json.dumps({"model": "scratch-arcade", "version": "1.4.0", "source_path": str(source)}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert json.loads(resp.read().decode())["firmware"]["filename"] == "scratch-arcade_1.4.0.bin"
+        with urllib.request.urlopen(base_url + "/admin/ota/firmware", timeout=10) as resp:
+            assert json.loads(resp.read().decode())["count"] == 1
     finally:
         server.shutdown()
         thread.join(timeout=5)

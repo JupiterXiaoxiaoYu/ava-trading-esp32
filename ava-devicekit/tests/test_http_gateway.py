@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.http_server import make_handler
 from ava_devicekit.gateway.session import DeviceSession
+from ava_devicekit.runtime.settings import RuntimeSettings
 
 def _post(base_url: str, path: str, payload: dict | None = None) -> dict:
     req = urllib.request.Request(
@@ -63,8 +64,39 @@ def test_http_gateway_admin_endpoints():
         assert "core_capabilities" in _get(base_url, "/admin/capabilities")
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/providers/health")["count"] >= 3
+        assert _get(base_url, "/admin/developer/services")["count"] == 0
+        assert "items" in _get(base_url, "/admin/ota/firmware")
         assert _get(base_url, "/admin/tasks")["count"] == 0
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_reports_developer_services(monkeypatch):
+    monkeypatch.setenv("MY_PROXY_KEY", "secret")
+    settings = RuntimeSettings.from_dict(
+        {
+            "services": [
+                {
+                    "id": "proxy_wallet",
+                    "kind": "custodial_wallet",
+                    "base_url": "https://wallet.example.com",
+                    "api_key_env": "MY_PROXY_KEY",
+                    "capabilities": ["wallet.balance", "trade.submit"],
+                }
+            ]
+        }
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        body = _get(base_url, "/admin/developer/services")
+        assert body["ok"] is True
+        assert body["items"][0]["id"] == "proxy_wallet"
+        assert body["items"][0]["status"] == "configured"
     finally:
         server.shutdown()
         thread.join(timeout=5)

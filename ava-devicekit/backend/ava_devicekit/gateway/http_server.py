@@ -13,9 +13,11 @@ from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.ota.firmware import build_ota_response, resolve_firmware_download
+from ava_devicekit.ota.publish import firmware_catalog, publish_firmware
 from ava_devicekit.providers.health import provider_health_report
 from ava_devicekit.runtime.settings import RuntimeSettings
 from ava_devicekit.runtime.tasks import BackgroundTaskManager
+from ava_devicekit.services.registry import developer_service_report
 
 SessionFactory = Callable[[], DeviceSession]
 
@@ -95,6 +97,16 @@ def make_handler(
                 if not self._authorized_admin():
                     return
                 self._send_json(provider_health() if provider_health else provider_health_report(settings))
+                return
+            if path == "/admin/developer/services":
+                if not self._authorized_admin():
+                    return
+                self._send_json(developer_service_report(settings.developer_services))
+                return
+            if path == "/admin/ota/firmware":
+                if not self._authorized_admin():
+                    return
+                self._send_json(firmware_catalog(settings))
                 return
             if path == "/admin/tasks":
                 if not self._authorized_admin():
@@ -178,6 +190,23 @@ def make_handler(
                         )
                     )
                 except Exception as exc:  # pragma: no cover - defensive server boundary
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/ota/firmware":
+                if not self._authorized_admin():
+                    return
+                try:
+                    body = self._read_json()
+                    self._send_json(
+                        publish_firmware(
+                            settings,
+                            model=str(body.get("model") or ""),
+                            version=str(body.get("version") or ""),
+                            source_path=body.get("source_path"),
+                            content_base64=str(body.get("content_base64") or ""),
+                        )
+                    )
+                except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json({"ok": False, "error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -268,6 +297,8 @@ code{color:#64d2ff}
 <a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
 <a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
 <a href="/admin/providers/health">Provider Health<br><code>/admin/providers/health</code></a>
+<a href="/admin/developer/services">Developer Services<br><code>/admin/developer/services</code></a>
+<a href="/admin/ota/firmware">OTA Firmware<br><code>/admin/ota/firmware</code></a>
 <a href="/admin/tasks">Tasks<br><code>/admin/tasks</code></a>
 <a href="/admin/apps">Apps<br><code>/admin/apps</code></a>
 <a href="/admin/devices">Devices<br><code>/admin/devices</code></a>

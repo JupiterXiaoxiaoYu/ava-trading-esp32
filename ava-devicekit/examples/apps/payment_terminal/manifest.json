@@ -1,0 +1,19 @@
+{
+  "app_id": "payment_terminal",
+  "name": "Payment Terminal",
+  "description": "Reference DeviceKit app shape for Solana payment approval hardware.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "any", "inputs": ["button", "touch", "microphone"], "outputs": ["display", "speaker"]},
+  "screens": ["payment_home", "confirm", "result", "notify"],
+  "actions": ["payment.scan", "payment.draft", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "external_wallet_or_backend_draft", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["payment.draft"]},
+  "screen_contracts": [
+    {
+      "screen_id": "payment_home",
+      "description": "Shows merchant/payment request context before creating a draft.",
+      "payload_schema": {"type": "object", "required": ["merchant", "amount", "asset"]},
+      "context_schema": {"type": "object", "required": ["screen", "selected"]},
+      "actions": ["payment.draft"]
+    }
+  ]
+}

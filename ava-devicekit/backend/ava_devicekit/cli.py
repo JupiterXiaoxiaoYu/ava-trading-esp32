@@ -9,6 +9,7 @@ from typing import Any
 from ava_devicekit.gateway.http_server import run_http_gateway
 from ava_devicekit.gateway.legacy_firmware import run_legacy_firmware_gateway
 from ava_devicekit.gateway.server import run_server
+from ava_devicekit.ota.publish import firmware_catalog, publish_firmware
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,24 @@ def main(argv: list[str] | None = None) -> None:
     init_board = sub.add_parser("init-board", help="Create a starter ESP32 board port from userland templates")
     init_board.add_argument("path")
     init_board.add_argument("--force", action="store_true")
+
+    init_adapter = sub.add_parser("init-adapter", help="Create starter adapter templates")
+    init_adapter.add_argument("path")
+    init_adapter.add_argument("--force", action="store_true")
+
+    init_provider = sub.add_parser("init-provider", help="Create starter provider configuration examples")
+    init_provider.add_argument("path")
+    init_provider.add_argument("--force", action="store_true")
+
+    firmware = sub.add_parser("firmware", help="List or publish OTA firmware binaries")
+    firmware_sub = firmware.add_subparsers(dest="firmware_command", required=True)
+    firmware_list = firmware_sub.add_parser("list", help="List firmware binaries available to OTA")
+    firmware_list.add_argument("--config", default=None)
+    firmware_publish = firmware_sub.add_parser("publish", help="Copy a firmware .bin into the OTA bin directory")
+    firmware_publish.add_argument("--config", default=None)
+    firmware_publish.add_argument("--model", required=True)
+    firmware_publish.add_argument("--version", required=True)
+    firmware_publish.add_argument("--source", required=True)
 
     http = sub.add_parser("run-http", help="Run the HTTP gateway")
     _add_runtime_args(http, default_port=8788)
@@ -54,6 +73,20 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "init-board":
         _init_board(Path(args.path), force=args.force)
         return
+    if args.command == "init-adapter":
+        _copy_tree(USERLAND / "adapter", Path(args.path), force=args.force)
+        return
+    if args.command == "init-provider":
+        _copy_tree(USERLAND / "provider", Path(args.path), force=args.force)
+        return
+    if args.command == "firmware":
+        settings = RuntimeSettings.load(args.config)
+        if args.firmware_command == "list":
+            _print_json(firmware_catalog(settings))
+            return
+        if args.firmware_command == "publish":
+            _print_json(publish_firmware(settings, model=args.model, version=args.version, source_path=args.source))
+            return
     if args.command == "run-http":
         settings = RuntimeSettings.load(args.config)
         run_http_gateway(args.host, args.port, app_id=args.app_id, manifest_path=args.manifest, adapter=args.adapter, mock=args.mock, skill_store_path=args.skill_store, runtime_settings=settings)
@@ -102,6 +135,21 @@ def _init_board(path: Path, *, force: bool = False) -> None:
     for src in (USERLAND / "hardware_port" / "templates").iterdir():
         if src.is_file():
             shutil.copy2(src, path / src.name)
+    _print_json({"ok": True, "path": str(path)})
+
+
+def _copy_tree(source: Path, path: Path, *, force: bool = False) -> None:
+    if path.exists() and any(path.iterdir()) and not force:
+        raise SystemExit(f"target exists and is not empty: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+    for src in source.iterdir():
+        dst = path / src.name
+        if src.is_file():
+            shutil.copy2(src, dst)
+        elif src.is_dir():
+            if dst.exists() and force:
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst, dirs_exist_ok=force)
     _print_json({"ok": True, "path": str(path)})
 
 

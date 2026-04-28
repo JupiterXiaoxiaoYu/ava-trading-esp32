@@ -1,0 +1,19 @@
+{
+  "app_id": "sensor_registry",
+  "name": "Sensor Registry",
+  "description": "Reference app for device identity and DePIN-style sensor registration flows.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "any", "inputs": ["button", "encoder"], "outputs": ["display"]},
+  "screens": ["sensor_panel", "confirm", "result", "notify"],
+  "actions": ["sensor.register", "sensor.heartbeat", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "device_identity_key_not_user_asset_key", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["sensor.register"]},
+  "screen_contracts": [
+    {
+      "screen_id": "sensor_panel",
+      "description": "Sensor identity, heartbeat and registration status.",
+      "payload_schema": {"type": "object", "required": ["device_id", "status"]},
+      "context_schema": {"type": "object", "required": ["screen", "page_data"]},
+      "actions": ["sensor.register", "sensor.heartbeat"]
+    }
+  ]
+}

@@ -97,6 +97,9 @@ ESP32 input / voice
 | `GET` | `/ava/ota/` | Compatibility health response for existing firmware OTA checks |
 | `POST` | `/ava/ota/` | Compatibility OTA response containing `websocket`, `server_time`, and optional firmware update |
 | `GET` | `/ava/ota/download/{filename}` | Safe firmware binary download from the configured bin directory |
+| `GET` | `/admin/ota/firmware` | List versioned firmware binaries available for OTA |
+| `POST` | `/admin/ota/firmware` | Publish a `.bin` into the OTA directory by `model` and `version` |
+| `GET` | `/admin/developer/services` | Inspect backend services such as proxy wallets, market-data APIs, payment APIs, and order routers without exposing secrets |
 
 
 ## Production Components Added
@@ -108,8 +111,10 @@ ESP32 input / voice
 | LLM fallback | Framework provider boundary | Runtime-configured OpenAI-compatible chat provider plus custom LLM provider classes through `providers/registry.py` |
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider, optional self-custody transaction provider, and custom execution provider classes in `apps/ava_box_skills/execution.py` |
-| Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, optional bearer auth |
-| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `run-http`, and `run-legacy-ws` |
+| Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/ota/firmware`, `/admin/developer/services`, optional bearer auth |
+| Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
+| Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
+| Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
 | Generic page/input/context | Framework contract | Custom `ScreenContract`, `InputEvent`, and `ContextSnapshot` schemas let new pages and new hardware controls attach AI-readable state without changing core |
 
@@ -126,6 +131,7 @@ ESP32 input / voice
 | `docs/provider-setup.md` | ASR, LLM, TTS, market stream, and trade provider setup |
 | `docs/production-deploy.md` | Gateway deployment, proxy/heartbeat, OTA, wallet safety |
 | `docs/package-release.md` | CLI/package release and versioning notes |
+| `docs/ota-and-developer-services.md` | Pull-based firmware updates and server-side developer service registry |
 
 ## Existing Firmware Compatibility
 

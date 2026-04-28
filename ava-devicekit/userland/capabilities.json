@@ -155,6 +155,27 @@
       "path": "userland/hardware_port/templates/",
       "user_action": "copy_or_generate",
       "description": "C template for JSON transport, binary audio, display rendering, audio playback, buttons, and cursor context."
+    },
+    {
+      "id": "firmware_publish",
+      "name": "Firmware Publish API",
+      "path": "backend/ava_devicekit/ota/publish.py",
+      "user_action": "use",
+      "description": "Lists and publishes versioned firmware binaries for pull-based OTA updates."
+    },
+    {
+      "id": "developer_service_registry",
+      "name": "Developer Service Registry",
+      "path": "backend/ava_devicekit/services/registry.py",
+      "user_action": "configure",
+      "description": "Declares server-side APIs such as proxy wallets, market data, payments, and custom app services without exposing credentials to devices."
+    },
+    {
+      "id": "single_process_server",
+      "name": "Single Process Runtime Server",
+      "path": "backend/ava_devicekit/gateway/server.py",
+      "user_action": "deploy",
+      "description": "Runs HTTP, legacy WebSocket, runtime tasks, provider health, OTA, and admin APIs against one shared RuntimeManager."
     }
   ],
   "extension_points": [

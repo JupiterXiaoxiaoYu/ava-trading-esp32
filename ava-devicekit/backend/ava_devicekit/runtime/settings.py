@@ -75,6 +75,7 @@ class RuntimeSettings:
     proxy_default_gas: str = "1000000"
     execution_provider_class: str = ""
     execution_options: dict[str, Any] = field(default_factory=dict)
+    developer_services: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "RuntimeSettings":
@@ -89,6 +90,7 @@ class RuntimeSettings:
         llm = providers.get("llm") if isinstance(providers.get("llm"), dict) else {}
         tts = providers.get("tts") if isinstance(providers.get("tts"), dict) else {}
         execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
+        services = data.get("services") if isinstance(data.get("services"), list) else []
         return cls(
             host=str(data.get("host") or server.get("ip") or DEFAULT_HOST),
             http_port=int(_first_present(data.get("http_port"), server.get("http_port"), DEFAULT_HTTP_PORT)),
@@ -139,6 +141,7 @@ class RuntimeSettings:
             proxy_default_gas=str(data.get("proxy_default_gas") or execution.get("proxy_default_gas") or "1000000"),
             execution_provider_class=str(data.get("execution_provider_class") or execution.get("class") or execution.get("class_path") or ""),
             execution_options=_provider_options(execution),
+            developer_services=[dict(item) for item in services if isinstance(item, dict)],
         )
 
     @classmethod
@@ -196,6 +199,7 @@ class RuntimeSettings:
                 "class": self.execution_provider_class,
                 "options": _sanitize_options(self.execution_options),
             },
+            "services": [_sanitize_service(item) for item in self.developer_services],
         }
 
     def ava_box_skill_config(self, *, store_path: str | None = None) -> AvaBoxSkillConfig:
@@ -224,6 +228,8 @@ class RuntimeSettings:
             self.chain_adapter_options = {}
         if self.execution_options is None:
             self.execution_options = {}
+        if self.developer_services is None:
+            self.developer_services = []
 
 
 def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
@@ -272,3 +278,14 @@ def _sanitize_options(options: dict[str, Any] | None) -> dict[str, Any]:
         )
         for k, v in options.items()
     }
+
+
+def _sanitize_service(service: dict[str, Any]) -> dict[str, Any]:
+    safe = dict(service)
+    if isinstance(safe.get("options"), dict):
+        safe["options"] = _sanitize_options(safe["options"])
+    for key in list(safe):
+        lower = key.lower()
+        if not lower.endswith("_env") and any(word in lower for word in ("key", "secret", "token", "password")):
+            safe[key] = "<redacted>"
+    return safe
