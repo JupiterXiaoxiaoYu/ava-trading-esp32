@@ -38,7 +38,7 @@ def provider_health_report(settings: RuntimeSettings) -> dict[str, Any]:
         _provider("asr", settings.asr_provider, settings.asr_model, settings.asr_api_key_env, settings.asr_class),
         _provider("llm", settings.llm_provider, settings.llm_model, settings.llm_api_key_env, settings.llm_class),
         _provider("tts", settings.tts_provider, settings.tts_model, settings.tts_api_key_env, settings.tts_class, mock_names={"", "mock", "none", "disabled"}),
-        _provider("chain", settings.chain_adapter, "", "", settings.chain_adapter_class, mock_names={"", "mock", "mock_solana"}),
+        _provider("chain", settings.chain_adapter or "auto", "", "", settings.chain_adapter_class, mock_names={"mock", "mock_solana"}),
         _provider("execution", settings.execution_mode, "", settings.execution_api_key_env, settings.execution_provider_class, mock_names={"", "paper", "mock"}),
     ]
     payloads = [item.to_dict() for item in items]
