@@ -41,6 +41,11 @@ def _get(base_url: str, path: str) -> dict:
         return json.loads(resp.read().decode())
 
 
+def _get_text(base_url: str, path: str) -> str:
+    with urllib.request.urlopen(base_url + path, timeout=10) as resp:
+        return resp.read().decode()
+
+
 def test_http_gateway_mock_flow():
     def factory() -> DeviceSession:
         return create_device_session(mock=True)
@@ -76,6 +81,11 @@ def test_http_gateway_admin_endpoints():
     base_url = f"http://127.0.0.1:{server.server_port}"
     try:
         assert "core_capabilities" in _get(base_url, "/admin/capabilities")
+        html = _get_text(base_url, "/admin")
+        assert "Ava DeviceKit Cloud Control Plane" in html
+        assert "id=\"firmware-form\"" in html
+        assert "id=\"invoke-form\"" in html
+        assert "data-tab=\"devices\"" in html
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/providers/health")["count"] >= 3
         assert _get(base_url, "/admin/developer/services")["count"] == 0

@@ -325,47 +325,73 @@ def _admin_page() -> str:
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ava DeviceKit Admin</title>
+<title>Ava DeviceKit Cloud</title>
 <style>
-body{margin:0;background:#101418;color:#edf2f7;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-main{max-width:1160px;margin:0 auto;padding:32px}
-h1{font-size:28px;margin:0 0 8px}
-p{color:#a8b3c2}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:24px 0}
-a{display:block;padding:18px;border:1px solid #2d3748;border-radius:14px;color:#edf2f7;text-decoration:none;background:#151c24}
-a:hover{border-color:#64d2ff}
-code{color:#64d2ff}
-pre{white-space:pre-wrap;background:#0b0f13;border:1px solid #26313c;border-radius:14px;padding:16px;max-height:520px;overflow:auto}
-button{background:#64d2ff;color:#061018;border:0;border-radius:10px;padding:10px 14px;font-weight:700}
-</style>
-<main>
-<h1>Ava DeviceKit Admin</h1>
-<p>Deployment inspection surface. Secret values are never returned by these endpoints.</p>
-<button onclick="refresh()">Refresh Dashboard</button>
-<pre id="dashboard">loading...</pre>
-<div class="grid">
-<a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
-<a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
-<a href="/admin/providers/health">Provider Health<br><code>/admin/providers/health</code></a>
-<a href="/admin/developer/services">Developer Services<br><code>/admin/developer/services</code></a>
-<a href="/admin/ota/firmware">OTA Firmware<br><code>/admin/ota/firmware</code></a>
-<a href="/admin/tasks">Tasks<br><code>/admin/tasks</code></a>
-<a href="/admin/apps">Apps<br><code>/admin/apps</code></a>
-<a href="/admin/devices">Devices<br><code>/admin/devices</code></a>
-<a href="/admin/events">Events<br><code>/admin/events</code></a>
-<a href="/device/state">Device State<br><code>/device/state</code></a>
-</div>
-<script>
-async function refresh(){
-  const target=document.getElementById('dashboard');
-  try{
-    const response=await fetch('/admin/dashboard.json');
-    target.textContent=JSON.stringify(await response.json(), null, 2);
-  }catch(err){target.textContent=String(err);}
+:root{
+  --ink:#1f241b;--muted:#68715f;--paper:#f3ead7;--panel:#fff9eb;--line:#d6c7aa;
+  --coal:#263022;--moss:#587247;--amber:#c97923;--red:#b84a33;--blue:#386f86;
+  --shadow:0 22px 70px rgba(63,49,25,.14);--radius:22px;
 }
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:
+  radial-gradient(circle at 18% 8%,rgba(201,121,35,.20),transparent 28rem),
+  linear-gradient(115deg,#f7efd8 0%,#efe1c2 42%,#e7d2aa 100%);
+  font-family:"Aptos","IBM Plex Sans","Segoe UI",sans-serif;min-height:100vh}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(38,48,34,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(38,48,34,.035) 1px,transparent 1px);background-size:32px 32px;mask-image:linear-gradient(to bottom,#000,transparent 88%)}
+button,input,textarea,select{font:inherit}button{cursor:pointer}.shell{width:min(1440px,calc(100% - 32px));margin:0 auto;padding:28px 0 56px}.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;align-items:stretch;margin-bottom:22px}.title{background:var(--coal);color:#fbf1d7;border-radius:32px;padding:32px;box-shadow:var(--shadow);position:relative;overflow:hidden}.title:after{content:"";position:absolute;right:-70px;top:-100px;width:260px;height:260px;border:42px solid rgba(201,121,35,.34);border-radius:50%}.eyebrow{letter-spacing:.14em;text-transform:uppercase;color:#e6b15f;font-size:12px;font-weight:800}.title h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(38px,6vw,86px);line-height:.88;margin:12px 0 18px;max-width:780px;font-weight:900}.title p{font-size:clamp(15px,1.7vw,20px);color:#e3d7b8;max-width:720px;margin:0}.status-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.metric{background:rgba(255,249,235,.82);border:1px solid rgba(90,71,34,.20);border-radius:26px;padding:20px;box-shadow:var(--shadow);backdrop-filter:blur(10px)}.metric b{display:block;font-size:clamp(30px,4vw,54px);line-height:1;font-family:Georgia,"Times New Roman",serif}.metric span{display:block;color:var(--muted);margin-top:8px;font-weight:700}.toolbar{position:sticky;top:0;z-index:10;display:flex;gap:10px;align-items:center;padding:12px;margin:0 -8px 18px;background:rgba(239,225,194,.82);backdrop-filter:blur(16px);border-bottom:1px solid rgba(90,71,34,.18)}.tab{border:1px solid var(--line);background:var(--panel);color:var(--coal);border-radius:999px;padding:10px 14px;font-weight:800}.tab.active{background:var(--coal);color:#fbf1d7}.spacer{flex:1}.token{min-width:220px;border:1px solid var(--line);border-radius:999px;padding:10px 14px;background:#fff7e4}.btn{border:0;border-radius:999px;padding:11px 15px;background:var(--coal);color:#fff3d8;font-weight:900}.btn.alt{background:transparent;color:var(--coal);border:1px solid var(--line)}.btn.warn{background:var(--amber);color:#1d160b}.btn.danger{background:var(--red);color:#fff}.panel{display:none;animation:rise .32s cubic-bezier(.19,1,.22,1)}.panel.active{display:block}@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{grid-column:span 6;background:var(--panel);border:1px solid rgba(90,71,34,.20);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}.card.wide{grid-column:span 12}.card.third{grid-column:span 4}.card h2,.card h3{margin:0 0 14px;font-family:Georgia,"Times New Roman",serif}.card h2{font-size:30px}.card h3{font-size:22px}.sub{color:var(--muted);font-weight:700}table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--line);padding:9px 8px}td{border-bottom:1px solid rgba(90,71,34,.14);padding:11px 8px;vertical-align:top}tr:hover td{background:rgba(201,121,35,.07)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:900;background:#eadfc4;color:var(--coal)}.pill.ok{background:#d9e8c8;color:#31501f}.pill.bad{background:#f0c7b8;color:#7d2818}.pill.info{background:#cce1e8;color:#214d5d}.mono{font-family:"Cascadia Mono","SFMono-Regular",monospace;font-size:12px}.stack{display:flex;flex-wrap:wrap;gap:8px}.form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end}.field label{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;font-weight:900;margin:0 0 6px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);border-radius:14px;padding:11px;background:#fffaf0;color:var(--ink)}textarea{min-height:110px;resize:vertical}.log{max-height:520px;overflow:auto;background:#1f241b;color:#f6e9c9;border-radius:20px;padding:16px}.event{display:grid;grid-template-columns:150px 170px 1fr;gap:12px;padding:10px;border-bottom:1px solid rgba(246,233,201,.14)}.raw{white-space:pre-wrap;overflow:auto;max-height:560px;background:#1f241b;color:#f6e9c9;border-radius:20px;padding:18px}.empty{border:1px dashed var(--line);border-radius:18px;padding:22px;color:var(--muted);background:rgba(255,249,235,.58)}.toast{position:fixed;right:20px;bottom:20px;z-index:30;background:var(--coal);color:#fff1d4;border-radius:18px;padding:14px 16px;box-shadow:var(--shadow);max-width:420px;display:none}.toast.show{display:block;animation:rise .2s ease-out}@media(max-width:900px){.hero{grid-template-columns:1fr}.status-strip{grid-template-columns:repeat(2,1fr)}.toolbar{overflow:auto}.card,.card.third{grid-column:span 12}.form{grid-template-columns:1fr}.event{grid-template-columns:1fr}.token{min-width:180px}.title{border-radius:24px;padding:24px}}
+</style>
+<main class="shell">
+  <section class="hero">
+    <div class="title">
+      <div class="eyebrow">Ava DeviceKit Cloud Control Plane</div>
+      <h1>AI hardware fleet command.</h1>
+      <p>Manage ESP32 AI devices, model providers, OTA firmware, backend services, and runtime events from one lightweight gateway.</p>
+    </div>
+    <div class="status-strip">
+      <div class="metric"><b id="m-devices">-</b><span>devices</span></div>
+      <div class="metric"><b id="m-online">-</b><span>online</span></div>
+      <div class="metric"><b id="m-firmware">-</b><span>firmware builds</span></div>
+      <div class="metric"><b id="m-providers">-</b><span>providers ok</span></div>
+    </div>
+  </section>
+  <nav class="toolbar" aria-label="Admin sections">
+    <button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="devices">Devices</button><button class="tab" data-tab="firmware">Firmware</button><button class="tab" data-tab="providers">Providers</button><button class="tab" data-tab="services">Services</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="raw">Raw</button>
+    <span class="spacer"></span><input id="admin-token" class="token" placeholder="Admin bearer token"><button class="btn alt" id="save-token">Save token</button><button class="btn" id="refresh">Refresh</button>
+  </nav>
+  <section id="overview" class="panel active"><div class="grid"><div class="card wide"><h2>Runtime posture</h2><div id="overview-body" class="stack"></div></div><div class="card"><h3>Recent events</h3><div id="overview-events" class="log"></div></div><div class="card"><h3>Quick actions</h3><div class="stack"><a class="btn alt" href="/admin/runtime">Runtime JSON</a><a class="btn alt" href="/admin/capabilities">Capabilities</a><a class="btn alt" href="/manifest">Manifest</a></div><p class="sub">Use the tabs for device OTA checks, firmware publishing, service invoke tests, and event filtering.</p></div></div></section>
+  <section id="devices" class="panel"><div class="card wide"><h2>Devices</h2><div id="devices-table"></div></div></section>
+  <section id="firmware" class="panel"><div class="grid"><div class="card"><h2>Publish firmware</h2><form id="firmware-form" class="form"><div class="field"><label>Model</label><input name="model" placeholder="scratch-arcade" required></div><div class="field"><label>Version</label><input name="version" placeholder="1.4.0" required></div><div class="field" style="grid-column:span 2"><label>Server source path</label><input name="source_path" placeholder="/path/to/build.bin" required></div><button class="btn warn" type="submit">Publish</button></form><p class="sub">This copies an existing server-side .bin into the configured OTA directory.</p></div><div class="card"><h2>Firmware catalog</h2><div id="firmware-table"></div></div></div></section>
+  <section id="providers" class="panel"><div class="card wide"><h2>AI and chain providers</h2><div id="providers-table"></div></div></section>
+  <section id="services" class="panel"><div class="grid"><div class="card wide"><h2>Developer services</h2><div id="services-table"></div></div><div class="card wide"><h3>Allowlisted invoke test</h3><form id="invoke-form" class="form"><div class="field"><label>Service id</label><input name="service_id" placeholder="quote_api" required></div><div class="field"><label>Path</label><input name="path" placeholder="/quote" required></div><div class="field"><label>Method</label><select name="method"><option>POST</option><option>GET</option></select></div><div class="field"><label>Body JSON</label><textarea name="body" placeholder='{"symbol":"SOL"}'></textarea></div><button class="btn" type="submit">Invoke</button></form><pre id="invoke-result" class="raw">No invocation yet.</pre></div></div></section>
+  <section id="events" class="panel"><div class="card wide"><h2>Events</h2><form id="events-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="default"></div><div class="field"><label>Event type</label><input name="event" placeholder="runtime.error"></div><div class="field"><label>Limit</label><input name="limit" value="100"></div><button class="btn" type="submit">Filter</button></form><div id="events-log" class="log"></div></div></section>
+  <section id="raw" class="panel"><div class="card wide"><h2>Dashboard payload</h2><pre id="raw-json" class="raw">loading...</pre></div></section>
+</main><div id="toast" class="toast"></div>
+<script>
+const state={dashboard:null};
+const $=(s,r=document)=>r.querySelector(s); const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+function token(){return localStorage.getItem('ava_admin_token')||''} function headers(extra={}){const h={...extra}; if(token()) h.Authorization='Bearer '+token(); return h}
+function toast(msg){const el=$('#toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),3600)}
+async function api(path, opts={}){const res=await fetch(path,{...opts,headers:headers(opts.headers||{})}); const text=await res.text(); let body; try{body=JSON.parse(text)}catch{body={ok:false,error:text||res.statusText}} if(!res.ok) throw new Error(body.error||res.statusText); return body}
+function pill(ok,text){return `<span class="pill ${ok?'ok':'bad'}">${escapeHtml(text)}</span>`} function info(text){return `<span class="pill info">${escapeHtml(text)}</span>`}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function table(cols, rows, empty='No data yet.'){if(!rows||!rows.length)return `<div class="empty">${empty}</div>`;return `<table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(c=>`<td>${c.render?c.render(row):escapeHtml(row[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
+function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?.items||[], fw=d.firmware?.items||[], providers=d.providers?.items||[], services=d.developer_services?.items||[], events=d.events?.items||[]; const online=devices.filter(x=>x.connection&&x.connection.connected).length; $('#m-devices').textContent=devices.length; $('#m-online').textContent=online; $('#m-firmware').textContent=fw.length; $('#m-providers').textContent=d.providers?.ok?'yes':'check'; $('#raw-json').textContent=JSON.stringify(d,null,2);
+ $('#overview-body').innerHTML=[pill(d.providers?.ok,'providers '+(d.providers?.ok?'healthy':'need config')),pill(d.developer_services?.ok,'services '+(d.developer_services?.ok?'ready':'need env')),info('runtime '+(d.runtime?.production_mode?'production':'development')),info('ws '+(d.runtime?.websocket_port||'-')),info('http '+(d.runtime?.http_port||'-'))].join(' ');
+ $('#overview-events').innerHTML=renderEvents(events.slice(-8)); $('#events-log').innerHTML=renderEvents(events);
+ $('#devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Status',render:r=>pill(!!(r.connection&&r.connection.connected),r.connection&&r.connection.connected?'online':'offline')},{label:'App',render:r=>escapeHtml(r.app_name||r.app_id||'-')},{label:'Screen',render:r=>info(r.screen||'-')},{label:'Last seen',render:r=>escapeHtml(r.connection?.last_seen?new Date(r.connection.last_seen*1000).toLocaleString():'-')},{label:'Action',render:r=>`<button class="btn warn" onclick="otaCheck('${escapeHtml(r.device_id)}')">OTA check</button> <button class="btn alt" onclick="viewDevice('${escapeHtml(r.device_id)}')">State</button>`}],devices,'No devices have connected yet.');
+ $('#firmware-table').innerHTML=table([{label:'Model',key:'model'},{label:'Version',render:r=>info(r.version)},{label:'File',render:r=>`<span class="mono">${escapeHtml(r.filename)}</span>`},{label:'Size',render:r=>escapeHtml(r.size||0)}],fw,'No firmware binaries published.');
+ $('#providers-table').innerHTML=table([{label:'Kind',key:'kind'},{label:'Provider',key:'provider'},{label:'Status',render:r=>pill(r.configured,r.status)},{label:'Model',key:'model'},{label:'Env',render:r=>`<span class="mono">${escapeHtml(r.api_key_env||'-')}</span>`}],providers,'No providers reported.');
+ $('#services-table').innerHTML=table([{label:'Service',key:'id'},{label:'Kind',key:'kind'},{label:'Status',render:r=>pill(r.configured,r.status)},{label:'Base URL',render:r=>`<span class="mono">${escapeHtml(r.base_url||'-')}</span>`},{label:'Capabilities',render:r=>(r.capabilities||[]).map(info).join(' ')}],services,'No developer services configured.');}
+function renderEvents(events){if(!events||!events.length)return '<div class="empty">No events yet.</div>';return events.map(e=>`<div class="event"><div>${new Date((e.ts||0)*1000).toLocaleTimeString()}</div><div><span class="mono">${escapeHtml(e.event)}</span><br><span class="sub">${escapeHtml(e.device_id)}</span></div><div class="mono">${escapeHtml(JSON.stringify(e.payload||{}))}</div></div>`).join('')}
+async function refresh(){try{state.dashboard=await api('/admin/dashboard.json'); render(); toast('Dashboard refreshed')}catch(e){toast('Refresh failed: '+e.message)}}
+async function otaCheck(id){try{await api(`/admin/devices/${encodeURIComponent(id)}/ota-check`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('OTA check queued for '+id); await refresh()}catch(e){toast('OTA check failed: '+e.message)}}
+async function viewDevice(id){try{const body=await api(`/admin/devices/${encodeURIComponent(id)}/state`); $('#raw-json').textContent=JSON.stringify(body,null,2); activate('raw')}catch(e){toast('State failed: '+e.message)}}
+function activate(id){$$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===id)); $$('.panel').forEach(x=>x.classList.toggle('active',x.id===id))}
+$$('.tab').forEach(btn=>btn.addEventListener('click',()=>activate(btn.dataset.tab))); $('#refresh').addEventListener('click',refresh); $('#admin-token').value=token(); $('#save-token').addEventListener('click',()=>{localStorage.setItem('ava_admin_token',$('#admin-token').value.trim());toast('Token saved locally');refresh()});
+$('#firmware-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/ota/firmware',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Firmware published');e.target.reset();await refresh()}catch(err){toast('Publish failed: '+err.message)}});
+$('#invoke-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);let body={};try{body=fd.get('body')?JSON.parse(fd.get('body')):{}}catch(err){toast('Body JSON invalid');return}try{const result=await api(`/admin/developer/services/${encodeURIComponent(fd.get('service_id'))}/invoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:fd.get('path'),method:fd.get('method'),body})});$('#invoke-result').textContent=JSON.stringify(result,null,2);toast('Service invoked')}catch(err){$('#invoke-result').textContent=err.message;toast('Invoke failed: '+err.message)}});
+$('#events-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const qs=new URLSearchParams();['device_id','event','limit'].forEach(k=>{if(fd.get(k))qs.set(k,fd.get(k))});try{$('#events-log').innerHTML=renderEvents((await api('/admin/events?'+qs)).items||[])}catch(err){toast('Event filter failed: '+err.message)}});
 refresh();
 </script>
-</main>
 """
 
 
