@@ -258,6 +258,7 @@ def run_http_gateway(
         adapter=adapter,
         mock=mock,
         skill_store_path=skill_store_path,
+        queue_outbound=True,
     )
     factory = session_factory or (lambda: manager.get("default"))
     server = ThreadingHTTPServer((host, port), make_handler(factory, runtime_settings, manager=manager))

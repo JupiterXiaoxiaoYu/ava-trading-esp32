@@ -47,9 +47,11 @@ class LegacyFirmwareConnection:
         self.audio = audio or AudioInputBuffer()
         self.market_runtime: MarketStreamRuntime | None = None
         self._market_task: asyncio.Task | None = None
+        self._outbound_task: asyncio.Task | None = None
 
     async def open(self, ws: Any) -> None:
         self._start_market_stream(ws)
+        self._start_outbound_queue(ws)
         try:
             async for raw in ws:
                 if isinstance(raw, bytes):
@@ -60,6 +62,8 @@ class LegacyFirmwareConnection:
         finally:
             if self._market_task:
                 self._market_task.cancel()
+            if self._outbound_task:
+                self._outbound_task.cancel()
 
     async def handle_raw(self, raw: str) -> list[dict[str, Any]]:
         return await self._handle_text(raw, allow_async_asr=True)
@@ -222,6 +226,21 @@ class LegacyFirmwareConnection:
                 pair = str(data.get("main_pair_id") or "")
                 if pair:
                     self.market_runtime.subscribe(StreamSubscription("kline", [pair], interval=_to_wss_kline_interval(str(data.get("interval") or "60")), chain=chain))
+
+    def _start_outbound_queue(self, ws: Any) -> None:
+        if not self.manager:
+            return
+
+        async def poll() -> None:
+            while True:
+                await asyncio.sleep(0.5)
+                self.manager.state(self.device_id)
+                self.session = self.manager.get(self.device_id)
+                for payload in self.manager.pop_queued_outbound(self.device_id):
+                    await ws.send(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                    self._sync_market_subscriptions([payload])
+
+        self._outbound_task = asyncio.create_task(poll(), name="ava_devicekit_outbound_queue")
 
     def _handle_device_message(self, message: dict[str, Any]) -> dict[str, Any]:
         if not self.manager:

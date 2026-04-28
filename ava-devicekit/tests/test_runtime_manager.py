@@ -71,3 +71,18 @@ def test_runtime_manager_refreshes_external_state_changes(tmp_path):
     second.handle("device-a", {"type": "key_action", "action": "back"})
 
     assert first.state("device-a")["screen"] == "feed"
+
+
+def test_runtime_manager_queues_cross_process_outbound_payloads(tmp_path):
+    state_store = tmp_path / "runtime-state"
+    http_side = RuntimeManager.for_app(mock=True, state_store_path=state_store, queue_outbound=True)
+    ws_side = RuntimeManager.for_app(mock=True, state_store_path=state_store)
+
+    http_side.boot("device-a")
+    reply = http_side.handle("device-a", {"type": "key_action", "action": "watch"})
+    assert reply["screen"] == "spotlight"
+
+    queued = ws_side.pop_queued_outbound("device-a")
+    assert [item["screen"] for item in queued] == ["spotlight"]
+    assert ws_side.pop_queued_outbound("device-a") == []
+    assert ws_side.state("device-a")["screen"] == "spotlight"

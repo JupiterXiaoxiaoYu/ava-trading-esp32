@@ -35,10 +35,12 @@ class RuntimeManager:
         *,
         max_events: int = 1000,
         state_store_path: str | Path | None = None,
+        queue_outbound: bool = False,
     ):
         self.session_builder = session_builder or (lambda device_id: create_device_session(mock=True))
         self.max_events = max_events
         self.state_store_path = str(state_store_path) if state_store_path else None
+        self.queue_outbound = queue_outbound
         self.sessions: dict[str, DeviceSession] = {}
         self.events: list[RuntimeEvent] = []
         self._restored_boot_payloads: dict[str, dict[str, Any]] = {}
@@ -56,6 +58,7 @@ class RuntimeManager:
         state_store_path: str | Path | None = None,
         skill_config: AvaBoxSkillConfig | None = None,
         adapter_options: dict[str, Any] | None = None,
+        queue_outbound: bool = False,
     ) -> "RuntimeManager":
         def build(device_id: str) -> DeviceSession:
             store = _skill_store_path(skill_store_path, device_id)
@@ -84,7 +87,7 @@ class RuntimeManager:
                 adapter_options=adapter_options,
             )
 
-        return cls(build, state_store_path=state_store_path)
+        return cls(build, state_store_path=state_store_path, queue_outbound=queue_outbound)
 
     def get(self, device_id: str = "default") -> DeviceSession:
         device_id = normalize_device_id(device_id)
@@ -115,6 +118,8 @@ class RuntimeManager:
         self._refresh_external_state(device_id, session)
         payload = session.handle(message)
         self._persist_session_state(device_id, session)
+        if self.queue_outbound:
+            self._append_outbound_payload(device_id, payload)
         self.record(device_id, "message", {"message_type": message.get("type"), "screen": payload.get("screen")})
         return payload
 
@@ -137,6 +142,22 @@ class RuntimeManager:
     def persist(self, device_id: str = "default") -> None:
         device_id = normalize_device_id(device_id)
         self._persist_session_state(device_id, self.get(device_id))
+
+    def pop_queued_outbound(self, device_id: str = "default") -> list[dict[str, Any]]:
+        path = _device_outbox_path(self.state_store_path, device_id)
+        if not path:
+            return []
+        drained: list[dict[str, Any]] = []
+
+        def drain(state: dict[str, Any]) -> dict[str, Any]:
+            items = state.get("items") if isinstance(state.get("items"), list) else []
+            drained.extend(item for item in items if isinstance(item, dict))
+            state["items"] = []
+            state["updated_at"] = time.time()
+            return state
+
+        JsonStore(path).update({"items": []}, drain)
+        return drained
 
     def record(self, device_id: str, event: str, payload: dict[str, Any] | None = None) -> None:
         self.events.append(RuntimeEvent(time.time(), normalize_device_id(device_id), event, payload or {}))
@@ -169,6 +190,20 @@ class RuntimeManager:
         target = Path(path)
         JsonStore(target).write(state)
         self._state_mtimes[normalize_device_id(device_id)] = _path_mtime(target)
+
+    def _append_outbound_payload(self, device_id: str, payload: dict[str, Any]) -> None:
+        path = _device_outbox_path(self.state_store_path, device_id)
+        if not path:
+            return
+
+        def append(state: dict[str, Any]) -> dict[str, Any]:
+            items = state.get("items") if isinstance(state.get("items"), list) else []
+            items.append(payload)
+            state["items"] = items[-100:]
+            state["updated_at"] = time.time()
+            return state
+
+        JsonStore(path).update({"items": []}, append)
 
     def _restore_session_state(self, device_id: str, session: DeviceSession) -> dict[str, Any] | None:
         path = _device_store_path(self.state_store_path, device_id)
@@ -223,6 +258,13 @@ def _skill_store_path(base: str | Path | None, device_id: str) -> str | None:
     return str(path / f"{normalize_device_id(device_id)}.json")
 
 
+def _device_outbox_path(base: str | Path | None, device_id: str) -> str | None:
+    path = _device_store_path(base, device_id)
+    if not path:
+        return None
+    return f"{path}.outbox"
+
+
 def _last_screen_to_dict(screen: Any) -> dict[str, Any] | None:
     if not isinstance(screen, ScreenPayload):
         return None
@@ -258,6 +300,7 @@ def runtime_manager_for_settings(
     adapter: str = "auto",
     mock: bool = False,
     skill_store_path: str | None = None,
+    queue_outbound: bool = False,
 ) -> RuntimeManager:
     adapter_name = settings.chain_adapter if adapter.strip().lower() in {"", "auto"} and settings.chain_adapter else adapter
     return RuntimeManager.for_app(
@@ -269,4 +312,5 @@ def runtime_manager_for_settings(
         state_store_path=settings.runtime_state_dir,
         adapter_options={**settings.chain_adapter_options, **({"class": settings.chain_adapter_class} if settings.chain_adapter_class else {})},
         skill_config=settings.ava_box_skill_config(store_path=skill_store_path),
+        queue_outbound=queue_outbound,
     )
