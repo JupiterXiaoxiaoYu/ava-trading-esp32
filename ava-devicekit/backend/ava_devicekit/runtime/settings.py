@@ -13,6 +13,7 @@ DEFAULT_HTTP_PORT = 8788
 DEFAULT_WEBSOCKET_PORT = 8787
 DEFAULT_FIRMWARE_BIN_DIR = "data/bin"
 DEFAULT_RUNTIME_STATE_DIR = "data/device_runtime_state"
+DEFAULT_CONTROL_PLANE_STORE_PATH = "data/devicekit_control_plane/control_plane.json"
 DEFAULT_TIMEZONE_OFFSET_HOURS = 8
 DEFAULT_WEBSOCKET_PING_INTERVAL = 30
 DEFAULT_WEBSOCKET_PING_TIMEOUT = 10
@@ -33,6 +34,7 @@ class RuntimeSettings:
     websocket_url: str = ""
     firmware_bin_dir: str = DEFAULT_FIRMWARE_BIN_DIR
     runtime_state_dir: str = DEFAULT_RUNTIME_STATE_DIR
+    control_plane_store_path: str = DEFAULT_CONTROL_PLANE_STORE_PATH
     admin_token_env: str = "AVA_DEVICEKIT_ADMIN_TOKEN"
     device_token_env: str = "AVA_DEVICEKIT_DEVICE_TOKEN"
     timezone_offset_hours: int = DEFAULT_TIMEZONE_OFFSET_HOURS
@@ -91,6 +93,7 @@ class RuntimeSettings:
         llm = providers.get("llm") if isinstance(providers.get("llm"), dict) else {}
         tts = providers.get("tts") if isinstance(providers.get("tts"), dict) else {}
         execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
+        control_plane = data.get("control_plane") if isinstance(data.get("control_plane"), dict) else {}
         services = data.get("services") if isinstance(data.get("services"), list) else []
         return cls(
             host=str(data.get("host") or server.get("ip") or DEFAULT_HOST),
@@ -100,6 +103,7 @@ class RuntimeSettings:
             websocket_url=str(data.get("websocket_url") or server.get("websocket") or ""),
             firmware_bin_dir=str(data.get("firmware_bin_dir") or server.get("firmware_bin_dir") or DEFAULT_FIRMWARE_BIN_DIR),
             runtime_state_dir=str(data.get("runtime_state_dir") or server.get("runtime_state_dir") or DEFAULT_RUNTIME_STATE_DIR),
+            control_plane_store_path=str(data.get("control_plane_store_path") or control_plane.get("store_path") or server.get("control_plane_store_path") or DEFAULT_CONTROL_PLANE_STORE_PATH),
             admin_token_env=str(data.get("admin_token_env") or server.get("admin_token_env") or "AVA_DEVICEKIT_ADMIN_TOKEN"),
             device_token_env=str(data.get("device_token_env") or server.get("device_token_env") or "AVA_DEVICEKIT_DEVICE_TOKEN"),
             timezone_offset_hours=int(data.get("timezone_offset_hours") or server.get("timezone_offset") or DEFAULT_TIMEZONE_OFFSET_HOURS),
@@ -174,6 +178,7 @@ class RuntimeSettings:
             "websocket_url": self.websocket_url,
             "firmware_bin_dir": self.firmware_bin_dir,
             "runtime_state_dir": self.runtime_state_dir,
+            "control_plane_store_path": self.control_plane_store_path,
             "admin_token_env": self.admin_token_env,
             "device_token_env": self.device_token_env,
             "websocket_ping_interval": self.websocket_ping_interval,

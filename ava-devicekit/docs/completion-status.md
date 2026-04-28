@@ -25,7 +25,9 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Explicit ACK protocol | Framework + firmware port contract | Complete at protocol/template boundary | Backend supports ACK; board template extracts `message_id` and ACKs after render/command acceptance. Existing Ava Box remains compatible through legacy auto-ack. |
 | Device protocol spec | Framework docs | Complete | `docs/device-protocol.md` defines all current JSON and binary protocol frames. |
 | Security hardening | Framework deploy policy | Complete | `production_mode` enforces configured admin/device bearer tokens; docs define allowlist and credential boundaries. |
-| Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is a lightweight developer console with Overview, Devices, Firmware, Providers, Services, Events, and Raw tabs. |
+| Cloud control plane UI | Framework admin UI | Complete first pass | `/admin` is a lightweight developer console with Overview, Control Plane, Runtime Devices, Firmware, Providers, Services, Events, and Raw tabs. |
+| Users/projects/devices registry | Framework control plane | Complete MVP | Local JSON-backed control plane bootstraps users/projects, provisions devices, exchanges one-time registration tokens, and validates per-device bearer tokens. |
+| Solana AI DePIN app template | Framework reference template | Complete MVP | `examples/apps/solana_ai_depin_device` and `ava-devicekit init-app --type depin` provide a hardware-app template for device identity, heartbeat, proof drafts, and physical confirmation. |
 | CLI/package | Framework | Complete first release | `ava-devicekit` CLI supports capabilities, validate, init-app, init-board, init-adapter, init-provider, firmware publish/list, run-http, run-legacy-ws, and run-server. |
 | CI | Repo infra | Complete first pass | GitHub Actions workflow compiles, tests, and validates runtime config. |
 
@@ -37,4 +39,5 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Wallet custody | Ava Box uses server-managed proxy/custodial wallets for default real execution. ESP32 confirms intents only; API credentials stay server-side. |
 | App-specific UI | Product pages belong to `reference_apps/ava_box/ui`, not framework core. |
 | Multi-device sessions | Runtime state is keyed by `X-Ava-Device-Id` or message `device_id`; each device gets an independent app session and event log. |
+| Device registration | Production deployments should provision devices through the control plane and store the returned device token on the device. The global device token remains only for compatibility and lab deployments. |
 | Chain-specific trading | AVE/Solana trade execution belongs to Ava Box app skills, not `ChainAdapter`. |

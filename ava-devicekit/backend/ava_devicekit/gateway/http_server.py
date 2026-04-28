@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
+from ava_devicekit.control_plane import ControlPlaneStore
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
@@ -33,6 +34,7 @@ def make_handler(
     settings = runtime_settings or RuntimeSettings.load()
     session_factory = session_factory or (lambda: create_device_session(mock=True))
     manager = manager or RuntimeManager(lambda device_id: session_factory())
+    control_plane = ControlPlaneStore(settings.control_plane_store_path)
 
     class DeviceKitHandler(BaseHTTPRequestHandler):
         server_version = "AvaDeviceKitHTTP/0.1"
@@ -82,6 +84,29 @@ def make_handler(
                 if not self._authorized_admin():
                     return
                 self._send_json({"items": manager.list_devices(), "count": len(manager.sessions)})
+                return
+            if path == "/admin/control-plane":
+                if not self._authorized_admin():
+                    return
+                self._send_json(control_plane.snapshot())
+                return
+            if path == "/admin/users":
+                if not self._authorized_admin():
+                    return
+                snapshot = control_plane.snapshot()
+                self._send_json({"ok": True, "items": snapshot["users"], "count": len(snapshot["users"])})
+                return
+            if path == "/admin/projects":
+                if not self._authorized_admin():
+                    return
+                snapshot = control_plane.snapshot()
+                self._send_json({"ok": True, "items": snapshot["projects"], "count": len(snapshot["projects"])})
+                return
+            if path == "/admin/registered-devices":
+                if not self._authorized_admin():
+                    return
+                snapshot = control_plane.snapshot()
+                self._send_json({"ok": True, "items": snapshot["devices"], "count": len(snapshot["devices"])})
                 return
             if path == "/admin/events":
                 if not self._authorized_admin():
@@ -154,9 +179,16 @@ def make_handler(
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             path = urlparse(self.path).path
+            if path == "/device/register":
+                try:
+                    self._send_json(control_plane.register_device(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/device/boot":
                 if not self._authorized_device():
                     return
+                control_plane.mark_device_seen(self._device_id())
                 self._send_json(manager.boot(self._device_id()))
                 return
             if path == "/device/message":
@@ -164,8 +196,42 @@ def make_handler(
                     return
                 try:
                     body = self._read_json()
+                    control_plane.mark_device_seen(self._device_id(), firmware_version=str(body.get("firmware_version") or ""))
                     self._send_json(manager.handle(self._device_id(), body))
                 except Exception as exc:  # pragma: no cover - defensive server boundary
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/users":
+                if not self._authorized_admin():
+                    return
+                try:
+                    self._send_json(control_plane.create_user(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/projects":
+                if not self._authorized_admin():
+                    return
+                try:
+                    self._send_json(control_plane.create_project(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/devices/register":
+                if not self._authorized_admin():
+                    return
+                try:
+                    self._send_json(control_plane.provision_device(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/provision-token"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(control_plane.rotate_provisioning_token(device_id))
+                except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
             if path.startswith("/admin/devices/") and path.endswith("/boot"):
@@ -254,7 +320,20 @@ def make_handler(
             return self._authorized(settings.admin_token_env)
 
         def _authorized_device(self) -> bool:
-            return self._authorized(settings.device_token_env)
+            expected = os.environ.get(settings.device_token_env, "")
+            supplied = self.headers.get("Authorization", "")
+            token = supplied.removeprefix("Bearer ").strip()
+            if expected and token == expected:
+                return True
+            if control_plane.validate_device_token(self._device_id(), token):
+                return True
+            if not expected and not settings.production_mode:
+                return True
+            if expected:
+                self._send_json({"ok": False, "error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+            else:
+                self._send_json({"ok": False, "error": "token_required", "token_env": settings.device_token_env}, HTTPStatus.UNAUTHORIZED)
+            return False
 
         def _authorized(self, token_env: str) -> bool:
             expected = os.environ.get(token_env, "")
@@ -308,9 +387,11 @@ def _dashboard_payload(
     provider_health: Callable[[], dict[str, Any]] | None,
 ) -> dict[str, Any]:
     providers = provider_health() if provider_health else provider_health_report(settings)
+    control_plane = ControlPlaneStore(settings.control_plane_store_path).snapshot()
     return {
         "ok": True,
         "runtime": settings.sanitized_dict(),
+        "control_plane": control_plane,
         "providers": providers,
         "developer_services": developer_service_report(settings.developer_services),
         "firmware": firmware_catalog(settings),
@@ -354,10 +435,11 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.shell{width:min
     </div>
   </section>
   <nav class="toolbar" aria-label="Admin sections">
-    <button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="devices">Devices</button><button class="tab" data-tab="firmware">Firmware</button><button class="tab" data-tab="providers">Providers</button><button class="tab" data-tab="services">Services</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="raw">Raw</button>
+    <button class="tab active" data-tab="overview">Overview</button><button class="tab" data-tab="control">Control Plane</button><button class="tab" data-tab="devices">Runtime Devices</button><button class="tab" data-tab="firmware">Firmware</button><button class="tab" data-tab="providers">Providers</button><button class="tab" data-tab="services">Services</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="raw">Raw</button>
     <span class="spacer"></span><input id="admin-token" class="token" placeholder="Admin bearer token"><button class="btn alt" id="save-token">Save token</button><button class="btn" id="refresh">Refresh</button>
   </nav>
   <section id="overview" class="panel active"><div class="grid"><div class="card wide"><h2>Runtime posture</h2><div id="overview-body" class="stack"></div></div><div class="card"><h3>Recent events</h3><div id="overview-events" class="log"></div></div><div class="card"><h3>Quick actions</h3><div class="stack"><a class="btn alt" href="/admin/runtime">Runtime JSON</a><a class="btn alt" href="/admin/capabilities">Capabilities</a><a class="btn alt" href="/manifest">Manifest</a></div><p class="sub">Use the tabs for device OTA checks, firmware publishing, service invoke tests, and event filtering.</p></div></div></section>
+  <section id="control" class="panel"><div class="grid"><div class="card wide"><h2>Users, projects, provisioned devices</h2><p class="sub">Self-hosted registry for operators, projects, and per-device credentials. Devices register once with a provisioning token, then use their own bearer token.</p><div id="control-summary" class="stack"></div></div><div class="card"><h3>Create user</h3><form id="user-form" class="form"><div class="field"><label>Username</label><input name="username" placeholder="alice" required></div><div class="field"><label>Display name</label><input name="display_name" placeholder="Alice"></div><div class="field"><label>Role</label><select name="role"><option>developer</option><option>operator</option><option>viewer</option><option>admin</option></select></div><button class="btn" type="submit">Create</button></form></div><div class="card"><h3>Create project</h3><form id="project-form" class="form"><div class="field"><label>Name</label><input name="name" placeholder="Solana device app" required></div><div class="field"><label>Chain</label><input name="chain" value="solana"></div><div class="field"><label>Owner user id</label><input name="owner_user_id" placeholder="usr_default_admin"></div><button class="btn" type="submit">Create</button></form></div><div class="card wide"><h3>Provision device</h3><form id="device-form" class="form"><div class="field"><label>Device id</label><input name="device_id" placeholder="ava-box-001" required></div><div class="field"><label>Name</label><input name="name" placeholder="Ava Box 001"></div><div class="field"><label>Project id</label><input name="project_id" placeholder="prj_default_solana"></div><div class="field"><label>Board model</label><input name="board_model" placeholder="esp32s3"></div><div class="field"><label>App id</label><input name="app_id" value="ava_box"></div><button class="btn warn" type="submit">Provision</button></form><pre id="provision-result" class="raw">Provisioning tokens are shown once here.</pre></div><div class="card wide"><h3>Registered devices</h3><div id="registered-devices-table"></div></div></div></section>
   <section id="devices" class="panel"><div class="card wide"><h2>Devices</h2><div id="devices-table"></div></div></section>
   <section id="firmware" class="panel"><div class="grid"><div class="card"><h2>Publish firmware</h2><form id="firmware-form" class="form"><div class="field"><label>Model</label><input name="model" placeholder="scratch-arcade" required></div><div class="field"><label>Version</label><input name="version" placeholder="1.4.0" required></div><div class="field" style="grid-column:span 2"><label>Server source path</label><input name="source_path" placeholder="/path/to/build.bin" required></div><button class="btn warn" type="submit">Publish</button></form><p class="sub">This copies an existing server-side .bin into the configured OTA directory.</p></div><div class="card"><h2>Firmware catalog</h2><div id="firmware-table"></div></div></div></section>
   <section id="providers" class="panel"><div class="card wide"><h2>AI and chain providers</h2><div id="providers-table"></div></div></section>
@@ -374,9 +456,11 @@ async function api(path, opts={}){const res=await fetch(path,{...opts,headers:he
 function pill(ok,text){return `<span class="pill ${ok?'ok':'bad'}">${escapeHtml(text)}</span>`} function info(text){return `<span class="pill info">${escapeHtml(text)}</span>`}
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function table(cols, rows, empty='No data yet.'){if(!rows||!rows.length)return `<div class="empty">${empty}</div>`;return `<table><thead><tr>${cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(c=>`<td>${c.render?c.render(row):escapeHtml(row[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
-function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?.items||[], fw=d.firmware?.items||[], providers=d.providers?.items||[], services=d.developer_services?.items||[], events=d.events?.items||[]; const online=devices.filter(x=>x.connection&&x.connection.connected).length; $('#m-devices').textContent=devices.length; $('#m-online').textContent=online; $('#m-firmware').textContent=fw.length; $('#m-providers').textContent=d.providers?.ok?'yes':'check'; $('#raw-json').textContent=JSON.stringify(d,null,2);
- $('#overview-body').innerHTML=[pill(d.providers?.ok,'providers '+(d.providers?.ok?'healthy':'need config')),pill(d.developer_services?.ok,'services '+(d.developer_services?.ok?'ready':'need env')),info('runtime '+(d.runtime?.production_mode?'production':'development')),info('ws '+(d.runtime?.websocket_port||'-')),info('http '+(d.runtime?.http_port||'-'))].join(' ');
+function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?.items||[], fw=d.firmware?.items||[], providers=d.providers?.items||[], services=d.developer_services?.items||[], events=d.events?.items||[], cp=d.control_plane||{}; const online=devices.filter(x=>x.connection&&x.connection.connected).length; $('#m-devices').textContent=cp.counts?.provisioned_devices??devices.length; $('#m-online').textContent=online; $('#m-firmware').textContent=fw.length; $('#m-providers').textContent=d.providers?.ok?'yes':'check'; $('#raw-json').textContent=JSON.stringify(d,null,2);
+ $('#overview-body').innerHTML=[pill(d.providers?.ok,'providers '+(d.providers?.ok?'healthy':'need config')),pill(d.developer_services?.ok,'services '+(d.developer_services?.ok?'ready':'need env')),info('users '+(cp.counts?.users??0)),info('projects '+(cp.counts?.projects??0)),info('runtime '+(d.runtime?.production_mode?'production':'development')),info('ws '+(d.runtime?.websocket_port||'-')),info('http '+(d.runtime?.http_port||'-'))].join(' ');
+ $('#control-summary').innerHTML=[info('users '+(cp.counts?.users??0)),info('projects '+(cp.counts?.projects??0)),info('provisioned '+(cp.counts?.provisioned_devices??0)),info('registered '+(cp.counts?.registered_devices??0))].join(' ');
  $('#overview-events').innerHTML=renderEvents(events.slice(-8)); $('#events-log').innerHTML=renderEvents(events);
+ $('#registered-devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Project',render:r=>`<span class="mono">${escapeHtml(r.project_id)}</span>`},{label:'Owner',render:r=>`<span class="mono">${escapeHtml(r.owner_user_id)}</span>`},{label:'Board',key:'board_model'},{label:'App',key:'app_id'},{label:'Status',render:r=>info(r.status||'-')},{label:'Action',render:r=>`<button class="btn alt" onclick="rotateProvision('${escapeHtml(r.device_id)}')">New provisioning token</button>`}],cp.devices||[],'No provisioned devices yet.');
  $('#devices-table').innerHTML=table([{label:'Device',render:r=>`<span class="mono">${escapeHtml(r.device_id)}</span>`},{label:'Status',render:r=>pill(!!(r.connection&&r.connection.connected),r.connection&&r.connection.connected?'online':'offline')},{label:'App',render:r=>escapeHtml(r.app_name||r.app_id||'-')},{label:'Screen',render:r=>info(r.screen||'-')},{label:'Last seen',render:r=>escapeHtml(r.connection?.last_seen?new Date(r.connection.last_seen*1000).toLocaleString():'-')},{label:'Action',render:r=>`<button class="btn warn" onclick="otaCheck('${escapeHtml(r.device_id)}')">OTA check</button> <button class="btn alt" onclick="viewDevice('${escapeHtml(r.device_id)}')">State</button>`}],devices,'No devices have connected yet.');
  $('#firmware-table').innerHTML=table([{label:'Model',key:'model'},{label:'Version',render:r=>info(r.version)},{label:'File',render:r=>`<span class="mono">${escapeHtml(r.filename)}</span>`},{label:'Size',render:r=>escapeHtml(r.size||0)}],fw,'No firmware binaries published.');
  $('#providers-table').innerHTML=table([{label:'Kind',key:'kind'},{label:'Provider',key:'provider'},{label:'Status',render:r=>pill(r.configured,r.status)},{label:'Model',key:'model'},{label:'Env',render:r=>`<span class="mono">${escapeHtml(r.api_key_env||'-')}</span>`}],providers,'No providers reported.');
@@ -384,10 +468,14 @@ function render(){const d=state.dashboard;if(!d)return; const devices=d.devices?
 function renderEvents(events){if(!events||!events.length)return '<div class="empty">No events yet.</div>';return events.map(e=>`<div class="event"><div>${new Date((e.ts||0)*1000).toLocaleTimeString()}</div><div><span class="mono">${escapeHtml(e.event)}</span><br><span class="sub">${escapeHtml(e.device_id)}</span></div><div class="mono">${escapeHtml(JSON.stringify(e.payload||{}))}</div></div>`).join('')}
 async function refresh(){try{state.dashboard=await api('/admin/dashboard.json'); render(); toast('Dashboard refreshed')}catch(e){toast('Refresh failed: '+e.message)}}
 async function otaCheck(id){try{await api(`/admin/devices/${encodeURIComponent(id)}/ota-check`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('OTA check queued for '+id); await refresh()}catch(e){toast('OTA check failed: '+e.message)}}
+async function rotateProvision(id){try{const result=await api(`/admin/devices/${encodeURIComponent(id)}/provision-token`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});$('#provision-result').textContent=JSON.stringify(result,null,2);toast('Provisioning token rotated');await refresh()}catch(e){toast('Token rotation failed: '+e.message)}}
 async function viewDevice(id){try{const body=await api(`/admin/devices/${encodeURIComponent(id)}/state`); $('#raw-json').textContent=JSON.stringify(body,null,2); activate('raw')}catch(e){toast('State failed: '+e.message)}}
 function activate(id){$$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===id)); $$('.panel').forEach(x=>x.classList.toggle('active',x.id===id))}
 $$('.tab').forEach(btn=>btn.addEventListener('click',()=>activate(btn.dataset.tab))); $('#refresh').addEventListener('click',refresh); $('#admin-token').value=token(); $('#save-token').addEventListener('click',()=>{localStorage.setItem('ava_admin_token',$('#admin-token').value.trim());toast('Token saved locally');refresh()});
 $('#firmware-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/ota/firmware',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Firmware published');e.target.reset();await refresh()}catch(err){toast('Publish failed: '+err.message)}});
+$('#user-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('User created');e.target.reset();await refresh()}catch(err){toast('Create user failed: '+err.message)}});
+$('#project-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api('/admin/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(fd))});toast('Project created');e.target.reset();await refresh()}catch(err){toast('Create project failed: '+err.message)}});
+$('#device-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const body=Object.fromEntries(fd);Object.keys(body).forEach(k=>{if(body[k]==='')delete body[k]});try{const result=await api('/admin/devices/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('#provision-result').textContent=JSON.stringify(result,null,2);toast('Device provisioned');await refresh()}catch(err){toast('Provision failed: '+err.message)}});
 $('#invoke-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);let body={};try{body=fd.get('body')?JSON.parse(fd.get('body')):{}}catch(err){toast('Body JSON invalid');return}try{const result=await api(`/admin/developer/services/${encodeURIComponent(fd.get('service_id'))}/invoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:fd.get('path'),method:fd.get('method'),body})});$('#invoke-result').textContent=JSON.stringify(result,null,2);toast('Service invoked')}catch(err){$('#invoke-result').textContent=err.message;toast('Invoke failed: '+err.message)}});
 $('#events-form').addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);const qs=new URLSearchParams();['device_id','event','limit'].forEach(k=>{if(fd.get(k))qs.set(k,fd.get(k))});try{$('#events-log').innerHTML=renderEvents((await api('/admin/events?'+qs)).items||[])}catch(err){toast('Event filter failed: '+err.message)}});
 refresh();

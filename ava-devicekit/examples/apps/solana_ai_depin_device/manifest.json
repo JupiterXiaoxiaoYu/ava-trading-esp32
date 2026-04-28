@@ -1,0 +1,54 @@
+{
+  "app_id": "solana_ai_depin_device",
+  "name": "Solana AI DePIN Device",
+  "description": "Reference DeviceKit app for ESP32 devices that register identity, send heartbeat/proof context, and confirm Solana actions through a backend gateway.",
+  "chain": "solana",
+  "device": {
+    "target": "esp32",
+    "display": "any",
+    "inputs": ["button", "touch", "microphone", "sensor"],
+    "outputs": ["display", "speaker"],
+    "custody_role": "physical_confirmation_surface"
+  },
+  "adapters": {
+    "chain": "solana",
+    "model": "deployment-configured",
+    "transport": "websocket_or_http",
+    "control_plane": "devicekit"
+  },
+  "models": {
+    "asr": "deployment-configured",
+    "llm": "deployment-configured",
+    "tts": "deployment-configured"
+  },
+  "screens": ["device_home", "proof_detail", "confirm", "result", "notify"],
+  "actions": [
+    "device.register",
+    "device.heartbeat",
+    "proof.submit",
+    "action.confirm",
+    "action.cancel"
+  ],
+  "safety": {
+    "custody_mode": "device_identity_key_not_user_asset_key",
+    "primary_asset_keys_on_esp32": false,
+    "requires_physical_confirmation": ["device.register", "proof.submit"],
+    "signing_boundary": "backend_or_external_wallet"
+  },
+  "screen_contracts": [
+    {
+      "screen_id": "device_home",
+      "description": "Device identity, project, heartbeat, and current operating status.",
+      "payload_schema": {"type": "object", "required": ["device_id", "project", "status"]},
+      "context_schema": {"type": "object", "required": ["screen", "page_data"], "properties": {"selected": {"type": "object"}, "device_id": {"type": "string"}}},
+      "actions": ["device.heartbeat", "proof.submit"]
+    },
+    {
+      "screen_id": "proof_detail",
+      "description": "Shows the DePIN proof payload before a user physically approves submission.",
+      "payload_schema": {"type": "object", "required": ["proof_type", "summary", "risk"]},
+      "context_schema": {"type": "object", "required": ["screen", "selected"]},
+      "actions": ["action.confirm", "action.cancel"]
+    }
+  ]
+}

@@ -26,6 +26,17 @@ def test_cli_init_app_type_creates_reference_template(tmp_path, capsys):
     assert (target / "tests" / "test_manifest.py").exists()
 
 
+def test_cli_init_app_depin_template(tmp_path, capsys):
+    target = tmp_path / "depin"
+    main(["init-app", str(target), "--type", "depin"])
+    body = json.loads(capsys.readouterr().out)
+    assert body["ok"] is True
+    assert body["type"] == "depin"
+    manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["app_id"] == "solana_ai_depin_device"
+    assert "proof.submit" in manifest["actions"]
+
+
 def test_cli_validate_outputs_sanitized_runtime(tmp_path, capsys):
     cfg = tmp_path / "runtime.json"
     cfg.write_text('{"admin_token_env":"ADMIN_TOKEN","providers":{"tts":{"provider":"mock","options":{"api_secret":"hidden"}}}}', encoding="utf-8")

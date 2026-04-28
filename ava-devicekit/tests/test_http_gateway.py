@@ -71,11 +71,12 @@ def test_http_gateway_mock_flow():
         thread.join(timeout=5)
 
 
-def test_http_gateway_admin_endpoints():
+def test_http_gateway_admin_endpoints(tmp_path):
     def factory() -> DeviceSession:
         return create_device_session(mock=True)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(factory))
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(factory, settings))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base_url = f"http://127.0.0.1:{server.server_port}"
@@ -86,7 +87,12 @@ def test_http_gateway_admin_endpoints():
         assert "id=\"firmware-form\"" in html
         assert "id=\"invoke-form\"" in html
         assert "data-tab=\"devices\"" in html
+        assert "data-tab=\"control\"" in html
         assert "providers" in _get(base_url, "/admin/runtime")
+        assert _get(base_url, "/admin/control-plane")["counts"]["projects"] >= 1
+        assert _get(base_url, "/admin/users")["count"] >= 1
+        assert _get(base_url, "/admin/projects")["count"] >= 1
+        assert "items" in _get(base_url, "/admin/registered-devices")
         assert _get(base_url, "/admin/providers/health")["count"] >= 3
         assert _get(base_url, "/admin/developer/services")["count"] == 0
         assert "items" in _get(base_url, "/admin/ota/firmware")
@@ -235,6 +241,42 @@ def test_http_gateway_admin_auth_and_multi_device(monkeypatch):
         status, body = _get_status(base_url, "/admin/devices", {"Authorization": "Bearer admin-secret"})
         assert status == 200
         assert body["count"] == 2
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_control_plane_registration_and_per_device_auth(tmp_path, monkeypatch):
+    monkeypatch.delenv("AVA_DEVICEKIT_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("AVA_DEVICEKIT_DEVICE_TOKEN", raising=False)
+    settings = RuntimeSettings(production_mode=True, control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        status, body = _post_status(base_url, "/admin/devices/register", {"device_id": "ava-box-002", "app_id": "ava_box"})
+        assert status == 401
+        assert body["error"] == "token_required"
+
+        # Production mode allows self-hosted admin access when the admin bearer env is configured.
+        monkeypatch.setenv("AVA_DEVICEKIT_ADMIN_TOKEN", "admin-secret")
+        status, body = _post_status(base_url, "/admin/devices/register", {"device_id": "ava-box-002", "app_id": "ava_box"}, {"Authorization": "Bearer admin-secret"})
+        assert status == 200
+        provisioning_token = body["provisioning_token"]
+
+        registered = _post(base_url, "/device/register", {"provisioning_token": provisioning_token, "device_id": "ava-box-002"})
+        assert registered["device_token"].startswith("avadev_")
+
+        status, body = _get_status(base_url, "/device/state", {"X-Ava-Device-Id": "ava-box-002"})
+        assert status == 401
+        status, body = _get_status(base_url, "/device/state", {"X-Ava-Device-Id": "ava-box-002", "Authorization": "Bearer " + registered["device_token"]})
+        assert status == 200
+        assert body["screen"] == "boot"
+
+        status, cp = _get_status(base_url, "/admin/control-plane", {"Authorization": "Bearer admin-secret"})
+        assert status == 200
+        assert cp["counts"]["registered_devices"] == 1
     finally:
         server.shutdown()
         thread.join(timeout=5)

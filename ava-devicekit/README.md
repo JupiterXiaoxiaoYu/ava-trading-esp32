@@ -28,6 +28,7 @@ Framework users should start in `userland/`, not by editing core files. That dir
 |---|---|---|
 | Deploy an existing app | `userland/runtime.example.json`, `userland/env.example` | Public URL, WS URL, ports, firmware bin dir, API keys |
 | Build a new hardware app | `userland/app/` | App manifest, app routing, app skills, screen choices |
+| Build a Solana AI DePIN device | `ava-devicekit init-app ./my-device --type depin` | Device identity, heartbeat/proof actions, physical confirmation, Solana backend boundary |
 | Add a chain or data source | `userland/adapter/chain_adapter_template.py` | `ChainAdapter` implementation and registry entry |
 | Add live market updates | `userland/adapter/market_stream_adapter_template.py` | `MarketStreamAdapter` implementation |
 | Add AI providers | `userland/provider/` | ASR, LLM, TTS provider implementations |
@@ -65,6 +66,7 @@ Ava Box can run through DeviceKit without importing the legacy assistant backend
 | Session factory | `gateway/factory.py` creates a runnable `DeviceSession` from CLI or code |
 | HTTP gateway | `gateway/http_server.py` exposes boot/message/state/outbox endpoints |
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
+| Control plane | `control_plane/store.py` manages local users, projects, provisioned devices, one-time registration, and per-device tokens |
 | legacy firmware compatibility shim | `gateway/legacy_firmware.py` accepts existing firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
 | OTA/settings runtime | `runtime/settings.py` and `ota/` emit the existing firmware OTA contract without importing legacy server code |
 | Model providers | `providers/` defines ASR, LLM, TTS, and voice fallback boundaries |
@@ -100,8 +102,15 @@ ESP32 input / voice
 | `GET` | `/admin/ota/firmware` | List versioned firmware binaries available for OTA |
 | `POST` | `/admin/ota/firmware` | Publish a `.bin` into the OTA directory by `model` and `version` |
 | `GET` | `/admin/developer/services` | Inspect backend services such as proxy wallets, market-data APIs, payment APIs, and order routers without exposing secrets |
+| `GET` | `/admin/control-plane` | Inspect local users, projects, and registered devices |
+| `GET/POST` | `/admin/users` | List or create local control-plane users |
+| `GET/POST` | `/admin/projects` | List or create projects, defaulting to Solana |
+| `GET` | `/admin/registered-devices` | List provisioned and registered devices |
+| `POST` | `/admin/devices/register` | Provision a device and return a one-time provisioning token |
+| `POST` | `/admin/devices/{device_id}/provision-token` | Rotate a device provisioning token |
 | `POST` | `/admin/devices/{device_id}/ota-check` | Queue an `ota_check` command so an online device runs its normal OTA pull flow |
 | `POST` | `/admin/developer/services/{service_id}/invoke` | Backend-only allowlisted service invocation for app/admin tooling |
+| `POST` | `/device/register` | Exchange a one-time provisioning token for a per-device bearer token |
 
 
 ## Production Components Added
@@ -114,6 +123,7 @@ ESP32 input / voice
 | Live market WSS | Ava Box reference integration | AVE data WSS frame builder/parser in `streams/ave_data_wss.py` |
 | Real trade/wallet flow | Ava Box app layer | Paper execution by default; AVE proxy/custodial wallet provider, optional self-custody transaction provider, and custom execution provider classes in `apps/ava_box_skills/execution.py` |
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/ota/firmware`, `/admin/developer/services`, optional bearer auth |
+| Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
@@ -139,6 +149,7 @@ ESP32 input / voice
 | `docs/ota-and-developer-services.md` | Pull-based firmware updates and server-side developer service registry |
 | `docs/device-protocol.md` | Firmware/backend protocol frames including explicit ACK and OTA trigger |
 | `docs/security-hardening.md` | Production mode, auth tokens, allowlists, and wallet/API safety |
+| `docs/ai-depin-cloud-prd.md` | Product requirements for the self-hosted AI DePIN control plane and Solana app template |
 
 ## Existing Firmware Compatibility
 
@@ -199,4 +210,4 @@ The production path uses `--adapter solana` or the manifest default. Offline fix
 
 ## Multi-Device Runtime
 
-HTTP device endpoints use `X-Ava-Device-Id` to keep independent sessions. Admin endpoints can inspect `/admin/devices` and `/admin/events`. Set `AVA_DEVICEKIT_ADMIN_TOKEN` and `AVA_DEVICEKIT_DEVICE_TOKEN` to enable bearer-token protection.
+HTTP device endpoints use `X-Ava-Device-Id` to keep independent sessions. Admin endpoints can inspect `/admin/devices`, `/admin/control-plane`, and `/admin/events`. Set `AVA_DEVICEKIT_ADMIN_TOKEN` for admin access. Devices can either use the compatibility-wide `AVA_DEVICEKIT_DEVICE_TOKEN` or register through `/device/register` and then use their own per-device bearer token.

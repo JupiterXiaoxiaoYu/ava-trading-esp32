@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> None:
 
     init_app = sub.add_parser("init-app", help="Create a starter hardware app directory from userland templates")
     init_app.add_argument("path")
-    init_app.add_argument("--type", choices=["starter", "payment", "alert", "sensor"], default="starter")
+    init_app.add_argument("--type", choices=["starter", "payment", "alert", "sensor", "depin"], default="starter")
     init_app.add_argument("--force", action="store_true")
 
     init_board = sub.add_parser("init-board", help="Create a starter ESP32 board port from userland templates")
@@ -128,7 +128,7 @@ def _init_app(path: Path, *, app_type: str = "starter", force: bool = False) -> 
         shutil.copy2(userland / "app" / "manifest.template.json", path / "manifest.json")
         shutil.copy2(userland / "app" / "app_template.py", path / "app.py")
     else:
-        example = _examples_root() / "apps" / {"payment": "payment_terminal", "alert": "token_alert", "sensor": "sensor_registry"}[app_type]
+        example = _examples_root() / "apps" / {"payment": "payment_terminal", "alert": "token_alert", "sensor": "sensor_registry", "depin": "solana_ai_depin_device"}[app_type]
         _copy_tree_contents(example, path)
         if not (path / "app.py").exists():
             shutil.copy2(userland / "app" / "app_template.py", path / "app.py")

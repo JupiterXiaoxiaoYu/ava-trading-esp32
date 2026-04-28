@@ -6,6 +6,7 @@
   "websocket_url": "wss://ava.example.com/ava/v1/",
   "firmware_bin_dir": "data/bin",
   "runtime_state_dir": "data/device_runtime_state",
+  "control_plane_store_path": "data/devicekit_control_plane/control_plane.json",
   "timezone_offset_hours": 8,
   "websocket_ping_interval": 30,
   "websocket_ping_timeout": 10,
