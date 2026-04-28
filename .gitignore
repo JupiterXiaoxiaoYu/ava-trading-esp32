@@ -44,6 +44,7 @@ server/data/
 data/ava_box_app_state.json
 data/*.lock
 data/device_runtime_state/
+data/devicekit_control_plane/
 ava-devicekit/data/
 
 ava-devicekit/dist/
