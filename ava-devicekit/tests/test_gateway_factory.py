@@ -203,6 +203,60 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     assert portfolio_after_sell["data"]["pnl_reason"] == "Cash: 1 SOL"
 
 
+def test_spotlight_back_restores_portfolio_source(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    token = session.boot()["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "buy", **token})
+    session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+
+    portfolio = session.handle({"type": "key_action", "action": "portfolio"})
+    holding = next(row for row in portfolio["data"]["holdings"] if row["symbol"] == "BONK")
+    spotlight = session.handle({"type": "key_action", "action": "portfolio_watch", **holding})
+    assert spotlight["screen"] == "spotlight"
+
+    interval = session.handle({"type": "key_action", "action": "kline_interval", "interval": "240"})
+    assert interval["screen"] == "spotlight"
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "portfolio"
+    assert back["data"]["holdings"][1]["symbol"] == "BONK"
+
+    spotlight = session.handle({"type": "key_action", "action": "portfolio_activity_detail", **holding})
+    assert spotlight["screen"] == "spotlight"
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "portfolio"
+
+
+def test_spotlight_back_restores_watchlist_signals_and_search_sources(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    token = session.boot()["data"]["tokens"][0]
+    session.handle({"type": "key_action", "action": "favorite", **token})
+
+    watchlist = session.handle({"type": "key_action", "action": "watchlist"})
+    assert watchlist["data"]["mode"] == "watchlist"
+    spotlight = session.handle({"type": "key_action", "action": "watch", **watchlist["data"]["tokens"][0], "cursor": 0})
+    assert spotlight["screen"] == "spotlight"
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "feed"
+    assert back["data"]["mode"] == "watchlist"
+
+    signals = session.handle({"type": "key_action", "action": "signals"})
+    assert signals["screen"] == "browse"
+    assert signals["data"]["mode"] == "signals"
+    spotlight = session.handle({"type": "key_action", "action": "watch", **signals["data"]["tokens"][0], "cursor": 0})
+    assert spotlight["screen"] == "spotlight"
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "browse"
+    assert back["data"]["mode"] == "signals"
+
+    search = session.handle({"type": "key_action", "action": "search", "keyword": "bonk"})
+    assert search["data"]["mode"] == "search"
+    spotlight = session.handle({"type": "key_action", "action": "watch", **search["data"]["tokens"][0], "cursor": 0})
+    assert spotlight["screen"] == "spotlight"
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "feed"
+    assert back["data"]["mode"] == "search"
+
+
 def test_portfolio_sell_legacy_na_position_removes_and_returns_to_portfolio(tmp_path):
     import json
 

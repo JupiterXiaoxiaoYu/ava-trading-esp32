@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ class AvaBoxApp:
     context: AppContext = field(init=False)
     last_screen: ScreenPayload | None = None
     last_draft: ActionDraft | None = None
+    spotlight_return: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self.context = AppContext(app_id=self.manifest.app_id, chain=self.manifest.chain, screen="boot")
@@ -100,7 +102,13 @@ class AvaBoxApp:
         if action == "back" and self.context.screen == "result" and self.context.state.get("return_after_result") == "portfolio":
             self.context.state.pop("return_after_result", None)
             return self._remember_screen(self.skills.get_portfolio(context=self.context))
+        if action == "back" and self.context.screen == "spotlight":
+            restored = self._restore_spotlight_return()
+            if restored:
+                return restored
         if action in {"home", "feed", "refresh", "feed_home", "back"}:
+            if action != "back":
+                self.spotlight_return = None
             return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
         if action == "confirm":
             return self._confirm(DeviceMessage(type="confirm", context=self.context))
@@ -132,6 +140,8 @@ class AvaBoxApp:
             feed = self.skills.get_watchlist(context=self.context)
             return self._remember_screen(_as_browse(feed, mode="watchlist", source_label="WATCHLIST"))
         if action in {"watch", "detail", "open", "disambiguation_select", "portfolio_watch", "portfolio_activity_detail"}:
+            self._set_cursor_from_payload(payload)
+            self._capture_spotlight_return(payload)
             token_id = str(payload.get("token_id") or self._selected_token_id())
             return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
         if action in {"kline_interval", "kline_internal"}:
@@ -203,6 +213,7 @@ class AvaBoxApp:
         self.context.cursor = next_cursor
         if self.context.selected:
             self.context.selected.cursor = next_cursor
+        self._capture_spotlight_return({"cursor": next_cursor})
         return self._remember_screen(self.chain_adapter.get_token_detail(token_id, context=self.context))
 
     def _route_voice(self, text: str) -> ScreenPayload | ActionDraft | ActionResult:
@@ -237,6 +248,7 @@ class AvaBoxApp:
             self._remember_screen(draft.screen)
             return draft
         if any(word in normalized for word in ("detail", "详情", "打开详情", "进入详情")):
+            self._capture_spotlight_return({})
             return self._remember_screen(self.chain_adapter.get_token_detail(self._selected_token_id(), context=self.context))
         return builders.notify("Ava", "Command routed to model fallback", level="info", context=self.context)
 
@@ -260,6 +272,72 @@ class AvaBoxApp:
         if result.screen:
             self._remember_screen(result.screen)
         return result
+
+    def _set_cursor_from_payload(self, payload: dict[str, Any]) -> None:
+        cursor = self._cursor_from_payload(payload)
+        if cursor is None:
+            return
+        self.context.cursor = cursor
+        if self.context.selected:
+            self.context.selected.cursor = cursor
+
+    def _capture_spotlight_return(self, payload: dict[str, Any]) -> None:
+        if self.context.screen == "spotlight" or not self.last_screen:
+            return
+        if self.last_screen.screen in {"boot", "confirm", "limit_confirm", "result", "notify"}:
+            return
+        cursor = self._cursor_from_payload(payload)
+        if cursor is None:
+            cursor = self.context.cursor
+        self.spotlight_return = {
+            "screen": self.last_screen.screen,
+            "payload": copy.deepcopy(self.last_screen.payload),
+            "cursor": cursor,
+        }
+
+    def _restore_spotlight_return(self) -> ScreenPayload | None:
+        nav = self.spotlight_return
+        self.spotlight_return = None
+        if not isinstance(nav, dict):
+            return None
+        screen = str(nav.get("screen") or "")
+        payload = nav.get("payload")
+        if not screen or not isinstance(payload, dict):
+            return None
+        cursor = _optional_int(nav.get("cursor"))
+        if cursor is not None:
+            self.context.cursor = cursor
+        return self._remember_screen(ScreenPayload(screen, copy.deepcopy(payload), self.context))
+
+    def _cursor_from_payload(self, payload: dict[str, Any]) -> int | None:
+        cursor = _optional_int(payload.get("cursor"))
+        if cursor is not None:
+            return cursor
+        if not self.last_screen:
+            return None
+        rows = []
+        if isinstance(self.last_screen.payload.get("tokens"), list):
+            rows = self.last_screen.payload["tokens"]
+        elif isinstance(self.last_screen.payload.get("holdings"), list):
+            rows = self.last_screen.payload["holdings"]
+        elif isinstance(self.last_screen.payload.get("items"), list):
+            rows = self.last_screen.payload["items"]
+        token_id = str(payload.get("token_id") or "").strip()
+        addr = str(payload.get("addr") or token_id).replace(f"-{self.manifest.chain}", "").strip()
+        symbol = str(payload.get("symbol") or "").strip().upper()
+        for idx, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            row_token_id = str(row.get("token_id") or "").strip()
+            row_addr = str(row.get("addr") or row_token_id).replace(f"-{self.manifest.chain}", "").strip()
+            row_symbol = str(row.get("symbol") or "").strip().upper()
+            if token_id and token_id == row_token_id:
+                return idx
+            if addr and addr == row_addr:
+                return idx
+            if symbol and symbol == row_symbol:
+                return idx
+        return None
 
     def _ingest_context(self, payload: dict[str, Any]) -> None:
         selected_data = payload.get("selected") if isinstance(payload.get("selected"), dict) else payload.get("token") if isinstance(payload.get("token"), dict) else {}
