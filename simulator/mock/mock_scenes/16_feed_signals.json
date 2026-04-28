@@ -14,10 +14,17 @@
         "price": "$0.42",
         "change_24h": "+3.8%",
         "change_positive": 1,
-        "headline": "Smart Money Buy",
+        "headline": "",
         "volume_24h": "$1.2M",
         "market_cap": "$12M",
-        "source": "signals"
+        "source": "signals",
+        "signal_label": "BUY",
+        "signal_value": "BUY 3.5 SOL",
+        "signal_first": "First 5m",
+        "signal_last": "Last 2m",
+        "signal_count": "Count 2",
+        "signal_vol": "Vol $125K",
+        "signal_summary": "First 5m Last 2m Count 2 Vol $125K"
       },
       {
         "token_id": "signal-002",
@@ -27,10 +34,17 @@
         "price": "$1.05",
         "change_24h": "N/A",
         "change_positive": 0,
-        "headline": "Rebalance Alert",
+        "headline": "",
         "volume_24h": "$800K",
         "market_cap": "$9M",
-        "source": "signals"
+        "source": "signals",
+        "signal_label": "SELL",
+        "signal_value": "SELL 1.2 SOL",
+        "signal_first": "First 9m",
+        "signal_last": "Last 1m",
+        "signal_count": "Count 4",
+        "signal_vol": "Vol $532K",
+        "signal_summary": "First 9m Last 1m Count 4 Vol $532K"
       }
     ]
   }

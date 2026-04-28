@@ -390,20 +390,34 @@ static void _render_rows(void)
         lv_obj_set_style_text_color(ui->lbl_meta4, text_color, 0);
 
         if (s_mode == BROWSE_MODE_SIGNALS) {
-            const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
-            lv_color_t chg_color = COLOR_GRAY;
-            lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : _signal_value(t));
-            lv_label_set_text(ui->lbl_subtitle, t->headline[0] ? t->headline : _signal_summary(t));
-            lv_label_set_text(ui->lbl_chg, chg_text);
-            lv_label_set_text(ui->lbl_meta1, "");
-            lv_label_set_text(ui->lbl_meta2, "");
-            lv_label_set_text(ui->lbl_meta3, "");
-            lv_label_set_text(ui->lbl_meta4, "");
-            if (t->change_24h[0]) {
-                if (t->change_positive > 0) chg_color = COLOR_GREEN;
-                else if (t->change_positive == 0) chg_color = COLOR_RED;
+            int has_signal_meta = t->signal_value[0] || t->signal_first[0] ||
+                                  t->signal_last[0] || t->signal_count[0] ||
+                                  t->signal_vol[0];
+            if (has_signal_meta) {
+                lv_label_set_text(ui->lbl_price, _signal_value(t));
+                lv_label_set_text(ui->lbl_subtitle, "");
+                lv_label_set_text(ui->lbl_chg, "");
+                lv_label_set_text(ui->lbl_meta1, _signal_first(t));
+                lv_label_set_text(ui->lbl_meta2, _signal_last(t));
+                lv_label_set_text(ui->lbl_meta3, _signal_count(t));
+                lv_label_set_text(ui->lbl_meta4, _signal_vol(t));
+                lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
+            } else {
+                const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
+                lv_color_t chg_color = COLOR_GRAY;
+                lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : _signal_value(t));
+                lv_label_set_text(ui->lbl_subtitle, t->headline[0] ? t->headline : _signal_summary(t));
+                lv_label_set_text(ui->lbl_chg, chg_text);
+                lv_label_set_text(ui->lbl_meta1, "");
+                lv_label_set_text(ui->lbl_meta2, "");
+                lv_label_set_text(ui->lbl_meta3, "");
+                lv_label_set_text(ui->lbl_meta4, "");
+                if (t->change_24h[0]) {
+                    if (t->change_positive > 0) chg_color = COLOR_GREEN;
+                    else if (t->change_positive == 0) chg_color = COLOR_RED;
+                }
+                lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
             }
-            lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
         } else {
             lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
             const char *chg_text = t->change_24h[0] ? t->change_24h : "--";

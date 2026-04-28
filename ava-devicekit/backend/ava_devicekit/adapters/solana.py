@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.parse
@@ -99,6 +100,25 @@ class SolanaAdapter(ChainAdapter):
             label = "TRENDING"
         tokens = [_token_row(row) for row in rows[:20] if isinstance(row, dict)]
         return builders.feed(tokens, chain=SOLANA, source_label=label, mode="standard", context=context)
+
+
+    def get_signals(self, *, context: AppContext | None = None) -> ScreenPayload:
+        resp = self.client.get("/signals/public/list", {"chain": SOLANA, "limit": 20, "pageSize": 20, "pageNO": 1})
+        raw = resp.get("data", {})
+        if isinstance(raw, dict):
+            raw = raw.get("list", raw.get("items", []))
+        rows = [_signal_row(row) for row in (raw if isinstance(raw, list) else []) if isinstance(row, dict)]
+        return ScreenPayload(
+            "browse",
+            {
+                "tokens": rows[:20],
+                "chain": SOLANA,
+                "mode": "signals",
+                "source_label": "SIGNALS",
+                "cursor": 0,
+            },
+            context,
+        )
 
     def search_tokens(self, keyword: str, *, context: AppContext | None = None) -> ScreenPayload:
         resp = self.client.get("/tokens", {"keyword": keyword, "chain": SOLANA, "limit": 20})
@@ -333,3 +353,139 @@ def _safe(fn, default):
         return fn()
     except Exception:
         return default
+
+
+def _compact_signal_number(amount: float) -> str:
+    if amount >= 1_000_000:
+        text = f"{amount / 1_000_000:.1f}".rstrip("0").rstrip(".")
+        return f"{text}M"
+    if amount >= 1_000:
+        text = f"{amount / 1_000:.1f}".rstrip("0").rstrip(".")
+        return f"{text}K"
+    if amount >= 100:
+        return f"{amount:.1f}".rstrip("0").rstrip(".")
+    if amount >= 1:
+        return f"{amount:.2f}".rstrip("0").rstrip(".")
+    return f"{amount:.4f}".rstrip("0").rstrip(".")
+
+
+def _signal_default_quote_symbol(chain: str) -> str:
+    return "SOL"
+
+
+def _fmt_signal_amount(value: Any) -> str:
+    amount = parse_number(value, default=-1)
+    if amount < 0:
+        return "0"
+    return _compact_signal_number(abs(float(amount)))
+
+
+def _fmt_signal_age(raw_ts: Any) -> str:
+    ts = parse_number(raw_ts, default=-1)
+    if ts <= 0:
+        return ""
+    try:
+        delta = max(0, int(datetime.now().timestamp()) - int(ts))
+    except Exception:
+        return ""
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
+
+
+def _signal_label_from_item(item: dict[str, Any]) -> str:
+    text = str(item.get("action_type") or item.get("signal_type") or "").strip().lower()
+    if "sell" in text:
+        return "SELL"
+    if "buy" in text:
+        return "BUY"
+    return ""
+
+
+def _build_signal_meta_fields(item: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    first_age = _fmt_signal_age(item.get("first_signal_time"))
+    first_text = f"First {first_age}" if first_age else "First -"
+    last_age = _fmt_signal_age(item.get("signal_time"))
+    last_text = f"Last {last_age}" if last_age else "Last -"
+    action_count = parse_number(item.get("action_count"), default=-1)
+    count_text = f"Count {int(action_count)}" if action_count > 0 else "Count -"
+    volume_value = item.get("tx_volume_u_24h", item.get("token_tx_volume_usd_24h", item.get("volume_24h")))
+    volume_text = _fmt_volume(volume_value)
+    vol_text = f"Vol {volume_text}" if volume_text != "N/A" else "Vol -"
+    return first_text, last_text, count_text, vol_text, f"{first_text} {last_text} {count_text} {vol_text}"
+
+
+def _build_signal_display(item: dict[str, Any], chain: str) -> tuple[str, str, str, str, str, str, str]:
+    label = _signal_label_from_item(item)
+    value_text = label or "SIGNAL"
+    first_text, last_text, count_text, vol_text, summary = _build_signal_meta_fields(item)
+    actions = item.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return label, value_text, first_text, last_text, count_text, vol_text, summary
+
+    buy_total = 0.0
+    sell_total = 0.0
+    unit = ""
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("action_type") or "").strip().lower()
+        volume = parse_number(action.get("quote_token_volume"), default=math.nan)
+        if math.isnan(volume):
+            volume = parse_number(action.get("volume_usd"), default=math.nan)
+        if math.isnan(volume):
+            volume = parse_number(action.get("base_token_volume"), default=math.nan)
+        if math.isnan(volume):
+            continue
+        quote_token = str(action.get("quote_token_symbol") or action.get("quote_token") or "").strip()
+        base_token = str(action.get("base_token_symbol") or action.get("base_token") or "").strip()
+        if not unit:
+            if quote_token and len(quote_token) <= 12 and quote_token.isascii():
+                unit = quote_token.upper()
+            elif base_token and len(base_token) <= 12 and base_token.isascii():
+                unit = base_token.upper()
+        if action_type == "sell":
+            sell_total += volume
+        else:
+            buy_total += volume
+
+    if not unit:
+        unit = _signal_default_quote_symbol(chain)
+    if buy_total > 0 and buy_total >= sell_total:
+        return "BUY", f"BUY {_fmt_signal_amount(buy_total)} {unit}", first_text, last_text, count_text, vol_text, summary
+    if sell_total > 0:
+        return "SELL", f"SELL {_fmt_signal_amount(sell_total)} {unit}", first_text, last_text, count_text, vol_text, summary
+    return label, value_text, first_text, last_text, count_text, vol_text, summary
+
+
+def _signal_row(item: dict[str, Any]) -> dict[str, Any]:
+    token_id = str(item.get("token") or item.get("token_id") or item.get("address") or "").strip()
+    chain = SOLANA
+    identity = _token_identity({"token_id": token_id, "chain": chain, "symbol": item.get("symbol"), "source": "signals"})
+    change_value = item.get("price_change_24h", item.get("token_price_change_24h"))
+    signal_label, signal_value, signal_first, signal_last, signal_count, signal_vol, signal_summary = _build_signal_display(item, chain)
+    market_cap = item.get("mc_cur", item.get("market_cap", item.get("fdv")))
+    volume = item.get("tx_volume_u_24h", item.get("token_tx_volume_usd_24h", item.get("volume_24h")))
+    return {
+        **identity,
+        "price": _fmt_price(item.get("current_price_usd", item.get("price"))),
+        "price_raw": _safe_float(item.get("current_price_usd", item.get("price"))),
+        "change_24h": _fmt_change(change_value),
+        "change_positive": _safe_float(change_value) >= 0,
+        "volume_24h": _fmt_volume(volume),
+        "market_cap": _fmt_volume(market_cap),
+        "signal_type": str(item.get("signal_type") or "").strip(),
+        "signal_label": signal_label,
+        "signal_value": signal_value,
+        "signal_first": signal_first,
+        "signal_last": signal_last,
+        "signal_count": signal_count,
+        "signal_vol": signal_vol,
+        "signal_summary": signal_summary,
+        "headline": str(item.get("headline") or "").strip(),
+        "signal_time": str(item.get("signal_time") or "").strip(),
+        "source": "signals",
+        "risk_level": str(item.get("risk_level") or "UNKNOWN"),
+    }

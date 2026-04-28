@@ -455,12 +455,14 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
             return 1;
         }
         if (strcmp(test_case->screen_name, "feed_signals") == 0) {
-            if (count_labels_containing_text_recursive(scr, "Smart Money Buy") <= 0 ||
-                count_labels_containing_text_recursive(scr, "$0.42") <= 0 ||
-                count_labels_containing_text_recursive(scr, "+3.8%") <= 0 ||
-                count_labels_containing_text_recursive(scr, "$1.2M") <= 0) {
+            if (count_labels_containing_text_recursive(scr, "BUY 3.5 SOL") <= 0 ||
+                count_labels_containing_text_recursive(scr, "SELL 1.2 SOL") <= 0 ||
+                count_labels_containing_text_recursive(scr, "First 5m") <= 0 ||
+                count_labels_containing_text_recursive(scr, "Last 2m") <= 0 ||
+                count_labels_containing_text_recursive(scr, "Count 2") <= 0 ||
+                count_labels_containing_text_recursive(scr, "Vol $125K") <= 0) {
                 fprintf(stderr,
-                        "FAIL: [feed_signals] expected headline plus price/change/volume browse rows\n");
+                        "FAIL: [feed_signals] expected buy/sell value plus first/last/count/volume meta rows\n");
                 return 0;
             }
             return 1;

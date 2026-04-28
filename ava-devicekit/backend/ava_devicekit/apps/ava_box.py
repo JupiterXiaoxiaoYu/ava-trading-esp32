@@ -111,6 +111,9 @@ class AvaBoxApp:
             platform = str(payload.get("platform") or "")
             return self._remember_screen(self.chain_adapter.get_feed(platform=platform, context=self.context))
         if action in {"signals", "signals_chain_cycle"}:
+            get_signals = getattr(self.chain_adapter, "get_signals", None)
+            if callable(get_signals):
+                return self._remember_screen(get_signals(context=self.context))
             feed = self.chain_adapter.get_feed(topic="gainer", context=self.context)
             return self._remember_screen(_as_browse(feed, mode="signals", source_label="SIGNALS"))
         if action == "watchlist_chain_cycle":
