@@ -30,6 +30,7 @@ class AvaBoxApp:
 
     def __post_init__(self) -> None:
         self.context = AppContext(app_id=self.manifest.app_id, chain=self.manifest.chain, screen="boot")
+        self.context.state["trade_mode"] = self.skills.get_trade_mode()
 
     @classmethod
     def create(
@@ -86,10 +87,16 @@ class AvaBoxApp:
             return self._route_key(action, {**payload, "input_source": event.source if event else "", "input_kind": event.kind if event else ""})
         return builders.notify("Input", "Event received", level="info", context=self.context)
 
+    def _trade_mode(self) -> str:
+        mode = str(self.context.state.get("trade_mode") or self.skills.get_trade_mode() or "").lower()
+        mode = "paper" if mode == "paper" else "real"
+        self.context.state["trade_mode"] = mode
+        return mode
+
     def _route_key(self, action: str, payload: dict[str, Any]) -> ScreenPayload | ActionDraft | ActionResult:
         action = str(action or "").strip().lower()
-        trade_mode = str(self.context.state.get("trade_mode") or "").lower()
-        trade_mode_payload = {"execution_mode": trade_mode} if trade_mode else {}
+        trade_mode = self._trade_mode()
+        trade_mode_payload = {"execution_mode": trade_mode}
         if action in {"home", "feed", "refresh", "feed_home", "back"}:
             return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
         if action == "confirm":
@@ -97,10 +104,12 @@ class AvaBoxApp:
         if action in {"cancel", "cancel_trade"}:
             return self._cancel(DeviceMessage(type="cancel", context=self.context))
         if action == "explorer_sync":
-            return self._remember_screen(ScreenPayload("explorer", {"trade_mode": self.context.state.get("trade_mode", "real")}, self.context))
+            trade_mode = self._trade_mode()
+            return self._remember_screen(ScreenPayload("explorer", {"trade_mode": trade_mode}, self.context))
         if action == "trade_mode_set":
             mode = str(payload.get("mode") or "real").lower()
             mode = "paper" if mode == "paper" else "real"
+            mode = self.skills.set_trade_mode(mode)
             self.context.state["trade_mode"] = mode
             return self._remember_screen(ScreenPayload("explorer", {"trade_mode": mode}, self.context))
         if action == "feed_source":
@@ -152,7 +161,7 @@ class AvaBoxApp:
         if action == "portfolio":
             return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if action in {"orders", "paper_orders"}:
-            return self._remember_screen(self.skills.get_orders(context=self.context))
+            return self._remember_screen(self.skills.get_orders(mode=self._trade_mode(), context=self.context))
         if action == "search":
             return self._remember_screen(self.chain_adapter.search_tokens(str(payload.get("keyword") or payload.get("query") or ""), context=self.context))
         if action == "watchlist":
@@ -192,7 +201,7 @@ class AvaBoxApp:
         if any(word in normalized for word in ("portfolio", "持仓", "组合")):
             return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if any(word in normalized for word in ("orders", "订单")):
-            return self._remember_screen(self.skills.get_orders(context=self.context))
+            return self._remember_screen(self.skills.get_orders(mode=self._trade_mode(), context=self.context))
         if any(word in normalized for word in ("watchlist", "观察", "收藏列表")):
             return self._remember_screen(self.skills.get_watchlist(context=self.context))
         if any(word in normalized for word in ("取消收藏", "移除收藏", "remove watch", "unfavorite")):

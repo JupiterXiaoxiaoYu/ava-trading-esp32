@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
-from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig
+from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig, SOLANA
 from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, AveSolanaTradeConfig, AveSolanaTradeProvider, load_trade_execution_provider
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.apps.ava_box_skills.portfolio import PortfolioSkill
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
 from ava_devicekit.apps.ava_box_skills.watchlist import WatchlistSkill
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext, ScreenPayload
+from ava_devicekit.screen import builders
 from ava_devicekit.storage.json_store import JsonStore
 
 
@@ -29,11 +31,26 @@ class AvaBoxSkillService:
         self.executor = self._create_executor()
         self.trading = TradingSkill(self.config, self.executor, paper_executor=self.paper_executor)
 
+    def get_trade_mode(self) -> str:
+        state = self.store.read({})
+        mode = _normalize_trade_mode(state.get("trade_mode") or self.config.execution_mode)
+        return mode
+
+    def set_trade_mode(self, mode: str) -> str:
+        normalized = _normalize_trade_mode(mode)
+        state = self.store.read({"watchlist": [], "paper_positions": [], "paper_orders": []})
+        state["trade_mode"] = normalized
+        self.store.write(state)
+        return normalized
+
     def get_portfolio(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.portfolio.open(context=context)
 
-    def get_orders(self, *, context: AppContext | None = None) -> ScreenPayload:
-        return self.portfolio.orders(context=context)
+    def get_orders(self, *, mode: str = "", context: AppContext | None = None) -> ScreenPayload:
+        normalized = _normalize_trade_mode(mode or self.get_trade_mode())
+        if normalized == "paper":
+            return self.portfolio.orders(context=context, source_label="PAPER ORDERS")
+        return self._real_orders(context=context)
 
     def get_watchlist(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.watchlist.open(context=context)
@@ -56,12 +73,28 @@ class AvaBoxSkillService:
     def submit_signed_action(self, request_id: str, signed_tx: str, *, context: AppContext | None = None) -> ActionResult:
         return self.trading.submit_signed(request_id, signed_tx, context=context)
 
+    def _real_orders(self, *, context: AppContext | None = None) -> ScreenPayload:
+        get_limit_orders = getattr(self.executor, "get_limit_orders", None)
+        if not callable(get_limit_orders):
+            rows = [_empty_order_row("REAL", "Real execution provider has no order list")]
+            return builders.feed(rows, chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+        assets_id = os.environ.get(self.config.proxy_wallet_id_env, "").strip()
+        if not assets_id:
+            rows = [_empty_order_row("REAL", "No proxy wallet configured")]
+            return builders.feed(rows, chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+        try:
+            resp = get_limit_orders(SOLANA, assets_id, page_size=20, page_no=0)
+            rows = [_real_order_row(row) for row in _extract_rows(resp) if isinstance(row, dict)]
+        except Exception as exc:
+            rows = [_empty_order_row("REAL", f"Order fetch failed: {exc}")]
+        return builders.feed(rows[:20], chain=SOLANA, source_label="REAL ORDERS", mode="orders", context=context)
+
     def _create_executor(self):
         mode = self.config.execution_mode.lower()
         if self.config.execution_provider_class or mode in {"custom", "class", "python"}:
             return load_trade_execution_provider(self.config.execution_provider_class, self.config.execution_options or {})
         if mode == "paper":
-            return self.paper_executor
+            return None
         if mode in {"proxy", "proxy_wallet", "custodial", "hosted", "real"}:
             return AveProxyWalletTradeProvider(
                 AveSolanaTradeConfig(
@@ -80,6 +113,53 @@ class AvaBoxSkillService:
                 )
             )
         return None
+
+
+def _normalize_trade_mode(mode: Any) -> str:
+    value = str(mode or "").strip().lower()
+    return "paper" if value in {"paper", "demo", "mock"} else "real"
+
+
+def _extract_rows(resp: dict[str, Any]) -> list[Any]:
+    data: Any = resp.get("data", resp) if isinstance(resp, dict) else resp
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("list", "items", "orders", "records", "data"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _real_order_row(row: dict[str, Any]) -> dict[str, Any]:
+    token_id = str(row.get("token") or row.get("tokenAddress") or row.get("outTokenAddress") or row.get("inTokenAddress") or "").strip()
+    symbol = str(row.get("symbol") or row.get("tokenSymbol") or row.get("outTokenSymbol") or row.get("inTokenSymbol") or "ORDER").strip()
+    price = str(row.get("limitPrice") or row.get("price") or row.get("amount") or row.get("inAmount") or row.get("volume") or "--")
+    status = str(row.get("status") or row.get("state") or row.get("orderStatus") or "real").strip()
+    return {
+        "symbol": symbol or "ORDER",
+        "chain": SOLANA,
+        "addr": token_id.replace(f"-{SOLANA}", ""),
+        "token_id": token_id if token_id.endswith(f"-{SOLANA}") else f"{token_id}-{SOLANA}" if token_id else "",
+        "price": price,
+        "change_24h": status or "real",
+        "change_positive": status.lower() not in {"failed", "cancelled", "canceled", "rejected"},
+        "source": "real_orders",
+        "source_tag": "real",
+    }
+
+
+def _empty_order_row(symbol: str, message: str) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "chain": SOLANA,
+        "price": "--",
+        "change_24h": message[:16],
+        "change_positive": False,
+        "source": "orders",
+        "source_tag": message,
+    }
 
 
 __all__ = ["AvaBoxSkillConfig", "AvaBoxSkillService", "AveProxyWalletTradeProvider", "AveSolanaTradeConfig", "AveSolanaTradeProvider", "load_trade_execution_provider"]

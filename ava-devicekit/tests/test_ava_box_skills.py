@@ -135,6 +135,61 @@ def test_trading_skill_respects_paper_trade_mode_override():
     assert result.data["execution"]["executor"] == "paper"
     assert result.data["execution"]["mode"] == "paper"
 
+
+def test_skill_service_persists_trade_mode(tmp_path):
+    store_path = str(tmp_path / "mode.json")
+    service = AvaBoxSkillService(AvaBoxSkillConfig(store_path=store_path, execution_mode="custodial"))
+
+    assert service.get_trade_mode() == "real"
+    assert service.set_trade_mode("paper") == "paper"
+
+    reloaded = AvaBoxSkillService(AvaBoxSkillConfig(store_path=store_path, execution_mode="custodial"))
+    assert reloaded.get_trade_mode() == "paper"
+
+
+def test_skill_service_separates_paper_and_real_order_sources(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEST_PROXY_WALLET_ID", "assets-1")
+    service = AvaBoxSkillService(
+        AvaBoxSkillConfig(
+            store_path=str(tmp_path / "orders.json"),
+            execution_mode="custodial",
+            proxy_wallet_id_env="TEST_PROXY_WALLET_ID",
+        )
+    )
+    context = AppContext(
+        app_id="ava_box",
+        chain="solana",
+        screen="spotlight",
+        selected=Selection(token_id="So111-solana", addr="So111", chain="solana", symbol="SOL"),
+        state={"trade_mode": "paper"},
+    )
+    draft = service.create_action_draft("buy", {}, context=context)
+    service.confirm_action(draft.request_id, context=context)
+
+    def fake_limit_orders(self, chain, assets_id, *, status="", token="", page_size=20, page_no=0):
+        return {
+            "data": {
+                "list": [
+                    {
+                        "tokenAddress": "Real111",
+                        "tokenSymbol": "REAL",
+                        "limitPrice": "0.42",
+                        "status": "open",
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(AveProxyWalletTradeProvider, "get_limit_orders", fake_limit_orders)
+
+    paper = service.get_orders(mode="paper", context=context)
+    real = service.get_orders(mode="real", context=context)
+
+    assert paper.payload["source_label"] == "PAPER ORDERS"
+    assert paper.payload["tokens"][0]["symbol"] == "SOL"
+    assert real.payload["source_label"] == "REAL ORDERS"
+    assert real.payload["tokens"][0]["symbol"] == "REAL"
+
 from ava_devicekit.apps.ava_box_skills.execution import AveProxyWalletTradeProvider, build_proxy_wallet_order_payload
 
 

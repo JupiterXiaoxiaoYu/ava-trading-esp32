@@ -31,9 +31,9 @@ class PortfolioSkill:
             context=context,
         )
 
-    def orders(self, *, context: AppContext | None = None) -> ScreenPayload:
+    def orders(self, *, context: AppContext | None = None, source_label: str = "PAPER ORDERS") -> ScreenPayload:
         rows = [_order_row(row) for row in _state(self.store).get("paper_orders", []) if isinstance(row, dict)]
-        return builders.feed(rows, chain=SOLANA, source_label="ORDERS", mode="orders", context=context)
+        return builders.feed(rows, chain=SOLANA, source_label=source_label, mode="orders", context=context)
 
 
 def _state(store: JsonStore) -> dict[str, Any]:

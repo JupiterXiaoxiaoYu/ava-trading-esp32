@@ -132,6 +132,7 @@ class SolanaAdapter(ChainAdapter):
         interval = str(interval or "60").strip().lower() or "60"
         token = _first_payload(self.client.get(f"/tokens/{addr}-{chain}"))
         risk = _safe(lambda: self.client.get(f"/contracts/{addr}-{chain}"), {})
+        top100 = _safe(lambda: self.client.get(f"/tokens/top100/{addr}-{chain}"), {})
         is_live_second = interval == "s1"
         kline = {} if is_live_second else _safe(lambda: self.client.get(f"/klines/token/{addr}-{chain}", {"interval": interval, "limit": 48}), {})
         chart = _extract_chart_payload(kline)
@@ -157,6 +158,7 @@ class SolanaAdapter(ChainAdapter):
             "liquidity": _fmt_volume(token.get("main_pair_tvl", token.get("tvl"))),
             "volume_24h": _fmt_volume(token.get("token_tx_volume_usd_24h", token.get("tx_volume_u_24h"))),
             "market_cap": _fmt_volume(token.get("market_cap", token.get("fdv"))),
+            "top100_concentration": _extract_top100_concentration(top100),
             "contract_short": _contract_short(addr),
             **chart,
             "is_honeypot": flags["is_honeypot"],
@@ -288,6 +290,66 @@ def _extract_chart_payload(kline_resp: dict[str, Any]) -> dict[str, Any]:
         "chart_t_mid": _fmt_chart_time(times[len(times) // 2]) if times else "",
         "chart_t_end": "now",
     }
+
+
+def _balance_ratio_to_percent_points(raw_value: Any) -> float | None:
+    parsed = parse_number(raw_value, default=math.nan)
+    if math.isnan(parsed) or math.isinf(parsed):
+        return None
+    if isinstance(raw_value, str) and "%" in raw_value:
+        pct = parsed
+    elif 0 <= parsed <= 1:
+        pct = parsed * 100
+    elif 0 <= parsed <= 100:
+        pct = parsed
+    else:
+        return None
+    return pct if math.isfinite(pct) else None
+
+
+def _fmt_percent_points(value: float) -> str:
+    text = f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{text}%"
+
+
+def _extract_top100_concentration(top100_resp: dict[str, Any]) -> str:
+    payload: Any = top100_resp.get("data", top100_resp) if isinstance(top100_resp, dict) else top100_resp
+    summary_nodes: list[dict[str, Any]] = []
+    top100_lists: list[list[Any]] = []
+
+    if isinstance(payload, dict):
+        summary_nodes.append(payload)
+        if isinstance(payload.get("summary"), dict):
+            summary_nodes.append(payload["summary"])
+        for key in ("top100", "holders", "items", "list", "data"):
+            entries = payload.get(key)
+            if isinstance(entries, list) and entries:
+                top100_lists.append(entries)
+    elif isinstance(payload, list):
+        top100_lists.append(payload)
+        summary_nodes.extend(item for item in payload if isinstance(item, dict))
+
+    for node in summary_nodes:
+        for key in ("top100_concentration", "top_100_holding_rate", "top100_holding_rate", "top100_rate"):
+            if node.get(key) not in (None, ""):
+                pct = _balance_ratio_to_percent_points(node.get(key))
+                return _fmt_percent_points(pct) if pct is not None else "N/A"
+
+    for entries in top100_lists:
+        total = 0.0
+        seen = False
+        for holder in entries[:100]:
+            if not isinstance(holder, dict):
+                continue
+            share = holder.get("balance_ratio", holder.get("holding_rate", holder.get("rate", holder.get("percentage"))))
+            pct = _balance_ratio_to_percent_points(share)
+            if pct is None:
+                continue
+            total += pct
+            seen = True
+        if seen:
+            return _fmt_percent_points(total)
+    return "N/A"
 
 
 def _risk_flags(resp: dict[str, Any]) -> dict[str, Any]:
