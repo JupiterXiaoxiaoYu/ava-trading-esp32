@@ -56,3 +56,12 @@ This status file separates framework responsibility from Ava Box reference-app r
 | Usage metering | Devices and backend/admin calls can report usage directly. Firmware voice paths also meter ASR seconds, LLM token usage, and TTS characters for provisioned devices. |
 | C-end operations | `/admin` is the service-owner/operator console; `/customer` is the C-end hardware-owner portal. Hosted SaaS, automated billing, tenant isolation, and developer marketplaces remain outside this milestone. |
 | Chain-specific trading | AVE/Solana trade execution belongs to Ava Box app skills, not `ChainAdapter`. |
+
+## Wallet-Signature Activation Addendum
+
+| Area | Layer | Status | Implementation |
+|---|---|---|---|
+| Purchase/order records | Framework control plane | Complete MVP | `purchases` are stored with order ref, device, app, buyer wallet/email, plan, status, and activation URL. |
+| Activation cards | Framework admin/API | Complete MVP | `POST /admin/purchases` and `GET /admin/purchases/{id}/activation-card` return activation code, URL, QR payload, and printable instructions. |
+| Wallet-signature login | Framework customer API | Complete MVP | `/customer/wallet/challenge` and `/customer/wallet/login` verify Solana Ed25519 signatures before issuing customer sessions. |
+| Wallet-locked activation | Framework customer API | Complete MVP | If a purchase specifies `customer_wallet`, activation requires the same wallet-authenticated customer. |

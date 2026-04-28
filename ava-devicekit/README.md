@@ -235,3 +235,15 @@ The production path uses `--adapter solana` or the manifest default. Offline fix
 ## Multi-Device Runtime
 
 HTTP device endpoints use `X-Ava-Device-Id` to keep independent sessions. Admin endpoints can inspect `/admin/devices`, `/admin/control-plane`, and `/admin/events`. Set `AVA_DEVICEKIT_ADMIN_TOKEN` for admin access. Devices can either use the compatibility-wide `AVA_DEVICEKIT_DEVICE_TOKEN` or register through `/device/register` and then use their own per-device bearer token.
+
+### Customer Purchase And Wallet Activation
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/admin/purchases` | Record a hardware purchase, assign plan, and generate an activation card. |
+| `GET` | `/admin/purchases` | List purchase/order records. |
+| `GET` | `/admin/purchases/{purchase_id}/activation-card` | Return the printable activation-card payload. |
+| `POST` | `/customer/wallet/challenge` | Create a Solana wallet sign-in challenge. |
+| `POST` | `/customer/wallet/login` | Verify the wallet signature and issue a customer bearer token. |
+
+The C-end user signs a message with a Solana wallet in `/customer`, then uses the activation code from the hardware package. Device provisioning tokens remain factory/device-only.

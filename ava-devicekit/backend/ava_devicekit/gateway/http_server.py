@@ -156,6 +156,20 @@ def make_handler(
                 snapshot = control_plane.snapshot()
                 self._send_json({"ok": True, "items": snapshot["projects"], "count": len(snapshot["projects"])})
                 return
+            if path == "/admin/purchases":
+                if not self._authorized_admin():
+                    return
+                self._send_json(control_plane.purchases(app_id=_query_value(query, "app_id")))
+                return
+            if path.startswith("/admin/purchases/") and path.endswith("/activation-card"):
+                if not self._authorized_admin():
+                    return
+                purchase_id = path.split("/")[3]
+                try:
+                    self._send_json(control_plane.activation_card(purchase_id, public_base_url=self._public_base_url()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.NOT_FOUND)
+                return
             if path == "/admin/registered-devices":
                 if not self._authorized_admin():
                     return
@@ -285,6 +299,18 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path == "/customer/wallet/challenge":
+                try:
+                    self._send_json(control_plane.create_wallet_challenge(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/customer/wallet/login":
+                try:
+                    self._send_json(control_plane.login_customer_with_wallet(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/customer/login":
                 try:
                     self._send_json(control_plane.login_customer(self._read_json()))
@@ -366,6 +392,14 @@ def make_handler(
                     return
                 try:
                     self._send_json(control_plane.create_project(self._read_json()))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path == "/admin/purchases":
+                if not self._authorized_admin():
+                    return
+                try:
+                    self._send_json(control_plane.create_purchase(self._read_json(), public_base_url=self._public_base_url()))
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -516,6 +550,11 @@ def make_handler(
 
         def _device_id(self) -> str:
             return normalize_device_id(self.headers.get("X-Ava-Device-Id") or "default")
+
+        def _public_base_url(self) -> str:
+            host = self.headers.get("Host", "127.0.0.1:8788")
+            scheme = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+            return f"{scheme}://{host}"
 
         def _authorized_admin(self) -> bool:
             return self._authorized(settings.admin_token_env)
@@ -712,6 +751,7 @@ def _onboarding_from_parts(
     projects = control_plane.get("projects") if isinstance(control_plane.get("projects"), list) else []
     customers = control_plane.get("customers") if isinstance(control_plane.get("customers"), list) else []
     devices = control_plane.get("devices") if isinstance(control_plane.get("devices"), list) else []
+    purchases = control_plane.get("purchases") if isinstance(control_plane.get("purchases"), list) else []
     plans = control_plane.get("service_plans") if isinstance(control_plane.get("service_plans"), list) else []
     registered = [item for item in devices if item.get("registered_at")]
     active = [item for item in devices if item.get("status") in {"active", "online_seen"}]
@@ -722,8 +762,9 @@ def _onboarding_from_parts(
         _step("providers", "Configure providers", bool(providers.get("ok")), "Providers", "POST /admin/runtime/providers", "Set ASR, LLM, TTS, chain, and execution providers by env-key references."),
         _step("service_plan", "Create service plan", bool(plans), "Usage", "POST /admin/service-plans", "Define the usage and entitlement model for C-end hardware users."),
         _step("device_provisioned", "Provision hardware", bool(devices), "Fleet Setup", "POST /admin/devices/register", "Create a device record and get its provisioning token plus activation code."),
+        _step("purchase_recorded", "Create purchase activation card", bool(purchases), "Fleet Setup", "POST /admin/purchases", "Record the hardware purchase, assign a plan, and generate the customer activation URL/card."),
         _step("device_registered", "Register device token", bool(registered), "Device firmware", "POST /device/register", "Device exchanges the one-time provisioning token for a per-device bearer token."),
-        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Portal", "GET /customer then POST /customer/login", "Create or reuse a customer account for the hardware user."),
+        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Portal", "GET /customer then POST /customer/wallet/login", "Create or reuse a customer account after Solana wallet signature verification."),
         _step("user_device_bound", "Bind user to device", bool(linked), "Customer Portal", "POST /customer/activate", "Activation code links the purchased device to the logged-in user and app."),
         _step("device_active", "Activate device", bool(active), "Customer Portal", "POST /customer/activate", "Device is active or has been seen online after activation."),
         _step("live_session", "Verify live session", bool(online), "Device Detail", "POST /device/boot or WebSocket hello", "Confirm that at least one hardware unit is connected to this backend.", required=False),
@@ -746,8 +787,9 @@ def _onboarding_from_parts(
             "Create app/project in Apps",
             "Configure Providers with env var names",
             "Provision device in Fleet Setup",
+            "Create purchase activation card in Fleet Setup",
             "Register device with provisioning token",
-            "Open /customer, sign in, and bind activation_code",
+            "Open /customer, sign with wallet, and bind activation_code",
             "Inspect app users, device diagnostics, usage, events, and OTA",
         ],
     }

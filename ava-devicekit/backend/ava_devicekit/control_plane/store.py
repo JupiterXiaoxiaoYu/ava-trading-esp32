@@ -5,8 +5,10 @@ import secrets
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from ava_devicekit.storage.json_store import JsonStore
+from ava_devicekit.wallet import build_login_message, verify_solana_signature
 
 DEFAULT_DEVICE_CONFIG: dict[str, Any] = {
     "language": "zh",
@@ -83,6 +85,7 @@ class ControlPlaneStore:
             "customers": [_safe_customer(item) for item in data.get("customers", [])],
             "projects": [dict(item) for item in data.get("projects", [])],
             "devices": [dict(item) for item in data.get("devices", [])],
+            "purchases": [_safe_purchase(item) for item in data.get("purchases", [])],
             "runtime_config": _redact(dict(data.get("runtime_config") or {})),
             "default_device_config": dict(data.get("default_device_config") or DEFAULT_DEVICE_CONFIG),
             "service_plans": [dict(item) for item in data.get("service_plans", [])],
@@ -103,6 +106,7 @@ class ControlPlaneStore:
                 "registered_devices": len([d for d in items["devices"] if d.get("registered_at")]),
                 "provisioned_devices": len(items["devices"]),
                 "service_plans": len(items["service_plans"]),
+                "purchases": len(items["purchases"]),
             },
         }
 
@@ -326,6 +330,115 @@ class ControlPlaneStore:
         profile = self.customer(customer_id)
         return {"ok": True, "customer": profile["customer"], "devices": profile["devices"], "device_count": profile["device_count"], "customer_token": token}
 
+    def create_wallet_challenge(self, body: dict[str, Any]) -> dict[str, Any]:
+        wallet = str(body.get("wallet") or body.get("wallet_address") or "").strip()
+        if not wallet:
+            raise ValueError("wallet_required")
+        app_id = str(body.get("app_id") or "ava_box").strip()
+        now = _now()
+        nonce = secrets.token_urlsafe(24)
+        message = build_login_message(wallet=wallet, nonce=nonce, app_id=app_id, issued_at=now)
+        challenge = {
+            "challenge_id": _id("wch"),
+            "wallet": wallet,
+            "app_id": app_id,
+            "nonce": nonce,
+            "message": message,
+            "created_at": now,
+            "expires_at": now + 300,
+            "used_at": 0,
+        }
+
+        def mutate(data: dict[str, Any]) -> None:
+            _ensure_shape(data)
+            data["auth_challenges"] = [
+                item
+                for item in data.get("auth_challenges", [])
+                if int(item.get("expires_at") or 0) > now and not int(item.get("used_at") or 0)
+            ][-50:]
+            data["auth_challenges"].append(challenge)
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, **challenge}
+
+    def login_customer_with_wallet(self, body: dict[str, Any]) -> dict[str, Any]:
+        wallet = str(body.get("wallet") or body.get("wallet_address") or "").strip()
+        nonce = str(body.get("nonce") or "").strip()
+        signature = str(body.get("signature") or "").strip()
+        if not wallet:
+            raise ValueError("wallet_required")
+        if not nonce:
+            raise ValueError("nonce_required")
+        if not signature:
+            raise ValueError("signature_required")
+        email = str(body.get("email") or "").strip().lower()
+        display_name = str(body.get("display_name") or body.get("name") or _short_wallet(wallet))
+        app_id = str(body.get("app_id") or "ava_box").strip()
+        project_id = str(body.get("project_id") or "").strip()
+        token = _token("avacus")
+        now = _now()
+        customer_id = ""
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal customer_id
+            _ensure_shape(data)
+            challenge = next(
+                (
+                    item
+                    for item in data.get("auth_challenges", [])
+                    if item.get("nonce") == nonce and item.get("wallet") == wallet and not int(item.get("used_at") or 0)
+                ),
+                None,
+            )
+            if not challenge:
+                raise ValueError("wallet_challenge_not_found")
+            if int(challenge.get("expires_at") or 0) < now:
+                raise ValueError("wallet_challenge_expired")
+            if not verify_solana_signature(wallet=wallet, message=str(challenge.get("message") or ""), signature=signature):
+                raise ValueError("invalid_wallet_signature")
+            challenge["used_at"] = now
+
+            customer = next((item for item in data["customers"] if item.get("wallet") == wallet), None)
+            if not customer and email:
+                customer = next((item for item in data["customers"] if item.get("email") == email), None)
+            if not customer:
+                customer = {
+                    "customer_id": _id("cus"),
+                    "email": email,
+                    "display_name": display_name,
+                    "wallet": wallet,
+                    "status": "active",
+                    "auth_method": "wallet_signature",
+                    "app_ids": [],
+                    "project_ids": [],
+                    "created_at": now,
+                    "registered_at": now,
+                    "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+                }
+                data["customers"].append(customer)
+            else:
+                customer["wallet"] = wallet
+                customer["auth_method"] = "wallet_signature"
+                if email and not customer.get("email"):
+                    customer["email"] = email
+                if display_name and customer.get("display_name") in {"", customer.get("email"), "customer", _short_wallet(wallet)}:
+                    customer["display_name"] = display_name
+            _ensure_customer_app_link(customer, app_id=app_id, project_id=project_id)
+            customer["customer_token_hash"] = _hash_token(token)
+            customer["last_login_at"] = now
+            customer_id = str(customer["customer_id"])
+
+        self.store.update(_default_state(), mutate)
+        profile = self.customer(customer_id)
+        return {
+            "ok": True,
+            "auth_method": "wallet_signature",
+            "customer": profile["customer"],
+            "devices": profile["devices"],
+            "device_count": profile["device_count"],
+            "customer_token": token,
+        }
+
     def customer_session(self, token: str) -> dict[str, Any]:
         token = str(token or "").strip()
         if not token:
@@ -362,6 +475,110 @@ class ControlPlaneStore:
         app_id = str(app_id or "").strip()
         rows = [_safe_device(item) for item in data.get("devices", []) if not app_id or item.get("app_id") == app_id]
         return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
+
+    def purchases(self, app_id: str = "") -> dict[str, Any]:
+        data = self.bootstrap()
+        app_id = str(app_id or "").strip()
+        rows = [_safe_purchase(item) for item in data.get("purchases", []) if not app_id or item.get("app_id") == app_id]
+        return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
+
+    def create_purchase(self, body: dict[str, Any], *, public_base_url: str = "") -> dict[str, Any]:
+        data = self.bootstrap()
+        requested_device_id = str(body.get("device_id") or body.get("serial") or _id("device"))
+        device_id = normalize_control_device_id(requested_device_id)
+        app_id = str(body.get("app_id") or "ava_box").strip()
+        project_id = str(body.get("project_id") or data["projects"][0]["project_id"])
+        plan_id = str(body.get("plan_id") or "")
+        if plan_id and not any(item.get("plan_id") == plan_id for item in data["service_plans"]):
+            raise ValueError("service_plan_not_found")
+        device = _find_device(data, device_id)
+        provisioning_token = ""
+        if not device:
+            provisioned = self.provision_device(
+                {
+                    "device_id": device_id,
+                    "project_id": project_id,
+                    "app_id": app_id,
+                    "name": str(body.get("device_name") or body.get("name") or device_id),
+                    "board_model": str(body.get("board_model") or body.get("model") or "esp32"),
+                    "plan_id": plan_id,
+                    "entitlement_status": str(body.get("entitlement_status") or "pending_activation"),
+                }
+            )
+            provisioning_token = provisioned["provisioning_token"]
+            data = self.bootstrap()
+            device = _find_device(data, device_id)
+        if not device:
+            raise ValueError("device_not_found")
+        activation_code = _activation_code(str(device["device_id"]))
+        now = _now()
+        purchase: dict[str, Any] = {}
+
+        def mutate(state: dict[str, Any]) -> None:
+            nonlocal purchase
+            _ensure_shape(state)
+            current_device = _find_device(state, str(device["device_id"]))
+            if not current_device:
+                raise ValueError("device_not_found")
+            current_device["app_id"] = app_id or str(current_device.get("app_id") or "ava_box")
+            if plan_id:
+                current_device["entitlement"] = _entitlement({"plan_id": plan_id, "status": str(body.get("entitlement_status") or "pending_activation"), "expires_at": body.get("expires_at") or 0})
+            purchase = {
+                "purchase_id": _id("pur"),
+                "order_ref": str(body.get("order_ref") or body.get("order_id") or ""),
+                "status": str(body.get("status") or "paid"),
+                "app_id": app_id or str(current_device.get("app_id") or "ava_box"),
+                "project_id": str(current_device.get("project_id") or project_id),
+                "device_id": str(current_device["device_id"]),
+                "activation_code": activation_code,
+                "activation_url": _activation_url(public_base_url, activation_code, app_id),
+                "customer_email": str(body.get("customer_email") or body.get("email") or "").strip().lower(),
+                "customer_wallet": str(body.get("customer_wallet") or body.get("wallet") or body.get("wallet_address") or "").strip(),
+                "customer_id": str(body.get("customer_id") or current_device.get("customer_id") or ""),
+                "plan_id": plan_id,
+                "amount_label": str(body.get("amount_label") or body.get("price_label") or ""),
+                "created_at": now,
+                "activated_at": 0,
+                "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+            }
+            state["purchases"].append(purchase)
+
+        self.store.update(_default_state(), mutate)
+        result = {"ok": True, "purchase": _safe_purchase(purchase), "activation_card": _activation_card(purchase), "activation_code": activation_code}
+        if provisioning_token:
+            result["provisioning_token"] = provisioning_token
+        return result
+
+    def activation_card(self, purchase_id: str, *, public_base_url: str = "") -> dict[str, Any]:
+        data = self.bootstrap()
+        purchase = _find_purchase(data, purchase_id)
+        if not purchase:
+            device = _find_device(data, purchase_id)
+            if not device:
+                raise ValueError("purchase_not_found")
+            activation_code = _activation_code(str(device["device_id"]))
+            purchase = {
+                "purchase_id": "",
+                "order_ref": "",
+                "status": "device_card",
+                "app_id": str(device.get("app_id") or "ava_box"),
+                "project_id": str(device.get("project_id") or ""),
+                "device_id": str(device["device_id"]),
+                "activation_code": activation_code,
+                "activation_url": _activation_url(public_base_url, activation_code, str(device.get("app_id") or "ava_box")),
+                "customer_email": "",
+                "customer_wallet": "",
+                "customer_id": str(device.get("customer_id") or ""),
+                "plan_id": str((device.get("entitlement") or {}).get("plan_id") or ""),
+                "amount_label": "",
+                "created_at": int(device.get("created_at") or 0),
+                "activated_at": int(device.get("activated_at") or 0),
+                "metadata": {},
+            }
+        elif public_base_url:
+            purchase = dict(purchase)
+            purchase["activation_url"] = _activation_url(public_base_url, str(purchase.get("activation_code") or ""), str(purchase.get("app_id") or "ava_box"))
+        return {"ok": True, "purchase": _safe_purchase(purchase), "activation_card": _activation_card(purchase)}
 
     def create_service_plan(self, body: dict[str, Any]) -> dict[str, Any]:
         plan_id = str(body.get("plan_id") or _slug(str(body.get("name") or _id("plan")))).replace("-", "_")
@@ -539,6 +756,25 @@ class ControlPlaneStore:
             linked_customer = _find_customer(state, customer_id)
             if linked_customer:
                 _ensure_customer_app_link(linked_customer, app_id=str(device.get("app_id") or ""), project_id=str(device.get("project_id") or ""))
+            for purchase in state.get("purchases", []):
+                if purchase.get("device_id") != device.get("device_id") and purchase.get("activation_code") != code:
+                    continue
+                expected_wallet = str(purchase.get("customer_wallet") or "")
+                actual_wallet = str((linked_customer or {}).get("wallet") or "")
+                if expected_wallet and actual_wallet != expected_wallet:
+                    raise ValueError("wallet_does_not_match_purchase")
+            for purchase in state.get("purchases", []):
+                if purchase.get("device_id") != device.get("device_id") and purchase.get("activation_code") != code:
+                    continue
+                purchase["status"] = "activated"
+                purchase["customer_id"] = customer_id
+                purchase["activated_at"] = now
+                if linked_customer:
+                    purchase["customer_email"] = str(linked_customer.get("email") or purchase.get("customer_email") or "")
+                    purchase["customer_wallet"] = str(linked_customer.get("wallet") or purchase.get("customer_wallet") or "")
+                plan_id = str(purchase.get("plan_id") or "")
+                if plan_id:
+                    device["entitlement"] = _entitlement({"plan_id": plan_id, "status": "active", "expires_at": (device.get("entitlement") or {}).get("expires_at") or 0})
             activated = dict(device)
 
         self.store.update(_default_state(), mutate)
@@ -745,6 +981,8 @@ def _default_state() -> dict[str, Any]:
         "customers": [],
         "projects": [],
         "devices": [],
+        "purchases": [],
+        "auth_challenges": [],
         "runtime_config": {},
         "default_device_config": dict(DEFAULT_DEVICE_CONFIG),
         "service_plans": [dict(item) for item in DEFAULT_SERVICE_PLANS],
@@ -762,6 +1000,10 @@ def _ensure_shape(data: dict[str, Any]) -> None:
         data["projects"] = []
     if not isinstance(data.get("devices"), list):
         data["devices"] = []
+    if not isinstance(data.get("purchases"), list):
+        data["purchases"] = []
+    if not isinstance(data.get("auth_challenges"), list):
+        data["auth_challenges"] = []
     if not isinstance(data.get("runtime_config"), dict):
         data["runtime_config"] = {}
     if not isinstance(data.get("default_device_config"), dict):
@@ -798,6 +1040,10 @@ def _safe_customer(customer: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+def _safe_purchase(purchase: dict[str, Any]) -> dict[str, Any]:
+    return dict(purchase)
+
+
 def _find_device(data: dict[str, Any], device_id: str) -> dict[str, Any] | None:
     normalized = normalize_control_device_id(device_id)
     for item in data.get("devices", []):
@@ -810,6 +1056,14 @@ def _find_customer(data: dict[str, Any], customer_id: str) -> dict[str, Any] | N
     needle = str(customer_id or "")
     for item in data.get("customers", []):
         if str(item.get("customer_id") or "") == needle:
+            return item
+    return None
+
+
+def _find_purchase(data: dict[str, Any], purchase_id: str) -> dict[str, Any] | None:
+    needle = str(purchase_id or "")
+    for item in data.get("purchases", []):
+        if str(item.get("purchase_id") or "") == needle or str(item.get("device_id") or "") == normalize_control_device_id(needle):
             return item
     return None
 
@@ -849,6 +1103,61 @@ def _token(prefix: str) -> str:
 def _activation_code(device_id: str) -> str:
     digest = hashlib.sha1(device_id.encode("utf-8")).hexdigest()[:8].upper()
     return f"AVA-{digest[:4]}-{digest[4:]}"
+
+
+def _activation_url(public_base_url: str, activation_code: str, app_id: str) -> str:
+    base = str(public_base_url or "").strip().rstrip("/")
+    if not base:
+        base = "http://127.0.0.1:8788"
+    return f"{base}/customer?{urlencode({'activation_code': activation_code, 'app_id': app_id or 'ava_box'})}"
+
+
+def _activation_card(purchase: dict[str, Any]) -> dict[str, Any]:
+    activation_url = str(purchase.get("activation_url") or _activation_url("", str(purchase.get("activation_code") or ""), str(purchase.get("app_id") or "ava_box")))
+    return {
+        "title": "Activate your Ava device",
+        "device_id": str(purchase.get("device_id") or ""),
+        "app_id": str(purchase.get("app_id") or "ava_box"),
+        "activation_code": str(purchase.get("activation_code") or ""),
+        "activation_url": activation_url,
+        "qr_payload": activation_url,
+        "qr_svg": _qr_placeholder_svg(activation_url),
+        "instructions": [
+            "Open the activation URL or scan the QR code.",
+            "Connect your Solana wallet and sign the login message.",
+            "Confirm the activation code to bind this hardware to your account.",
+        ],
+    }
+
+
+def _qr_placeholder_svg(payload: str) -> str:
+    try:
+        import qrcode
+        import qrcode.image.svg
+
+        image = qrcode.make(payload, image_factory=qrcode.image.svg.SvgPathImage)
+        return image.to_string(encoding="unicode")
+    except Exception:
+        pass
+    digest = hashlib.sha256(payload.encode("utf-8")).digest()
+    cells = 17
+    size = 170
+    cell = size // cells
+    rects = [f'<rect width="{size}" height="{size}" fill="#fff9ea"/>']
+    for y in range(cells):
+        for x in range(cells):
+            idx = (x + y * cells) % len(digest)
+            finder = (x < 5 and y < 5) or (x >= cells - 5 and y < 5) or (x < 5 and y >= cells - 5)
+            if finder or ((digest[idx] >> ((x + y) % 8)) & 1):
+                rects.append(f'<rect x="{x * cell}" y="{y * cell}" width="{cell}" height="{cell}" fill="#253021"/>')
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}" role="img" aria-label="Activation code visual marker">' + "".join(rects) + "</svg>"
+
+
+def _short_wallet(wallet: str) -> str:
+    wallet = str(wallet or "")
+    if len(wallet) <= 12:
+        return wallet or "wallet user"
+    return f"{wallet[:4]}...{wallet[-4:]}"
 
 
 def _id(prefix: str) -> str:

@@ -1162,3 +1162,35 @@ manifest
 ```
 
 这就是用 Ava DeviceKit 构建 Ava Box 类产品的核心路径。
+
+## C 端购买、钱包签名与激活闭环
+
+| 层 | 职责 | 当前实现 |
+|---|---|---|
+| Admin / Operator | 创建 app、服务计划、硬件库存、purchase/order、activation card | `/admin/projects`、`/admin/service-plans`、`/admin/devices/register`、`/admin/purchases` |
+| Customer Portal | C 端用户钱包签名登录、输入激活码、查看自己设备 | `/customer`、`/customer/wallet/challenge`、`/customer/wallet/login`、`/customer/activate` |
+| Control Plane | 保存 customers/devices/purchases/auth challenges/entitlements | `ControlPlaneStore` 本地 JSON store |
+| Device Runtime | 设备使用自己的 device token 拉配置、发消息、上报 usage/OTA | `/device/register`、`/device/config`、`/device/message`、`/device/usage` |
+
+### 关键对象
+
+| 对象 | 说明 |
+|---|---|
+| `purchase` | 一次硬件购买/发货记录，包含 order ref、device id、app id、buyer wallet/email、plan id、activation URL。 |
+| `activation_card` | 给 C 端用户的交付物，包含 activation code、activation URL、QR payload 和操作说明。 |
+| `auth_challenge` | 钱包登录 nonce，5 分钟有效，使用后作废。 |
+| `customer_token` | 钱包签名验证后发给浏览器的 portal session token，服务端只保存 hash。 |
+
+### 推荐真实业务流程
+
+| 步骤 | 动作 |
+|---|---|
+| 1 | 运营在 `/admin` 创建 app/project 和 service plan。 |
+| 2 | 运营在 Fleet Setup 创建 purchase activation card；如果知道买家钱包，填写 `customer_wallet`。 |
+| 3 | 工厂/设备用 `provisioning_token` 调 `/device/register`，换取 device token。 |
+| 4 | 用户收到设备和 activation card，打开 `/customer`。 |
+| 5 | 用户连接 Solana wallet，签名 Ava login message。 |
+| 6 | 用户输入 activation code，后台校验 purchase wallet、绑定 device、激活 plan entitlement。 |
+| 7 | 运营在 `/admin/apps/{app_id}/customers`、Device Detail、Usage、Events 查看售后状态。 |
+
+如果 purchase 已指定 `customer_wallet`，则激活必须由同一个钱包签名登录后完成；单独泄露 activation code 不能绑定设备。

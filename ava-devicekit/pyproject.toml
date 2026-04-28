@@ -3,7 +3,7 @@ name = "ava-devicekit"
 version = "0.1.0"
 description = "Full-stack ESP32 framework for Solana AI hardware apps."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["cryptography>=42", "qrcode>=7.4"]
 
 [build-system]
 requires = ["setuptools>=68"]

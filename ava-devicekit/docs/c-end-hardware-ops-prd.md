@@ -113,3 +113,16 @@ Configuration is resolved as default config -> project config -> device override
 | OTA result reporting | Operator must know whether C-end devices updated successfully. |
 | Production identity provider | The portal currently uses local customer bearer tokens; email OTP, wallet signature, or an external identity provider can replace the login boundary. |
 | Real Solana proof provider | Required to move from Solana-ready hardware framework to complete on-chain DePIN proof flow. |
+
+## Purchase And Wallet Login MVP
+
+| Capability | Implementation |
+|---|---|
+| Purchase/order record | `POST /admin/purchases` creates a purchase record for a device, app, plan, order reference, buyer wallet/email, and amount label. |
+| Activation card | Purchase creation returns `activation_card` with `activation_code`, activation URL, QR payload, and printable instructions. |
+| Wallet challenge | `POST /customer/wallet/challenge` returns a nonce-bound Solana sign-in message valid for 5 minutes. |
+| Wallet login | `POST /customer/wallet/login` verifies the Ed25519 signature, creates/reuses the customer, and returns a customer bearer token. |
+| Wallet-locked activation | If the purchase has `customer_wallet`, `/customer/activate` only succeeds for a customer logged in with that wallet. |
+| Plan activation | A purchase can assign `plan_id`; after successful activation the device entitlement becomes active. |
+
+The production identity boundary is wallet signature first. Email remains optional metadata and support fallback, not the primary proof of customer ownership.

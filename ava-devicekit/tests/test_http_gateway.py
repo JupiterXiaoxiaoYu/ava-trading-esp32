@@ -94,12 +94,15 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "Hardware Service Console" in html
         assert "id=\"app-log-form\"" in html
         assert "id=\"customer-register-form\"" in html
+        assert "id=\"purchase-form\"" in html
+        assert "id=\"purchases-table\"" in html
         assert "id=\"app-users-table\"" in html
         assert "id=\"device-detail-form\"" in html
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/control-plane")["counts"]["projects"] >= 1
         assert _get(base_url, "/admin/users")["count"] >= 1
         assert _get(base_url, "/admin/projects")["count"] >= 1
+        assert _get(base_url, "/admin/purchases")["count"] == 0
         assert "items" in _get(base_url, "/admin/registered-devices")
         assert _get(base_url, "/admin/providers/health")["count"] >= 3
         assert _get(base_url, "/admin/developer/services")["count"] == 0
@@ -376,8 +379,8 @@ def test_http_gateway_customer_portal_login_and_activation(tmp_path):
     base_url = f"http://127.0.0.1:{server.server_port}"
     try:
         html = _get_text(base_url, "/customer")
-        assert "Ava Device Activation" in html
-        assert "id=\"customer-login-form\"" in html
+        assert "Activate Ava Hardware" in html
+        assert "id=\"wallet-login-form\"" in html
         assert "id=\"activation-form\"" in html
 
         status, body = _get_status(base_url, "/customer/me")
@@ -403,6 +406,65 @@ def test_http_gateway_customer_portal_login_and_activation(tmp_path):
         users = _get(base_url, "/admin/apps/ava_box/customers")
         assert users["count"] == 1
         assert users["items"][0]["device_count"] == 1
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_http_gateway_wallet_customer_purchase_flow(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from ava_devicekit.wallet import b58encode
+
+    private_key = Ed25519PrivateKey.generate()
+    wallet = b58encode(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    )
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        html = _get_text(base_url, "/customer")
+        assert "wallet-login-form" in html
+        assert "/customer/wallet/challenge" in html
+
+        purchase = _post(
+            base_url,
+            "/admin/purchases",
+            {
+                "device_id": "wallet-http-box",
+                "order_ref": "ORDER-HTTP",
+                "app_id": "ava_box",
+                "plan_id": "plan_starter",
+                "customer_wallet": wallet,
+            },
+        )
+        assert purchase["purchase"]["customer_wallet"] == wallet
+        assert purchase["activation_card"]["activation_url"].startswith(base_url + "/customer?")
+        assert "qr_svg" in purchase["activation_card"]
+        assert _get(base_url, "/admin/purchases")["count"] == 1
+        card = _get(base_url, f"/admin/purchases/{purchase['purchase']['purchase_id']}/activation-card")
+        assert card["activation_card"]["activation_code"] == purchase["activation_code"]
+
+        challenge = _post(base_url, "/customer/wallet/challenge", {"wallet": wallet, "app_id": "ava_box"})
+        signature = b58encode(private_key.sign(challenge["message"].encode("utf-8")))
+        login = _post(
+            base_url,
+            "/customer/wallet/login",
+            {"wallet": wallet, "nonce": challenge["nonce"], "signature": signature, "app_id": "ava_box"},
+        )
+        assert login["auth_method"] == "wallet_signature"
+        headers = {"Authorization": "Bearer " + login["customer_token"]}
+        status, activated = _post_status(base_url, "/customer/activate", {"activation_code": purchase["activation_code"]}, headers)
+        assert status == 200
+        assert activated["device"]["device_id"] == "wallet_http_box"
+        assert activated["device"]["entitlement"]["status"] == "active"
     finally:
         server.shutdown()
         thread.join(timeout=5)

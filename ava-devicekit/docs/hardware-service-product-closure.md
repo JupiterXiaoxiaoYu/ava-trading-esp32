@@ -100,3 +100,28 @@ Recent events and the Events tab are server-side runtime event streams. They are
 | Payment/billing automation | Service plans and entitlements are enough for manual operation; automated billing can connect through backend services. |
 | OTA staged rollout and rollback UI | Important before large fleet rollout. |
 | Real Solana device proof program | Needed for full on-chain DePIN proof/reward programs. |
+
+## Wallet-Signature Customer Activation
+
+The C-end portal now uses Solana wallet signatures as the customer login boundary. The user does not create a developer account and does not receive backend credentials.
+
+| Step | Actor | API/UI | Result |
+|---|---|---|---|
+| 1 | Operator | `/admin` -> Apps | Create the app/project record. |
+| 2 | Operator | `/admin` -> Usage | Create or select a service plan. |
+| 3 | Operator | `/admin` -> Fleet Setup | Provision the physical device. |
+| 4 | Operator | `/admin/purchases` or Fleet Setup purchase form | Record the purchase, optionally lock it to a buyer wallet, assign the plan, and generate the activation card. |
+| 5 | Factory/device | `/device/register` | Exchange the provisioning token for a per-device bearer token. |
+| 6 | Customer | `/customer` | Connect Solana wallet and sign the login challenge. |
+| 7 | Customer | `/customer/activate` | Submit activation code; the device binds to the wallet-authenticated customer. |
+| 8 | Operator | `/admin/apps/{app_id}/customers` and `/admin/devices/{device_id}/diagnostics` | Inspect user, device, plan, logs, usage, and support state. |
+
+| Token/code | Holder | Purpose |
+|---|---|---|
+| `provisioning_token` | Factory/device only | First device registration. |
+| `device_token` | Device only | Device auth for config, messages, usage, OTA. |
+| `activation_code` | Customer | Proof that the user has the purchased hardware package. |
+| Wallet signature | Customer wallet | Login proof; no transaction and no asset movement. |
+| `customer_token` | Customer browser | Portal session after signature verification. |
+
+If a purchase is created with `customer_wallet`, activation is restricted to that wallet. This prevents a leaked activation code from being bound by another wallet.

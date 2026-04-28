@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ava_devicekit.control_plane import ControlPlaneStore, control_plane_usage_recorder
 from ava_devicekit.runtime.settings import RuntimeSettings
+from ava_devicekit.wallet import b58encode
 
 
 def test_control_plane_bootstrap_and_device_registration(tmp_path):
@@ -93,6 +94,47 @@ def test_control_plane_customer_session_token_and_activation(tmp_path):
 
     public = store.snapshot()
     assert "customer_token_hash" not in public["customers"][0]
+
+
+def test_control_plane_wallet_signature_purchase_activation(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    wallet = b58encode(public_key)
+
+    store = ControlPlaneStore(tmp_path / "control.json")
+    purchase = store.create_purchase(
+        {
+            "device_id": "wallet-box",
+            "order_ref": "ORDER-1",
+            "app_id": "ava_box",
+            "plan_id": "plan_starter",
+            "customer_wallet": wallet,
+        },
+        public_base_url="https://activate.example",
+    )
+    assert purchase["purchase"]["device_id"] == "wallet_box"
+    assert purchase["purchase"]["activation_url"].startswith("https://activate.example/customer?")
+    assert purchase["activation_card"]["activation_code"] == purchase["activation_code"]
+    assert purchase["provisioning_token"].startswith("avaprov_")
+
+    challenge = store.create_wallet_challenge({"wallet": wallet, "app_id": "ava_box"})
+    signature = b58encode(private_key.sign(challenge["message"].encode("utf-8")))
+    login = store.login_customer_with_wallet({"wallet": wallet, "nonce": challenge["nonce"], "signature": signature, "app_id": "ava_box"})
+    assert login["auth_method"] == "wallet_signature"
+    assert login["customer"]["wallet"] == wallet
+    assert login["customer_token"].startswith("avacus_")
+
+    activated = store.activate_customer_device(login["customer"]["customer_id"], {"activation_code": purchase["activation_code"]})
+    assert activated["device"]["status"] == "active"
+    assert activated["device"]["entitlement"]["plan_id"] == "plan_starter"
+    assert activated["device"]["entitlement"]["status"] == "active"
+    assert store.purchases()["items"][0]["status"] == "activated"
 
 
 def test_control_plane_runtime_config_is_persisted_and_redacted(tmp_path):

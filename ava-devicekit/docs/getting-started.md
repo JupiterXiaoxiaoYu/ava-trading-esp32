@@ -69,3 +69,20 @@ Use this sequence to verify the local service is usable as a hardware-product ba
 6. Register the device with `POST /device/register`.
 7. Open `/customer`, sign in with the hardware buyer email, and activate the device with the `activation_code`.
 8. Confirm the user appears in `Apps -> App users` and the device appears in `Device Detail`.
+
+## Wallet-Signature Purchase Flow
+
+1. In `/admin`, create the app/project and service plan.
+2. In Fleet Setup, create a purchase activation card with `device_id`, `app_id`, optional `customer_wallet`, and `plan_id`.
+3. Flash/register the device with its `provisioning_token`; the customer never sees this token.
+4. Give the customer the activation card URL/code.
+5. The customer opens `/customer`, connects a Solana wallet, signs the challenge, and submits the activation code.
+6. The device becomes bound to that wallet-authenticated customer and the plan entitlement is activated.
+
+| Path | Purpose |
+|---|---|
+| `POST /admin/purchases` | Record hardware purchase and generate activation card. |
+| `GET /admin/purchases` | List purchase/order records. |
+| `GET /admin/purchases/{purchase_id}/activation-card` | Re-open the activation card payload. |
+| `POST /customer/wallet/challenge` | Create a nonce-bound Solana wallet login challenge. |
+| `POST /customer/wallet/login` | Verify the wallet signature and issue a customer session token. |
