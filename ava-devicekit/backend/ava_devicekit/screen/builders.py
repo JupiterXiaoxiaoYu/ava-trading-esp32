@@ -44,7 +44,12 @@ def confirm(payload: dict, *, context: AppContext | None = None, limit: bool = F
 
 
 def result(title: str, body: str, *, ok: bool = True, context: AppContext | None = None) -> ScreenPayload:
-    return ScreenPayload("result", {"ok": ok, "title": title, "body": body}, context)
+    payload = {"ok": ok, "success": ok, "title": title, "body": body}
+    if ok:
+        payload["subtitle"] = body
+    else:
+        payload["error"] = body
+    return ScreenPayload("result", payload, context)
 
 
 def notify(title: str, body: str, *, level: str = "info", context: AppContext | None = None) -> ScreenPayload:

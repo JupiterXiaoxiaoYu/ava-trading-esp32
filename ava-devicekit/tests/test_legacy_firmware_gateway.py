@@ -129,6 +129,8 @@ def test_legacy_firmware_trade_action_confirm_routes_pending_draft():
     display = conn.handle_text(json.dumps({"type": "trade_action", "action": "confirm", "trade_id": request_id}))[0]
     assert display["screen"] == "result"
     assert display["data"]["title"] == "Action confirmed"
+    assert display["data"]["success"] is True
+    assert display["data"]["ok"] is True
     assert display["action_result"]["ok"] is True
 
 
@@ -140,6 +142,7 @@ def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
     display = conn.handle_text(json.dumps({"type": "trade_action", "action": "cancel", "trade_id": request_id}))[0]
     assert display["screen"] == "result"
     assert display["data"]["title"] == "Action cancelled"
+    assert display["data"]["success"] is True
     assert display["action_result"]["ok"] is True
 
 

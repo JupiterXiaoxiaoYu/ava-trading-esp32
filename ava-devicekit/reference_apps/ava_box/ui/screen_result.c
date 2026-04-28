@@ -283,6 +283,7 @@ void screen_result_show(const char *json_data)
     screen_result_cancel_timers();
 
     int success = _get_bool(json_data, "success");
+    if (!success) success = _get_bool(json_data, "ok");
 
     char title[64] = {0};
     char subtitle[128] = {0};

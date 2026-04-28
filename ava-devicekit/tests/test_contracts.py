@@ -34,6 +34,9 @@ def test_demo_flow_contracts():
     assert draft["action_draft"]["requires_confirmation"] is True
     result = session.handle({"type": "confirm"})
     assert result["screen"] == "result"
+    assert result["data"]["success"] is True
+    assert result["data"]["ok"] is True
+    assert result["data"]["subtitle"]
 
 
 def test_clean_framework_has_no_legacy_imports():
