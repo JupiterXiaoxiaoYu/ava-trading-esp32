@@ -152,6 +152,7 @@ ESP32 input / voice
 
 | Doc | Purpose |
 |---|---|
+| `docs/technical-architecture-and-builder-guide-zh.md` | 中文技术架构、后台功能、固件/硬件/UI/AI 关系，以及从 0 到 1 构建 Ava Box 类产品的开发者指南 |
 | `docs/framework-vs-avabox.md` | Strict boundary between DeviceKit framework and Ava Box app logic |
 | `docs/completion-status.md` | Current framework/app completion matrix and runtime assumptions |
 | `docs/getting-started.md` | Local install, offline run, runtime provider config, admin APIs |
