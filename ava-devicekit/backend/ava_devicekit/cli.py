@@ -8,6 +8,7 @@ from typing import Any
 
 from ava_devicekit.gateway.http_server import run_http_gateway
 from ava_devicekit.gateway.legacy_firmware import run_legacy_firmware_gateway
+from ava_devicekit.gateway.server import run_server
 from ava_devicekit.runtime.settings import RuntimeSettings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,10 @@ def main(argv: list[str] | None = None) -> None:
     ws = sub.add_parser("run-legacy-ws", help="Run the existing-firmware-compatible WebSocket gateway")
     _add_runtime_args(ws, default_port=8787)
 
+    server = sub.add_parser("run-server", help="Run HTTP, legacy WebSocket and runtime tasks in one process")
+    _add_runtime_args(server, default_port=8788)
+    server.add_argument("--ws-port", type=int, default=None)
+
     args = parser.parse_args(argv)
     if args.command == "capabilities":
         _print_json(json.loads((USERLAND / "capabilities.json").read_text(encoding="utf-8")))
@@ -58,6 +63,14 @@ def main(argv: list[str] | None = None) -> None:
 
         settings = RuntimeSettings.load(args.config)
         asyncio.run(run_legacy_firmware_gateway(args.host, args.port, app_id=args.app_id, manifest_path=args.manifest, adapter=args.adapter, mock=args.mock, skill_store_path=args.skill_store, runtime_settings=settings))
+        return
+    if args.command == "run-server":
+        settings = RuntimeSettings.load(args.config)
+        settings.host = args.host
+        settings.http_port = args.port
+        if args.ws_port is not None:
+            settings.websocket_port = args.ws_port
+        run_server(settings=settings, app_id=args.app_id, manifest_path=args.manifest, adapter=args.adapter, mock=args.mock, skill_store_path=args.skill_store)
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser, *, default_port: int) -> None:

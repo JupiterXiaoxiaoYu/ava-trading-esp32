@@ -143,3 +143,15 @@ def test_background_task_manager_validates_duplicate_and_unknown_tasks():
         await manager.stop()
 
     asyncio.run(scenario())
+
+
+def test_background_task_manager_snapshot_includes_registered_tasks():
+    manager = BackgroundTaskManager()
+    manager.add_periodic("poll", 1.0, lambda: None)
+
+    snapshot = manager.snapshot()
+
+    assert snapshot["count"] == 1
+    assert snapshot["items"][0]["name"] == "poll"
+    assert snapshot["items"][0]["running"] is False
+    assert snapshot["items"][0]["last_event"]["type"] == "registered"

@@ -13,6 +13,7 @@ EVENT_OUTBOUND_SENT = "outbound.sent"
 EVENT_OUTBOUND_ACKED = "outbound.acked"
 EVENT_PROVIDER_ERROR = "provider.error"
 EVENT_MARKET_EVENT = "market.event"
+EVENT_RUNTIME_ERROR = "runtime.error"
 
 STANDARD_EVENT_NAMES = frozenset(
     {
@@ -25,6 +26,7 @@ STANDARD_EVENT_NAMES = frozenset(
         EVENT_OUTBOUND_ACKED,
         EVENT_PROVIDER_ERROR,
         EVENT_MARKET_EVENT,
+        EVENT_RUNTIME_ERROR,
     }
 )
 
@@ -120,6 +122,9 @@ class RuntimeEventBus:
 
     def market_event(self, device_id: str, market: dict[str, Any], **payload: Any) -> RuntimeEvent:
         return self.emit(device_id, EVENT_MARKET_EVENT, {"market": dict(market), **payload})
+
+    def runtime_error(self, device_id: str, error: dict[str, Any], **payload: Any) -> RuntimeEvent:
+        return self.emit(device_id, EVENT_RUNTIME_ERROR, {"error": dict(error), **payload})
 
     def _notify(self, row: RuntimeEvent) -> None:
         for handler in [*self._subscribers.get(row.event, []), *self._subscribers.get(None, [])]:

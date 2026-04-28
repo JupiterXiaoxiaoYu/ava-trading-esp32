@@ -80,6 +80,7 @@ class BackgroundTaskManager:
         self._event_callback = event_callback
         self._registry: dict[str, PeriodicTask] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
+        self._last_events: dict[str, TaskEvent] = {}
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -120,6 +121,21 @@ class BackgroundTaskManager:
         self._registry[name] = task
         self._schedule_event(TaskEvent(name=name, type="registered", timestamp=time.time()))
         return task
+
+    def snapshot(self) -> dict[str, Any]:
+        items = []
+        for name, task in self._registry.items():
+            event = self._last_events.get(name)
+            items.append(
+                {
+                    "name": name,
+                    "interval": task.interval,
+                    "initial_delay": task.initial_delay,
+                    "running": name in self._running,
+                    "last_event": _event_to_dict(event) if event else None,
+                }
+            )
+        return {"items": items, "count": len(items), "running_count": len(self._running)}
 
     async def start(self) -> None:
         """Start all registered tasks that are not already running."""
@@ -225,6 +241,7 @@ class BackgroundTaskManager:
             )
 
     async def _emit(self, event: TaskEvent) -> None:
+        self._last_events[event.name] = event
         if self._event_callback is None:
             return
         try:
@@ -236,6 +253,7 @@ class BackgroundTaskManager:
             return
 
     def _schedule_event(self, event: TaskEvent) -> None:
+        self._last_events[event.name] = event
         if self._event_callback is None:
             return
         try:
@@ -243,6 +261,20 @@ class BackgroundTaskManager:
         except RuntimeError:
             return
         loop.create_task(self._emit(event))
+
+
+def _event_to_dict(event: TaskEvent | None) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    return {
+        "name": event.name,
+        "type": event.type,
+        "timestamp": event.timestamp,
+        "run_count": event.run_count,
+        "failure_count": event.failure_count,
+        "next_delay": event.next_delay,
+        "exception": str(event.exception) if event.exception else "",
+    }
 
 
 __all__ = [

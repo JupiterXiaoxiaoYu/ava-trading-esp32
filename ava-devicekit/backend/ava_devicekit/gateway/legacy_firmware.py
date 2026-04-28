@@ -355,6 +355,8 @@ async def run_legacy_firmware_gateway(
     mock: bool = False,
     skill_store_path: str | None = None,
     runtime_settings: RuntimeSettings | None = None,
+    manager: RuntimeManager | None = None,
+    providers: ProviderBundle | None = None,
 ) -> None:
     try:
         import websockets
@@ -362,8 +364,8 @@ async def run_legacy_firmware_gateway(
         raise RuntimeError("Install websockets or ava-devicekit[websocket] to run the legacy-firmware-compatible gateway") from exc
 
     settings = runtime_settings or RuntimeSettings.load()
-    providers: ProviderBundle = create_provider_bundle(settings)
-    manager = runtime_manager_for_settings(
+    providers = providers or create_provider_bundle(settings)
+    manager = manager or runtime_manager_for_settings(
         settings,
         app_id=app_id,
         manifest_path=manifest_path,

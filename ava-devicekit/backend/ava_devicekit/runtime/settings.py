@@ -91,8 +91,8 @@ class RuntimeSettings:
         execution = data.get("execution") if isinstance(data.get("execution"), dict) else {}
         return cls(
             host=str(data.get("host") or server.get("ip") or DEFAULT_HOST),
-            http_port=int(data.get("http_port") or server.get("http_port") or DEFAULT_HTTP_PORT),
-            websocket_port=int(data.get("websocket_port") or server.get("port") or DEFAULT_WEBSOCKET_PORT),
+            http_port=int(_first_present(data.get("http_port"), server.get("http_port"), DEFAULT_HTTP_PORT)),
+            websocket_port=int(_first_present(data.get("websocket_port"), server.get("port"), DEFAULT_WEBSOCKET_PORT)),
             public_base_url=str(data.get("public_base_url") or server.get("public_base_url") or ""),
             websocket_url=str(data.get("websocket_url") or server.get("websocket") or ""),
             firmware_bin_dir=str(data.get("firmware_bin_dir") or server.get("firmware_bin_dir") or DEFAULT_FIRMWARE_BIN_DIR),
@@ -250,6 +250,13 @@ def _provider_options(data: dict[str, Any]) -> dict[str, Any]:
     }
     inline = {k: v for k, v in data.items() if k not in reserved}
     return {**inline, **options}
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _sanitize_options(options: dict[str, Any] | None) -> dict[str, Any]:

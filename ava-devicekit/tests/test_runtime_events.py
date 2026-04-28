@@ -9,6 +9,7 @@ from ava_devicekit.runtime.events import (
     EVENT_OUTBOUND_QUEUED,
     EVENT_OUTBOUND_SENT,
     EVENT_PROVIDER_ERROR,
+    EVENT_RUNTIME_ERROR,
     EVENT_SCREEN_CHANGED,
     STANDARD_EVENT_NAMES,
     RuntimeEventBus,
@@ -64,6 +65,7 @@ def test_runtime_event_bus_exposes_all_standard_typed_helpers():
     bus.outbound_acked("device-a", {"message_id": "msg_1"})
     bus.provider_error("device-a", "llm", RuntimeError("boom"))
     bus.market_event("device-a", {"symbol": "SOL"})
+    bus.runtime_error("device-a", {"code": "runtime.state.invalid"})
 
     names = [item["event"] for item in bus.event_log(limit=20)["items"]]
     assert names == [
@@ -76,5 +78,6 @@ def test_runtime_event_bus_exposes_all_standard_typed_helpers():
         EVENT_OUTBOUND_ACKED,
         EVENT_PROVIDER_ERROR,
         EVENT_MARKET_EVENT,
+        EVENT_RUNTIME_ERROR,
     ]
     assert set(names) == STANDARD_EVENT_NAMES

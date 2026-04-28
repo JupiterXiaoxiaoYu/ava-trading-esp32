@@ -10,7 +10,9 @@ from ava_devicekit.core.types import AppContext, ScreenPayload
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.runtime.events import RuntimeEvent, RuntimeEventBus
+from ava_devicekit.runtime.errors import ERROR_DEVICE_QUEUE_EXPIRED, RuntimeErrorInfo
 from ava_devicekit.runtime.settings import RuntimeSettings
+from ava_devicekit.runtime.state import RUNTIME_STATE_VERSION, migrate_runtime_state
 from ava_devicekit.storage.json_store import JsonStore
 
 SessionBuilder = Callable[[str], DeviceSession]
@@ -163,6 +165,17 @@ class RuntimeManager:
                     continue
                 attempts = int(item.get("attempts") or 0)
                 if attempts >= max_attempts:
+                    error = RuntimeErrorInfo(
+                        code=ERROR_DEVICE_QUEUE_EXPIRED,
+                        message="queued outbound message exceeded max delivery attempts",
+                        component="gateway.outbox",
+                        details={
+                            "message_id": str(item.get("message_id") or ""),
+                            "attempts": attempts,
+                            "max_attempts": max_attempts,
+                        },
+                    )
+                    self.event_bus.runtime_error(device_id, error.to_dict())
                     continue
                 if float(item.get("lease_until") or 0) > now:
                     kept.append(item)
@@ -259,6 +272,26 @@ class RuntimeManager:
         state = JsonStore(path).read({})
         return state if isinstance(state, dict) and state else {"device_id": normalize_device_id(device_id), "connected": False}
 
+    def sweep_stale_connections(self, *, max_idle_sec: float = 120.0) -> dict[str, Any]:
+        now = time.time()
+        changed: list[str] = []
+        for device_id in self._stored_device_ids():
+            state = self.connection_state(device_id)
+            if not state.get("connected"):
+                continue
+            last_seen = float(state.get("last_seen") or state.get("connected_at") or 0)
+            if last_seen <= 0 or now - last_seen <= max_idle_sec:
+                continue
+            state["connected"] = False
+            state["disconnected_at"] = now
+            state["disconnect_reason"] = "stale"
+            path = _device_connection_path(self.state_store_path, device_id)
+            if path:
+                JsonStore(path).write(state)
+            self.event_bus.device_disconnected(device_id, reason="stale", idle_sec=now - last_seen)
+            changed.append(device_id)
+        return {"stale": changed, "count": len(changed)}
+
     def record(self, device_id: str, event: str, payload: dict[str, Any] | None = None) -> None:
         self.event_bus.record(device_id, event, payload)
         self.events = self.event_bus.events
@@ -273,7 +306,7 @@ class RuntimeManager:
         app = session.app
         last_screen = getattr(app, "last_screen", None)
         state = {
-            "version": 1,
+            "version": RUNTIME_STATE_VERSION,
             "device_id": normalize_device_id(device_id),
             "updated_at": time.time(),
             "snapshot": session.snapshot(),
@@ -314,9 +347,9 @@ class RuntimeManager:
         path = _device_store_path(self.state_store_path, device_id)
         if not path:
             return None
-        raw = JsonStore(path).read({})
-        if not isinstance(raw, dict):
-            return None
+        raw, errors = migrate_runtime_state(JsonStore(path).read({}))
+        for error in errors:
+            self.event_bus.runtime_error(device_id, error.to_dict())
         self._state_mtimes[normalize_device_id(device_id)] = _path_mtime(Path(path))
         context = _context_from_stored_dict(raw.get("context"))
         if context:

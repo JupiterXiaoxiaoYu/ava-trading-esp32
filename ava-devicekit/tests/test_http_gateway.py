@@ -62,6 +62,8 @@ def test_http_gateway_admin_endpoints():
     try:
         assert "core_capabilities" in _get(base_url, "/admin/capabilities")
         assert "providers" in _get(base_url, "/admin/runtime")
+        assert _get(base_url, "/admin/providers/health")["count"] >= 3
+        assert _get(base_url, "/admin/tasks")["count"] == 0
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
     finally:
         server.shutdown()

@@ -6,19 +6,27 @@ import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
-from urllib.parse import urlparse
+from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 from ava_devicekit.gateway.factory import create_device_session
 from ava_devicekit.gateway.runtime_manager import RuntimeManager, normalize_device_id, runtime_manager_for_settings
 from ava_devicekit.gateway.session import DeviceSession
 from ava_devicekit.ota.firmware import build_ota_response, resolve_firmware_download
+from ava_devicekit.providers.health import provider_health_report
 from ava_devicekit.runtime.settings import RuntimeSettings
+from ava_devicekit.runtime.tasks import BackgroundTaskManager
 
 SessionFactory = Callable[[], DeviceSession]
 
 
-def make_handler(session_factory: SessionFactory | None = None, runtime_settings: RuntimeSettings | None = None, manager: RuntimeManager | None = None):
+def make_handler(
+    session_factory: SessionFactory | None = None,
+    runtime_settings: RuntimeSettings | None = None,
+    manager: RuntimeManager | None = None,
+    task_manager: BackgroundTaskManager | None = None,
+    provider_health: Callable[[], dict[str, Any]] | None = None,
+):
     settings = runtime_settings or RuntimeSettings.load()
     session_factory = session_factory or (lambda: create_device_session(mock=True))
     manager = manager or RuntimeManager(lambda device_id: session_factory())
@@ -27,7 +35,9 @@ def make_handler(session_factory: SessionFactory | None = None, runtime_settings
         server_version = "AvaDeviceKitHTTP/0.1"
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = parse_qs(parsed.query)
             if path == "/health":
                 self._send_json({"ok": True, "service": "ava-devicekit"})
                 return
@@ -73,13 +83,35 @@ def make_handler(session_factory: SessionFactory | None = None, runtime_settings
             if path == "/admin/events":
                 if not self._authorized_admin():
                     return
-                self._send_json(manager.event_log(limit=200))
+                self._send_json(
+                    manager.event_log(
+                        device_id=_query_value(query, "device_id"),
+                        event=_query_value(query, "event"),
+                        limit=int(_query_value(query, "limit") or 200),
+                    )
+                )
+                return
+            if path == "/admin/providers/health":
+                if not self._authorized_admin():
+                    return
+                self._send_json(provider_health() if provider_health else provider_health_report(settings))
+                return
+            if path == "/admin/tasks":
+                if not self._authorized_admin():
+                    return
+                self._send_json(task_manager.snapshot() if task_manager else {"items": [], "count": 0, "running_count": 0})
                 return
             if path.startswith("/admin/devices/") and path.endswith("/state"):
                 if not self._authorized_admin():
                     return
                 device_id = path.split("/")[3]
                 self._send_json(manager.state(device_id))
+                return
+            if path.startswith("/admin/devices/") and path.endswith("/connection"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                self._send_json(manager.connection_state(device_id))
                 return
             if path.startswith("/admin/devices/") and path.endswith("/outbox"):
                 if not self._authorized_admin():
@@ -208,6 +240,11 @@ def _load_capabilities() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _query_value(query: dict[str, list[str]], key: str) -> str:
+    values = query.get(key) or []
+    return str(values[0]) if values else ""
+
+
 def _admin_page() -> str:
     return """<!doctype html>
 <html lang="en">
@@ -230,6 +267,8 @@ code{color:#64d2ff}
 <div class="grid">
 <a href="/admin/capabilities">Capabilities<br><code>/admin/capabilities</code></a>
 <a href="/admin/runtime">Runtime<br><code>/admin/runtime</code></a>
+<a href="/admin/providers/health">Provider Health<br><code>/admin/providers/health</code></a>
+<a href="/admin/tasks">Tasks<br><code>/admin/tasks</code></a>
 <a href="/admin/apps">Apps<br><code>/admin/apps</code></a>
 <a href="/admin/devices">Devices<br><code>/admin/devices</code></a>
 <a href="/admin/events">Events<br><code>/admin/events</code></a>
