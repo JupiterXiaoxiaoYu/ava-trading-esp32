@@ -32,6 +32,8 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert portfolio.screen == "portfolio"
     assert "holdings" in portfolio.payload
     assert portfolio.payload["mode_label"] == "Paper"
+    assert portfolio.payload["total_usd"] == "Funds 1 SOL"
+    assert portfolio.payload["pnl_reason"] == "Cash: 1 SOL"
 
     draft = service.create_action_draft("buy", {}, context=context)
     assert draft.action == "trade.market_draft"
@@ -47,6 +49,8 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     assert holding["symbol"] == "BONK"
     assert holding["value_usd"]
     assert holding["balance_raw"]
+    assert portfolio_after_trade.payload["total_usd"] == "Funds 1 SOL"
+    assert portfolio_after_trade.payload["pnl_reason"] == "Cash: 0.9 SOL"
     orders = service.get_orders(context=context)
     assert orders.screen == "feed"
     assert orders.payload["mode"] == "orders"

@@ -479,14 +479,9 @@ static void _refresh_rows(void) {
             char avg_buf[24];
             char source_tag[8];
             _compact_upper_tag(h->source_tag, source_tag, sizeof(source_tag), 4);
-            if (h->contract_tail[0] && source_tag[0]) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s %s *%s",
-                         h->symbol, source_tag, h->contract_tail);
-            } else if (source_tag[0]) {
+            if (source_tag[0]) {
                 snprintf(sym_buf, sizeof(sym_buf), "%s %s",
                          h->symbol, source_tag);
-            } else if (h->contract_tail[0]) {
-                snprintf(sym_buf, sizeof(sym_buf), "%s *%s", h->symbol, h->contract_tail);
             } else {
                 snprintf(sym_buf, sizeof(sym_buf), "%s", h->symbol);
             }

@@ -6,6 +6,8 @@ from typing import Any
 
 from ava_devicekit.storage.json_store import JsonStore
 
+DEFAULT_PAPER_CASH_SOL = Decimal("1")
+
 
 class PaperExecutionProvider:
     """Safe execution provider used by Ava Box demos.
@@ -33,6 +35,7 @@ class PaperExecutionProvider:
         state.setdefault("paper_orders", []).insert(0, order)
         state["paper_orders"] = state["paper_orders"][:100]
         _apply_position(state, order)
+        _apply_cash(state, order)
         self.store.write(state)
         return order
 
@@ -71,6 +74,24 @@ def _apply_position(state: dict[str, Any], order: dict[str, Any]) -> None:
     state["paper_positions"] = [row for row in positions if _decimal(row.get("amount")) > 0][:100]
 
 
+def _apply_cash(state: dict[str, Any], order: dict[str, Any]) -> None:
+    cash = _paper_cash(state)
+    delta = _extract_amount(order.get("amount"))
+    if delta <= 0:
+        return
+    if str(order.get("action") or "") == "trade.sell_draft":
+        cash += delta
+    else:
+        cash -= delta
+    if cash < 0:
+        cash = Decimal("0")
+    state["paper_cash_sol"] = _fmt_decimal(cash)
+
+
+def _paper_cash(state: dict[str, Any]) -> Decimal:
+    return _decimal(state.get("paper_cash_sol", DEFAULT_PAPER_CASH_SOL))
+
+
 def _extract_amount(value: Any) -> Decimal:
     text = str(value or "0").upper().replace("SOL", "").strip()
     return _decimal(text)
@@ -88,4 +109,12 @@ def _fmt_decimal(value: Decimal) -> str:
 
 
 def _state(store: JsonStore) -> dict[str, Any]:
-    return store.read({"watchlist": [], "paper_positions": [], "paper_orders": []})
+    return store.read(
+        {
+            "watchlist": [],
+            "paper_positions": [],
+            "paper_orders": [],
+            "paper_cash_sol": str(DEFAULT_PAPER_CASH_SOL),
+            "paper_starting_sol": str(DEFAULT_PAPER_CASH_SOL),
+        }
+    )

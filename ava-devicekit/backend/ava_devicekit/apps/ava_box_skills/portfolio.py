@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import SOLANA
+from ava_devicekit.apps.ava_box_skills.paper import DEFAULT_PAPER_CASH_SOL
 from ava_devicekit.core.types import AppContext, ScreenPayload
 from ava_devicekit.formatting.numbers import format_money, format_percent, parse_number
 from ava_devicekit.screen import builders
@@ -14,20 +15,22 @@ class PortfolioSkill:
         self.store = store
 
     def open(self, *, context: AppContext | None = None) -> ScreenPayload:
-        rows = [_portfolio_row(row) for row in _state(self.store).get("paper_positions", []) if isinstance(row, dict)]
+        state = _state(self.store)
+        rows = [_portfolio_row(row) for row in state.get("paper_positions", []) if isinstance(row, dict)]
         if not rows:
             rows = [_portfolio_row({"symbol": "EMPTY", "chain": SOLANA, "value": "$0", "pnl": "$0", "source": "paper"})]
-        total = _sum_money(row.get("value_usd") for row in rows)
         pnl = _sum_money(row.get("pnl") for row in rows)
+        starting_sol = _sol_label(state.get("paper_starting_sol", DEFAULT_PAPER_CASH_SOL))
+        cash_sol = _sol_label(state.get("paper_cash_sol", DEFAULT_PAPER_CASH_SOL))
         return builders.portfolio(
             rows,
             chain=SOLANA,
-            total_usd=_money_label(total),
+            total_usd=f"Funds {starting_sol}",
             pnl=_money_label(pnl),
             pnl_pct=format_percent(0),
             mode_label="Paper",
             chain_label="SOL",
-            pnl_reason="Local paper execution",
+            pnl_reason=f"Cash: {cash_sol}",
             context=context,
         )
 
@@ -37,7 +40,15 @@ class PortfolioSkill:
 
 
 def _state(store: JsonStore) -> dict[str, Any]:
-    return store.read({"watchlist": [], "paper_positions": [], "paper_orders": []})
+    return store.read(
+        {
+            "watchlist": [],
+            "paper_positions": [],
+            "paper_orders": [],
+            "paper_cash_sol": str(DEFAULT_PAPER_CASH_SOL),
+            "paper_starting_sol": str(DEFAULT_PAPER_CASH_SOL),
+        }
+    )
 
 
 def _portfolio_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -93,3 +104,9 @@ def _money_value(value: Any) -> float:
 def _money_label(value: float) -> str:
     sign = "-" if value < 0 else ""
     return format_money(value)
+
+
+def _sol_label(value: Any) -> str:
+    amount = parse_number(value, default=1)
+    text = f"{amount:.4f}".rstrip("0").rstrip(".")
+    return f"{text or '0'} SOL"

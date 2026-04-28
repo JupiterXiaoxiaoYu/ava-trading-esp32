@@ -522,9 +522,9 @@ int main(void)
     snprintf(s_holdings[0].symbol, sizeof(s_holdings[0].symbol), "%s", "SYM\"1");
     snprintf(s_holdings[0].balance_raw, sizeof(s_holdings[0].balance_raw), "%s", "10\".25");
 
-    screen_portfolio_show("{\"holdings\":[{\"symbol\":\"BONK\",\"source_tag\":\"paper\",\"avg_cost_usd\":\"$1\",\"value_usd\":\"$2\",\"pnl\":\"$1\",\"pnl_positive\":true}],\"total_usd\":\"$2\",\"pnl\":\"$1\",\"mode_label\":\"Paper\",\"chain_label\":\"SOL\"}");
-    if (!s_row_sym[0] || strstr(s_row_sym[0]->text, "PAPE") || strcmp(s_row_sym[0]->text, "BONK") != 0) {
-        fprintf(stderr, "FAIL: portfolio paper mode source tag leaked into symbol: %s\n", s_row_sym[0] ? s_row_sym[0]->text : "<null>");
+    screen_portfolio_show("{\"holdings\":[{\"symbol\":\"BONK\",\"source_tag\":\"paper\",\"contract_tail\":\"ABCD\",\"avg_cost_usd\":\"$1\",\"value_usd\":\"$2\",\"pnl\":\"$1\",\"pnl_positive\":true}],\"total_usd\":\"Cash 1 SOL\",\"pnl\":\"$1\",\"mode_label\":\"Paper\",\"chain_label\":\"SOL\"}");
+    if (!s_row_sym[0] || strstr(s_row_sym[0]->text, "PAPE") || strstr(s_row_sym[0]->text, "*ABCD") || strcmp(s_row_sym[0]->text, "BONK") != 0) {
+        fprintf(stderr, "FAIL: portfolio row leaked source/address suffix into symbol: %s\n", s_row_sym[0] ? s_row_sym[0]->text : "<null>");
         ok = 0;
     }
 
