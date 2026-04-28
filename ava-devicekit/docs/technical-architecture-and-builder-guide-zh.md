@@ -224,6 +224,17 @@ C 端用户闭环：
 
 真实生产环境应由支付/履约后端调用 `/admin/purchases` 或服务 webhook 创建 purchase，而不是让 customer 直接调用 demo endpoint。`/customer/demo-purchase` 在 production mode 下默认禁用，除非显式设置 `AVA_DEVICEKIT_ENABLE_DEMO_CHECKOUT=1`。
 
+Customer portal 的当前信息架构：
+
+| 区域 | 显示时机 | 作用 |
+|---|---|---|
+| 左侧主区域 | 默认显示 | 产品说明、三步流程、购买硬件 demo |
+| Buy hardware 横排表单 | 默认显示；移动端折叠为竖排 | 选择 app、plan、board model，可选择是否 wallet lock，然后创建 demo purchase/activation card |
+| Activation card | demo buy 后或 URL 带 activation code 时 | 展示 activation code、device、app、wallet lock 状态和 activation URL |
+| 右侧激活面板 | demo buy 后、activation URL 进入、或本地已有 customer session 时显示 | 钱包签名、激活码绑定、查看已绑定设备 |
+
+这个布局的原则是：用户先看到“购买/获得硬件”，buy 后再出现“钱包验证/激活/设备列表”，避免 customer 入口看起来像单纯登录页。
+
 后台会通过 `GET /admin/onboarding` 和 Dashboard 的 Setup checklist 返回当前闭环进度。这个 checklist 不依赖前端状态，而是由服务端根据 control plane、provider health、service plan、device registration、customer registration、activation、online session、developer services、firmware catalog 计算，用于告诉开发者/运营下一步该补什么。
 
 框架级 DePIN/设备合约：

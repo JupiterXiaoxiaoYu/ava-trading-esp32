@@ -157,3 +157,16 @@ The customer portal must show the hardware ownership loop, not only the final ac
 | Customer submits activation code | `/customer/activate` binds device to customer and activates plan | `Apps -> App users`, `Hardware`, and `Orders` show the activated relationship |
 
 Production deployments should replace the demo checkout with a real payment/fulfillment call into `/admin/purchases` or an allowlisted service webhook. The customer-visible activation model stays the same.
+
+## Customer Portal Layout Requirement
+
+The customer portal should make the hardware ownership sequence visible from left to right:
+
+| Area | When Visible | Purpose |
+|---|---|---|
+| Left primary area | Always visible | Product story, three-step flow, and horizontal `Buy hardware` demo checkout. |
+| Buy hardware row | Always visible on desktop, stacked on mobile | Select app, plan, board model, optional wallet lock, then create the demo purchase/activation card. |
+| Activation card | After checkout or activation URL preload | Shows activation code, device id, app id, wallet-lock state, and activation URL. |
+| Right activation panel | After checkout, activation-code URL, or restored customer session | Wallet sign-in, activation-code binding, and bound-device list. |
+
+This prevents the page from looking like a login-only form before the user has a purchased device, while still supporting direct activation URLs printed on shipped activation cards.
