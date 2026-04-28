@@ -1,15 +1,15 @@
 {
   "type": "display",
   "screen": "result",
-  "ts": 1775456993,
+  "ts": 1777338809,
   "data": {
     "success": true,
-    "title": "Bought stonks!",
+    "title": "Bought SCAM!",
     "out_amount": "25000",
-    "out_symbol": "stonks",
+    "out_symbol": "SCAM",
     "amount_usd": "$15.00",
-    "tp_price": "$5.65e-4",
-    "sl_price": "$3.84e-4",
+    "tp_price": "$0.0163",
+    "sl_price": "$0.0111",
     "tx_id": "3xK9mP..."
   }
 }

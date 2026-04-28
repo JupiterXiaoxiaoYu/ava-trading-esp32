@@ -17,16 +17,15 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * Format a price as three-significant-digit scientific notation.
- * price == 0  -> "$0"
- * price > 0   -> "$1.23e4"
- * price < 0   -> "-$1.23e-4"
+ * Format a price for a compact 320px table.
+ * Normal fixed notation is used while it fits; scientific notation is used
+ * only for very small values (< 0.0001) or values with more than eight digits.
  */
 void ave_fmt_price(char *buf, size_t n, double price);
 
 /**
- * Normalize an already formatted price string to scientific notation.
- * Example: "$0.00007956" -> "$7.96e-5"
+ * Normalize an already formatted price string using the compact display policy.
+ * Example: "$0.123456" -> "$0.1235", "$0.00007956" -> "$7.96e-5"
  */
 void ave_fmt_price_text(char *buf, size_t n, const char *raw_price);
 
@@ -36,7 +35,7 @@ void ave_fmt_price_text(char *buf, size_t n, const char *raw_price);
 void ave_fmt_change(char *buf, size_t n, double pct);
 
 /**
- * Format a money/volume value as scientific notation.
+ * Format a money/volume value using compact K/M/B/T suffixes when useful.
  */
 void ave_fmt_volume(char *buf, size_t n, double value);
 

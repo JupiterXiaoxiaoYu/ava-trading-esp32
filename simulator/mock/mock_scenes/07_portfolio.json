@@ -1,10 +1,10 @@
 {
   "type": "display",
   "screen": "portfolio",
-  "ts": 1775456993,
+  "ts": 1777338809,
   "data": {
     "holdings": [],
-    "total_usd": "$0",
+    "total_usd": "$0.00",
     "pnl": "--",
     "pnl_pct": "--"
   }

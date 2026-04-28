@@ -1,11 +1,11 @@
 {
   "type": "display",
   "screen": "confirm",
-  "ts": 1775456993,
+  "ts": 1777338809,
   "data": {
     "trade_id": "a1b2c3d4",
     "action": "BUY",
-    "symbol": "stonks",
+    "symbol": "SCAM",
     "amount_native": "0.1 SOL",
     "amount_usd": "≈ $15.00",
     "tp_pct": 25,

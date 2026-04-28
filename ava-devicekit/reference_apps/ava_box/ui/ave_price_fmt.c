@@ -8,17 +8,37 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void _fmt_money_sci(char *buf, size_t n, double value);
+#define NORMAL_MAX_CHARS 8
+#define SCI_SMALL_THRESHOLD 0.0001
+#define SCI_LARGE_THRESHOLD 100000000.0
+
+static void _fmt_money_normal(char *buf, size_t n, double value);
+static void _fmt_sci(char *buf, size_t n, double value);
 
 void ave_fmt_price(char *buf, size_t n, double price)
 {
-    _fmt_money_sci(buf, n, price);
+    _fmt_money_normal(buf, n, price);
 }
 
 static void _copy_price(char *buf, size_t n, const char *raw_price)
 {
     if (!buf || n == 0) return;
     snprintf(buf, n, "%s", raw_price && raw_price[0] ? raw_price : "$0");
+}
+
+static void _trim_decimal(char *buf)
+{
+    char *dot;
+    if (!buf) return;
+    dot = strchr(buf, '.');
+    if (!dot) return;
+    char *end = buf + strlen(buf) - 1;
+    while (end > dot && *end == '0') {
+        *end = '\0';
+        end--;
+    }
+    if (end == dot) *end = '\0';
+    if (strcmp(buf, "-0") == 0) snprintf(buf, 3, "0");
 }
 
 static void _trim_exp_zeros(char *buf)
@@ -50,17 +70,95 @@ static void _fmt_sci(char *buf, size_t n, double value)
     _trim_exp_zeros(buf);
 }
 
-static void _fmt_money_sci(char *buf, size_t n, double value)
+static int _normal_decimals(double abs_value)
+{
+    if (abs_value >= 1000000.0) return 0;
+    if (abs_value >= 1000.0) return 0;
+    if (abs_value >= 100.0) return 1;
+    if (abs_value >= 1.0) return 2;
+    if (abs_value >= 0.01) return 4;
+    return 6;
+}
+
+static void _fmt_plain_number(char *buf, size_t n, double value, int max_chars)
+{
+    char tmp[32] = {0};
+    double abs_value;
+    int decimals;
+
+    if (!buf || n == 0) return;
+    if (value == 0.0) {
+        snprintf(buf, n, "0");
+        return;
+    }
+
+    abs_value = value < 0 ? -value : value;
+    if (abs_value < SCI_SMALL_THRESHOLD || abs_value >= SCI_LARGE_THRESHOLD) {
+        _fmt_sci(buf, n, value);
+        return;
+    }
+
+    decimals = _normal_decimals(abs_value);
+    snprintf(tmp, sizeof(tmp), "%.*f", decimals, value);
+    _trim_decimal(tmp);
+    if ((int)strlen(tmp) <= max_chars) {
+        snprintf(buf, n, "%s", tmp);
+        return;
+    }
+
+    for (decimals = decimals - 1; decimals >= 0; decimals--) {
+        snprintf(tmp, sizeof(tmp), "%.*f", decimals, value);
+        _trim_decimal(tmp);
+        if ((int)strlen(tmp) <= max_chars) {
+            snprintf(buf, n, "%s", tmp);
+            return;
+        }
+    }
+    _fmt_sci(buf, n, value);
+}
+
+static void _fmt_money_normal(char *buf, size_t n, double value)
 {
     char num[32] = {0};
     if (!buf || n == 0) return;
     if (value < 0) {
-        _fmt_sci(num, sizeof(num), -value);
+        _fmt_plain_number(num, sizeof(num), -value, NORMAL_MAX_CHARS);
         snprintf(buf, n, "-$%s", num);
     } else {
-        _fmt_sci(num, sizeof(num), value);
+        _fmt_plain_number(num, sizeof(num), value, NORMAL_MAX_CHARS);
         snprintf(buf, n, "$%s", num);
     }
+}
+
+static void _fmt_money_compact(char *buf, size_t n, double value)
+{
+    static const struct {
+        const char *suffix;
+        double divisor;
+    } units[] = {{"T", 1000000000000.0}, {"B", 1000000000.0}, {"M", 1000000.0}, {"K", 1000.0}};
+    char num[32] = {0};
+    double abs_value = value < 0 ? -value : value;
+    const char *sign = value < 0 ? "-$" : "$";
+
+    if (!buf || n == 0) return;
+    for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+        if (abs_value >= units[i].divisor) {
+            double scaled = abs_value / units[i].divisor;
+            snprintf(num, sizeof(num), "%.1f", scaled);
+            _trim_decimal(num);
+            if ((int)(strlen(sign) + strlen(num) + strlen(units[i].suffix)) <= NORMAL_MAX_CHARS + 1) {
+                snprintf(buf, n, "%s%s%s", sign, num, units[i].suffix);
+                return;
+            }
+            snprintf(num, sizeof(num), "%.0f", scaled);
+            if ((int)(strlen(sign) + strlen(num) + strlen(units[i].suffix)) <= NORMAL_MAX_CHARS + 1) {
+                snprintf(buf, n, "%s%s%s", sign, num, units[i].suffix);
+                return;
+            }
+            break;
+        }
+    }
+    _fmt_money_normal(buf, n, value);
 }
 
 static const char *_numeric_start(const char *raw_price)
@@ -97,7 +195,7 @@ void ave_fmt_price_text(char *buf, size_t n, const char *raw_price)
         return;
     }
 
-    _fmt_money_sci(buf, n, price);
+    _fmt_money_normal(buf, n, price);
 }
 
 void ave_fmt_change(char *buf, size_t n, double pct)
@@ -105,13 +203,13 @@ void ave_fmt_change(char *buf, size_t n, double pct)
     const char *sign = (pct >= 0) ? "▲ +" : "▼ ";
     double abs_pct = pct < 0 ? -pct : pct;
     char num[32] = {0};
-    _fmt_sci(num, sizeof(num), abs_pct);
+    _fmt_plain_number(num, sizeof(num), abs_pct, 6);
     snprintf(buf, n, "%s%s%%", sign, num);
 }
 
 void ave_fmt_volume(char *buf, size_t n, double value)
 {
-    _fmt_money_sci(buf, n, value);
+    _fmt_money_compact(buf, n, value);
 }
 
 int16_t ave_price_to_chart(double price, double price_min, double price_max)

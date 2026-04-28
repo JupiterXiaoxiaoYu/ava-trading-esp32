@@ -456,11 +456,11 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
         }
         if (strcmp(test_case->screen_name, "feed_signals") == 0) {
             if (count_labels_containing_text_recursive(scr, "Smart Money Buy") <= 0 ||
-                count_labels_containing_text_recursive(scr, "Rebalance Alert") <= 0 ||
-                count_labels_containing_text_recursive(scr, "SMART_MONEY") <= 0 ||
-                count_labels_containing_text_recursive(scr, "REBALANCE") <= 0) {
+                count_labels_containing_text_recursive(scr, "$0.42") <= 0 ||
+                count_labels_containing_text_recursive(scr, "+3.8%") <= 0 ||
+                count_labels_containing_text_recursive(scr, "$1.2M") <= 0) {
                 fprintf(stderr,
-                        "FAIL: [feed_signals] expected signal type & headline lines in browse rows\n");
+                        "FAIL: [feed_signals] expected headline plus price/change/volume browse rows\n");
                 return 0;
             }
             return 1;
@@ -469,7 +469,7 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
             if (count_labels_containing_text_recursive(scr, "$2.11") <= 0 ||
                 count_labels_containing_text_recursive(scr, "+0.9%") <= 0 ||
                 count_labels_containing_text_recursive(scr, "$0.88") <= 0 ||
-                count_labels_containing_text_recursive(scr, "-1.5%") <= 0) {
+                count_labels_containing_text_recursive(scr, "$2M") <= 0) {
                 fprintf(stderr,
                         "FAIL: [feed_watchlist] expected price & change on the browse rows\n");
                 return 0;

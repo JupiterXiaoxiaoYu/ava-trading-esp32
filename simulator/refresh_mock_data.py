@@ -7,7 +7,7 @@ import json, os, sys, time, urllib.request, urllib.parse, math
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(ROOT, "ava-devicekit", "backend"))
-from ava_devicekit.formatting.numbers import format_money, format_percent  # noqa: E402
+from ava_devicekit.formatting.numbers import format_compact_money, format_money, format_percent  # noqa: E402
 
 API_KEY = os.environ.get("AVE_API_KEY",
     "5vHBOFMQZFnXcu3eQs5YvcQDPHAlkn1OlkhNdIhhEho3VF4bUG58jK6Sl0AGMNsP")
@@ -37,7 +37,7 @@ def fmt_change(c):
 
 def fmt_vol(v):
     if v is None: return "$0"
-    return format_money(v)
+    return format_compact_money(v)
 
 
 def write(filename, data):

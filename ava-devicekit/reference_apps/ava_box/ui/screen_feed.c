@@ -5,7 +5,7 @@
  * Layout (320x240 landscape):
  *   y=  0..21   top bar (22px): [source label (left)] [context hint (mid)] [N/M counter (far right)]
  *              - ORDERS mode tints the top bar orange.
- *   y= 22..213  list (8 rows x 24px): [Chain 32px] [Symbol 122px] [Price 84px] [Change 60px]
+ *   y= 22..213  list (8 rows x 24px): [Symbol 6 chars] [Price] [Change] [Vol]
  *   y=214       divider
  *   y=215..239  bottom bar (25px): [navigation hint (left)] [action hint (right)]
  *
@@ -86,10 +86,11 @@ static const char *SOURCE_KEYS[]  = {"trending", "gainer", "loser", "new", "meme
 #define BOTTOM_BAR_H (240 - BOTTOM_Y)
 
 /* Column x positions (within the row container, i.e. relative to x=0) */
-#define COL_CHAIN_X    4
-#define COL_SYM_X     42
-#define COL_PRICE_X   154
-#define COL_CHG_X     252
+#define COL_CHAIN_X    224
+#define COL_SYM_X     4
+#define COL_PRICE_X   72
+#define COL_CHG_X     154
+#define COL_VOL_X     COL_CHAIN_X
 #define COL_OVERLAY_TITLE_X   24
 #define COL_OVERLAY_TITLE_W   84
 #define COL_OVERLAY_DETAIL_X  112
@@ -274,7 +275,10 @@ static void _apply_source_label(const char *label, int remember_as_feed_source)
     s_has_special_source_label = !_label_is_standard_source(s_active_source_label);
 
     if (s_lbl_source) {
-        lv_label_set_text(s_lbl_source, s_active_source_label);
+        char rendered[48];
+        snprintf(rendered, sizeof(rendered), "#9945FF SOL# %s", s_active_source_label);
+        lv_label_set_recolor(s_lbl_source, true);
+        lv_label_set_text(s_lbl_source, rendered);
         _layout_top_bar_labels();
     }
 }
@@ -746,12 +750,17 @@ static void _apply_token_row_layout(feed_row_ui_t *ui)
     lv_obj_set_style_text_font(ui->lbl_price, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, _center_text_y(&lv_font_montserrat_12));
     lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
-    lv_obj_set_width(ui->lbl_sym, 110);
+    lv_obj_set_width(ui->lbl_sym, 62);
     lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
-    lv_obj_set_width(ui->lbl_price, 88);
+    lv_obj_set_width(ui->lbl_price, 76);
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
+    lv_obj_set_width(ui->lbl_chg, 64);
+    lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, _center_text_y(&lv_font_montserrat_12));
+    lv_obj_set_width(ui->lbl_chain, 88);
+    lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
 
@@ -905,8 +914,8 @@ static void _update_token_rows(void)
             row_bg = (r & 1) ? COLOR_ALT : COLOR_BG;
         lv_obj_set_style_bg_color(ui->row, row_bg, 0);
 
-        lv_label_set_text(ui->lbl_chain, _chain_short(t->chain));
-        lv_obj_set_style_text_color(ui->lbl_chain, _chain_color(t->chain), 0);
+        lv_label_set_text(ui->lbl_chain, t->volume_24h[0] ? t->volume_24h : "Vol --");
+        lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
 
         _feed_symbol_text(t, sym_buf, sizeof(sym_buf));
         lv_label_set_text(ui->lbl_sym, sym_buf);
@@ -959,7 +968,8 @@ static void _build_screen(void)
 
     s_lbl_source = lv_label_create(s_top_bar);
     lv_obj_set_pos(s_lbl_source, 8, 4);
-    lv_label_set_text(s_lbl_source, "TRENDING");
+    lv_label_set_recolor(s_lbl_source, true);
+    lv_label_set_text(s_lbl_source, "#9945FF SOL# TRENDING");
     lv_obj_set_style_text_color(s_lbl_source, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(s_lbl_source, &lv_font_montserrat_12, 0);
 
@@ -991,21 +1001,22 @@ static void _build_screen(void)
         lv_obj_set_style_pad_all(ui->row, 0, 0);
         lv_obj_clear_flag(ui->row, LV_OBJ_FLAG_SCROLLABLE);
 
-        /* Chain badge */
+        /* Volume column (row-level chain is omitted on the Solana-only build). */
         ui->lbl_chain = lv_label_create(ui->row);
         lv_obj_set_style_text_font(ui->lbl_chain, &lv_font_montserrat_12, 0);
-        lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, _center_text_y(&lv_font_montserrat_12));
+        lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chain, 32);
+        lv_obj_set_width(ui->lbl_chain, 88);
+        lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Symbol */
         ui->lbl_sym = lv_label_create(ui->row);
         lv_obj_set_style_text_font(ui->lbl_sym, ave_font_cjk_16(), 0);
         lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, _center_text_y(ave_font_cjk_16()));
         lv_obj_set_style_text_color(ui->lbl_sym, COLOR_WHITE, 0);
-        lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_sym, 110);
+        lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(ui->lbl_sym, 62);
 
         /* Price */
         ui->lbl_price = lv_label_create(ui->row);
@@ -1013,7 +1024,7 @@ static void _build_screen(void)
         lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, _center_text_y(&lv_font_montserrat_14));
         lv_obj_set_style_text_color(ui->lbl_price, COLOR_GRAY, 0);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_price, 88);
+        lv_obj_set_width(ui->lbl_price, 76);
         lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
         /* Change % */
@@ -1021,8 +1032,8 @@ static void _build_screen(void)
         lv_obj_set_style_text_font(ui->lbl_chg, &lv_font_montserrat_12, 0);
         lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, _center_text_y(&lv_font_montserrat_12));
         lv_obj_set_style_text_color(ui->lbl_chg, COLOR_GRAY, 0);
-        lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
-        lv_obj_set_width(ui->lbl_chg, 60);
+        lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(ui->lbl_chg, 64);
         lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
 
         ui->lbl_subtitle = lv_label_create(ui->row);

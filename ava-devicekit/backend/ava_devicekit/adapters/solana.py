@@ -11,7 +11,7 @@ from typing import Any
 
 from ava_devicekit.adapters.base import ChainAdapter
 from ava_devicekit.core.types import AppContext, ScreenPayload
-from ava_devicekit.formatting.numbers import format_count, format_money, format_percent, parse_number
+from ava_devicekit.formatting.numbers import format_compact_money, format_count, format_money, format_percent, parse_number
 from ava_devicekit.screen import builders
 
 DATA_BASE = "https://data.ave-api.xyz/v2"
@@ -294,7 +294,7 @@ def _fmt_volume(vol: Any) -> str:
     value = _safe_float(vol, default=-1)
     if value < 0:
         return "N/A"
-    return format_money(value)
+    return format_compact_money(value)
 
 
 def _fmt_y_label(price: Any) -> str:

@@ -42,13 +42,13 @@ The machine-readable capability map is `userland/capabilities.json`.
 
 ## Numeric Display Policy
 
-Small hardware screens use one compact numeric format across prices, volumes, PnL, chart axes, holders, and percentage values:
+Small hardware screens use a conditional compact numeric policy across prices, volumes, PnL, chart axes, holders, and percentage values:
 
 | Value Type | Rule | Example |
 |---|---|---|
-| Money / price | Three significant digits, scientific notation, currency sign preserved | `$1.23e-5`, `$9.99e2`, `-$7.96e-5` |
-| Percent | Three significant digits, scientific notation, percent sign preserved | `+1.50e0%`, `-6.87e0%` |
-| Counts | Three significant digits, scientific notation, no separators | `1.23e4` |
+| Money / price | Fixed notation while it fits the small-screen budget; scientific notation only below `0.0001` or at `100,000,000+` | `$12.34`, `$0.1235`, `$7.96e-5`, `$1.23e8` |
+| Percent | Signed fixed notation while it fits; scientific only for oversized values | `+1.5%`, `-74.73%` |
+| Volumes / counts | Compact `K/M/B/T` suffixes; scientific only when compact text no longer fits | `$404K`, `$1.5M`, `12.3K` |
 | Zero | Rendered as plain zero with unit prefix/suffix if any | `$0`, `0`, `+0%` |
 
 Backend code should use `ava_devicekit.formatting.numbers`; C/LVGL code should use `ave_price_fmt`.

@@ -53,6 +53,9 @@ def token_identity(token: dict[str, Any]) -> dict[str, Any]:
         "price": str(token.get("price") or ""),
         "change_24h": str(token.get("change_24h") or ""),
         "change_positive": bool(token.get("change_positive", True)),
+        "volume_24h": str(token.get("volume_24h") or ""),
+        "market_cap": str(token.get("market_cap") or ""),
+        "headline": str(token.get("headline") or token.get("source_tag") or "Saved token"),
         "source": str(token.get("source") or token.get("source_tag") or "watchlist"),
     }
 

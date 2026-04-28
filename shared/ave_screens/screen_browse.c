@@ -22,10 +22,11 @@
 #define TOP_BAR_H         22
 #define BOTTOM_Y          215
 
-#define COL_CHAIN_X  4
-#define COL_SYM_X    42
-#define COL_PRICE_X  154
-#define COL_CHG_X    252
+#define COL_CHAIN_X  224
+#define COL_SYM_X    4
+#define COL_PRICE_X  72
+#define COL_CHG_X    154
+#define COL_VOL_X    COL_CHAIN_X
 
 #define COLOR_GREEN   lv_color_hex(0x00C853)
 #define COLOR_RED     lv_color_hex(0xFF1744)
@@ -52,6 +53,7 @@ typedef struct {
     char symbol[24];
     char price[24];
     char change_24h[16];
+    char volume_24h[16];
     int  change_positive;
     char signal_label[8];
     char signal_value[32];
@@ -162,26 +164,12 @@ static void _set_source_label_text(const char *source_label)
 {
     char rendered[48];
     const char *label = (source_label && source_label[0]) ? source_label : "SIGNALS";
-    const char *space = strrchr(label, ' ');
-    const char *chain_hex = NULL;
 
     if (!s_lbl_source) return;
 
-    if (space && *(space + 1)) {
-        chain_hex = _chain_hex_from_short(space + 1);
-    }
-
-    if (chain_hex && space) {
-        size_t prefix_len = (size_t)(space - label);
-        snprintf(rendered, sizeof(rendered), "%.*s #%s %s#",
-                 (int)prefix_len, label, chain_hex, space + 1);
-        lv_label_set_recolor(s_lbl_source, true);
-        lv_label_set_text(s_lbl_source, rendered);
-        return;
-    }
-
-    lv_label_set_recolor(s_lbl_source, false);
-    lv_label_set_text(s_lbl_source, label);
+    snprintf(rendered, sizeof(rendered), "#9945FF SOL# %s", label);
+    lv_label_set_recolor(s_lbl_source, true);
+    lv_label_set_text(s_lbl_source, rendered);
 }
 
 static const char *_signal_label(const browse_token_t *t)
@@ -260,22 +248,25 @@ static void _apply_row_layout(browse_row_ui_t *ui)
     lv_obj_set_style_text_font(ui->lbl_meta3, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_font(ui->lbl_meta4, &lv_font_montserrat_12, 0);
 
-    lv_obj_set_pos(ui->lbl_chain, COL_CHAIN_X, first_line_y);
     lv_obj_set_pos(ui->lbl_sym, COL_SYM_X, first_line_y);
-    lv_obj_set_width(ui->lbl_sym, 120);
+    lv_obj_set_width(ui->lbl_sym, 62);
     lv_obj_set_style_text_align(ui->lbl_sym, LV_TEXT_ALIGN_LEFT, 0);
 
     lv_obj_set_pos(ui->lbl_price, COL_PRICE_X, first_line_y);
-    lv_obj_set_width(ui->lbl_price, 90);
+    lv_obj_set_width(ui->lbl_price, 76);
     lv_obj_set_style_text_align(ui->lbl_price, LV_TEXT_ALIGN_RIGHT, 0);
 
-    lv_obj_set_pos(ui->lbl_subtitle, COL_SYM_X, second_line_y);
-    lv_obj_set_width(ui->lbl_subtitle, COL_CHG_X - COL_SYM_X);
-    lv_obj_set_style_text_align(ui->lbl_subtitle, LV_TEXT_ALIGN_LEFT, 0);
-
-    lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, second_line_y);
-    lv_obj_set_width(ui->lbl_chg, 60);
+    lv_obj_set_pos(ui->lbl_chg, COL_CHG_X, first_line_y);
+    lv_obj_set_width(ui->lbl_chg, 64);
     lv_obj_set_style_text_align(ui->lbl_chg, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_set_pos(ui->lbl_chain, COL_VOL_X, first_line_y);
+    lv_obj_set_width(ui->lbl_chain, 88);
+    lv_obj_set_style_text_align(ui->lbl_chain, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_set_pos(ui->lbl_subtitle, COL_SYM_X, second_line_y);
+    lv_obj_set_width(ui->lbl_subtitle, 308);
+    lv_obj_set_style_text_align(ui->lbl_subtitle, LV_TEXT_ALIGN_LEFT, 0);
 
     lv_obj_set_pos(ui->lbl_meta1, meta_x, second_line_y);
     lv_obj_set_width(ui->lbl_meta1, meta_w);
@@ -387,8 +378,8 @@ static void _render_rows(void)
         lv_color_t row_bg = selected ? COLOR_SEL : ((r & 1) ? COLOR_ALT : COLOR_BG);
         lv_obj_set_style_bg_color(ui->row, row_bg, 0);
 
-        lv_label_set_text(ui->lbl_chain, _chain_short(t->chain));
-        lv_obj_set_style_text_color(ui->lbl_chain, _chain_color(t->chain), 0);
+        lv_label_set_text(ui->lbl_chain, t->volume_24h[0] ? t->volume_24h : "Vol --");
+        lv_obj_set_style_text_color(ui->lbl_chain, COLOR_GRAY, 0);
         lv_label_set_text(ui->lbl_sym, t->symbol[0] ? t->symbol : "???");
         lv_obj_set_style_text_color(ui->lbl_sym, text_color, 0);
         lv_obj_set_style_text_color(ui->lbl_price, text_color, 0);
@@ -399,13 +390,20 @@ static void _render_rows(void)
         lv_obj_set_style_text_color(ui->lbl_meta4, text_color, 0);
 
         if (s_mode == BROWSE_MODE_SIGNALS) {
-            lv_label_set_text(ui->lbl_price, _signal_value(t));
-            lv_label_set_text(ui->lbl_subtitle, "");
-            lv_label_set_text(ui->lbl_chg, "");
-            lv_label_set_text(ui->lbl_meta1, _signal_first(t));
-            lv_label_set_text(ui->lbl_meta2, _signal_last(t));
-            lv_label_set_text(ui->lbl_meta3, _signal_count(t));
-            lv_label_set_text(ui->lbl_meta4, _signal_vol(t));
+            const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
+            lv_color_t chg_color = COLOR_GRAY;
+            lv_label_set_text(ui->lbl_price, t->price[0] ? t->price : _signal_value(t));
+            lv_label_set_text(ui->lbl_subtitle, t->headline[0] ? t->headline : _signal_summary(t));
+            lv_label_set_text(ui->lbl_chg, chg_text);
+            lv_label_set_text(ui->lbl_meta1, "");
+            lv_label_set_text(ui->lbl_meta2, "");
+            lv_label_set_text(ui->lbl_meta3, "");
+            lv_label_set_text(ui->lbl_meta4, "");
+            if (t->change_24h[0]) {
+                if (t->change_positive > 0) chg_color = COLOR_GREEN;
+                else if (t->change_positive == 0) chg_color = COLOR_RED;
+            }
+            lv_obj_set_style_text_color(ui->lbl_chg, chg_color, 0);
         } else {
             lv_obj_set_style_text_font(ui->lbl_subtitle, &lv_font_montserrat_12, 0);
             const char *chg_text = t->change_24h[0] ? t->change_24h : "--";
@@ -474,6 +472,7 @@ static void _parse_tokens_from_json(const char *json)
         _get_json_str_field(obj, "symbol", t->symbol, sizeof(t->symbol));
         _get_json_str_field(obj, "price", t->price, sizeof(t->price));
         _get_json_str_field(obj, "change_24h", t->change_24h, sizeof(t->change_24h));
+        _get_json_str_field(obj, "volume_24h", t->volume_24h, sizeof(t->volume_24h));
         _get_json_str_field(obj, "signal_label", t->signal_label, sizeof(t->signal_label));
         _get_json_str_field(obj, "signal_value", t->signal_value, sizeof(t->signal_value));
         _get_json_str_field(obj, "signal_first", t->signal_first, sizeof(t->signal_first));
@@ -549,9 +548,9 @@ static void _build_screen(void)
         ui->lbl_meta3 = lv_label_create(ui->row);
         ui->lbl_meta4 = lv_label_create(ui->row);
         lv_label_set_long_mode(ui->lbl_chain, LV_LABEL_LONG_CLIP);
-        lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_sym, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_long_mode(ui->lbl_price, LV_LABEL_LONG_CLIP);
-        lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(ui->lbl_chg, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_long_mode(ui->lbl_subtitle, LV_LABEL_LONG_CLIP);
         lv_label_set_long_mode(ui->lbl_meta1, LV_LABEL_LONG_CLIP);
         lv_label_set_long_mode(ui->lbl_meta2, LV_LABEL_LONG_CLIP);
