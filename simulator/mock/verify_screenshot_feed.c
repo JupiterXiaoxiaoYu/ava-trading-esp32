@@ -525,10 +525,10 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
         if (count_labels_with_text_recursive(scr, "[B] BACK") <= 0 ||
             count_labels_with_text_recursive(scr, "[A] DETAIL") <= 0 ||
             count_labels_with_text_recursive(scr, "[X] SELL") <= 0 ||
-            count_labels_with_text_recursive(scr, "[Y] PORTFOLIO") <= 0) {
+            count_labels_with_text_recursive(scr, "[Y] TRENDING") <= 0) {
             fprintf(stderr,
                     "FAIL: [portfolio] expected bottom-bar affordances: "
-                    "'[B] BACK' '[A] DETAIL' '[X] SELL' '[Y] PORTFOLIO'\n");
+                    "'[B] BACK' '[A] DETAIL' '[X] SELL' '[Y] TRENDING'\n");
             return 0;
         }
         return 1;

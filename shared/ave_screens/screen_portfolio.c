@@ -7,7 +7,7 @@
  *   y= 22..38   header row (Symbol / Value / P&L)
  *   y= 38..200  holding rows (up to 6 visible, scrollable with UP/DOWN)
  *   y=200..215  total P&L summary
- *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL  [Y] CHAIN
+ *   y=215..240  bottom bar: [B] BACK  [X] SELL  [A] DETAIL  [Y] TRENDING
  */
 #include "ave_screen_manager.h"
 #include "ave_font_provider.h"
@@ -679,7 +679,7 @@ static void _build(void) {
     lv_obj_set_style_pad_all(bot, 0, 0);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Portfolio keeps Y for local chain cycling while preserving B/X/A actions. */
+    /* Portfolio keeps Y as a quick return to the main trending feed. */
     lv_obj_t *slot_b = lv_obj_create(bot);
     lv_obj_set_size(slot_b, 64, 240 - BOTTOM_Y);
     lv_obj_set_pos(slot_b, 0, 0);
@@ -732,7 +732,7 @@ static void _build(void) {
 
     lv_obj_t *lbl_chain = lv_label_create(slot_y);
     lv_obj_align(lbl_chain, LV_ALIGN_CENTER, 0, 0);
-    lv_label_set_text(lbl_chain, "[Y] CHAIN");
+    lv_label_set_text(lbl_chain, "[Y] TRENDING");
     lv_obj_set_style_text_color(lbl_chain, COLOR_WHITE, 0);
     lv_obj_set_style_text_font(lbl_chain, &lv_font_montserrat_12, 0);
 }
@@ -1042,7 +1042,7 @@ void screen_portfolio_key(int key)
         if (!ave_sm_build_key_action_json("portfolio_sell", fields, 4, msg, sizeof(msg))) return;
         ave_send_json(msg);
     } else if (key == AVE_KEY_Y) {
-        ave_send_json("{\"type\":\"key_action\",\"action\":\"portfolio_chain_cycle\"}");
+        ave_send_json("{\"type\":\"key_action\",\"action\":\"feed_home\"}");
     }
 }
 

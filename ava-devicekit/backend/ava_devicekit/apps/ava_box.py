@@ -182,7 +182,7 @@ class AvaBoxApp:
             selected = self.context.selected.to_dict() if self.context.selected else {}
             return self.skills.remove_watchlist({**selected, **payload}, context=self.context)
         if action == "portfolio_chain_cycle":
-            return builders.notify("Portfolio", "Only Solana portfolio is enabled in this build", level="info", context=self.context)
+            return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
         return builders.notify("Unknown action", action or "empty", level="warn", context=self.context)
 
     def _route_feed_nav(self, action: str) -> ScreenPayload:
