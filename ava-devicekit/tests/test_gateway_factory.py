@@ -298,6 +298,31 @@ def test_portfolio_hides_native_sol_token_position(tmp_path):
     assert portfolio["data"]["pnl"] == "$1"
 
 
+def test_paper_buy_confirm_fails_when_cash_is_zero(tmp_path):
+    import json
+
+    store_path = tmp_path / "skills.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "trade_mode": "paper",
+                "paper_cash_sol": "0",
+                "paper_starting_sol": "1",
+                "paper_orders": [],
+                "paper_positions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = create_device_session(mock=True, skill_store_path=str(store_path))
+    token = session.boot()["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "buy", **token})
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["screen"] == "result"
+    assert result["data"]["success"] is False
+    assert "Insufficient paper SOL balance" in result["data"]["body"]
+
+
 def test_legacy_screen_context_token_is_treated_as_selected():
     session = create_device_session(mock=True)
     reply = session.handle(

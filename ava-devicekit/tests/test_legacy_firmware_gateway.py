@@ -146,8 +146,8 @@ def test_legacy_firmware_trade_action_cancel_routes_pending_draft():
     assert display["action_result"]["ok"] is True
 
 
-def test_legacy_firmware_generic_confirm_and_cancel_preserve_request_id():
-    conn = LegacyFirmwareConnection(create_device_session(mock=True))
+def test_legacy_firmware_generic_confirm_and_cancel_preserve_request_id(tmp_path):
+    conn = LegacyFirmwareConnection(create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json")))
     draft = conn.handle_text(json.dumps({"type": "key_action", "action": "buy"}))[0]
     request_id = draft["action_draft"]["request_id"]
 

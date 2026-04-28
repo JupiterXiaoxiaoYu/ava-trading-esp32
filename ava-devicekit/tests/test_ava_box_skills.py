@@ -158,6 +158,70 @@ def test_paper_sell_cash_falls_back_to_token_amount_and_price(tmp_path):
     assert state["paper_cash_sol"] == "0.2"
     assert state["paper_positions"] == []
 
+
+def test_paper_sell_enriches_missing_price_from_position(tmp_path):
+    store = JsonStore(tmp_path / "state.json")
+    store.write(
+        {
+            "paper_cash_sol": "0",
+            "paper_starting_sol": "1",
+            "paper_orders": [],
+            "paper_positions": [
+                {
+                    "symbol": "TOK",
+                    "chain": "solana",
+                    "token_id": "Tok222-solana",
+                    "amount": "5",
+                    "balance_raw": "5",
+                    "cost_basis_usd": "5",
+                    "last_price_usd": "3",
+                    "value_usd": "$15",
+                    "pnl": "$10",
+                    "source": "paper",
+                }
+            ],
+        }
+    )
+    provider = PaperExecutionProvider(store)
+    result = provider.execute(
+        {
+            "action": "trade.sell_draft",
+            "symbol": "TOK",
+            "token_id": "Tok222-solana",
+            "amount": "5 TOK",
+            "token_amount": "5",
+        },
+        {"request_id": "enriched-sell"},
+    )
+    state = store.read({})
+    assert result["amount_usd"] == "15"
+    assert result["out_native_amount"] == "0.1"
+    assert state["paper_cash_sol"] == "0.1"
+    assert state["paper_positions"] == []
+
+
+def test_paper_buy_rejects_when_cash_is_insufficient(tmp_path):
+    store = JsonStore(tmp_path / "state.json")
+    store.write({"paper_cash_sol": "0", "paper_starting_sol": "1", "paper_orders": [], "paper_positions": []})
+    provider = PaperExecutionProvider(store)
+    result = provider.execute(
+        {
+            "action": "trade.market_draft",
+            "symbol": "TOK",
+            "token_id": "Tok333-solana",
+            "amount": "0.1 SOL",
+            "native_amount": "0.1",
+            "amount_usd_raw": "15",
+            "token_amount": "10",
+            "price_usd": "1.5",
+        },
+        {"request_id": "no-cash"},
+    )
+    state = store.read({})
+    assert result["status"] == "paper_rejected"
+    assert state["paper_cash_sol"] == "0"
+    assert state["paper_positions"] == []
+
 from ava_devicekit.apps.ava_box_skills.trading import TradingSkill
 
 

@@ -102,6 +102,10 @@ class TradingSkill:
         execution_mode = str(pending.params.get("execution_mode") or self.config.execution_mode).lower()
         executor = self.paper_executor if execution_mode == "paper" else self.executor
         execution = executor.execute(summary, pending.params) if executor else {}
+        if _execution_failed(execution):
+            body = str(execution.get("reason") or execution.get("error") or "Execution rejected.")
+            screen = builders.result("Action failed", body, ok=False, context=context)
+            return ActionResult(False, body, screen=screen, data={**summary, "execution": execution})
         body = _result_body(summary, execution_mode)
         screen = builders.result("Action confirmed", body, ok=True, context=context)
         screen.payload.update(_result_payload_fields(summary, execution_mode))
@@ -216,6 +220,15 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value or "0").strip() or "0")
     except (InvalidOperation, ValueError):
         return Decimal("0")
+
+
+def _execution_failed(execution: Any) -> bool:
+    if not isinstance(execution, dict):
+        return False
+    if execution.get("ok") is False:
+        return True
+    status = str(execution.get("status") or "").lower()
+    return status in {"failed", "error", "rejected", "paper_rejected"}
 
 
 def _fmt_decimal(value: Decimal) -> str:

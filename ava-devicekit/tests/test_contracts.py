@@ -16,7 +16,7 @@ def test_manifest_loads():
     assert "trade.market_draft" in manifest.actions
 
 
-def test_demo_flow_contracts():
+def test_demo_flow_contracts(tmp_path):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("demo_flow", ROOT / "examples" / "demo_flow.py")
@@ -24,7 +24,7 @@ def test_demo_flow_contracts():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    session = module.create_device_session(mock=True)
+    session = module.create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
     feed = session.boot()
     assert feed["screen"] == "feed"
     detail = session.handle({"type": "key_action", "action": "watch"})

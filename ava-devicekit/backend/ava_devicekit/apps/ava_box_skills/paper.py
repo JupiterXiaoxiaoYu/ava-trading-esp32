@@ -7,6 +7,7 @@ from typing import Any
 from ava_devicekit.storage.json_store import JsonStore
 
 DEFAULT_PAPER_CASH_SOL = Decimal("1")
+DEFAULT_NATIVE_PRICE_USD = Decimal("150")
 NATIVE_SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
@@ -40,6 +41,14 @@ class PaperExecutionProvider:
             "native_price_usd": str(summary.get("native_price_usd") or params.get("native_price_usd") or ""),
             "out_amount": str(summary.get("out_amount") or params.get("out_amount") or ""),
         }
+        _enrich_sell_order_from_position(state, order)
+        if _is_insufficient_paper_cash(state, order):
+            order["status"] = "paper_rejected"
+            order["reason"] = "Insufficient paper SOL balance"
+            state.setdefault("paper_orders", []).insert(0, order)
+            state["paper_orders"] = state["paper_orders"][:100]
+            self.store.write(state)
+            return order
         state.setdefault("paper_orders", []).insert(0, order)
         state["paper_orders"] = state["paper_orders"][:100]
         if not _is_native_sol_order(order):
@@ -74,7 +83,7 @@ def _apply_position(state: dict[str, Any], order: dict[str, Any]) -> None:
     cost_basis = _decimal(existing.get("cost_basis_usd"))
     delta = _token_delta(order)
     trade_usd = _decimal(order.get("amount_usd"))
-    price_usd = _decimal(order.get("price_usd"))
+    price_usd = _decimal(order.get("price_usd")) or _decimal(existing.get("last_price_usd"))
     if action == "trade.sell_draft":
         prev_qty = qty
         qty -= delta
@@ -120,6 +129,54 @@ def _apply_cash(state: dict[str, Any], order: dict[str, Any]) -> None:
     if cash < 0:
         cash = Decimal("0")
     state["paper_cash_sol"] = _fmt_decimal(cash)
+
+
+def _enrich_sell_order_from_position(state: dict[str, Any], order: dict[str, Any]) -> None:
+    if str(order.get("action") or "") != "trade.sell_draft":
+        return
+    position = _find_position(state, order.get("token_id") or "")
+    if not position:
+        return
+    token_amount = _decimal(order.get("token_amount")) or _extract_amount(order.get("amount"))
+    if token_amount <= 0:
+        token_amount = _decimal(position.get("balance_raw") or position.get("amount_raw") or position.get("amount"))
+        if token_amount > 0:
+            order["token_amount"] = _fmt_decimal(token_amount)
+    price_usd = _decimal(order.get("price_usd")) or _decimal(position.get("last_price_usd") or position.get("price_usd"))
+    if price_usd <= 0:
+        value_usd = _decimal_money(position.get("value_usd") or position.get("value"))
+        position_amount = _decimal(position.get("balance_raw") or position.get("amount_raw") or position.get("amount"))
+        if value_usd > 0 and position_amount > 0:
+            price_usd = value_usd / position_amount
+    if price_usd > 0 and not str(order.get("price_usd") or "").strip():
+        order["price_usd"] = _fmt_decimal(price_usd)
+    if token_amount > 0 and price_usd > 0:
+        amount_usd = _decimal(order.get("amount_usd"))
+        if amount_usd <= 0:
+            amount_usd = token_amount * price_usd
+            order["amount_usd"] = _fmt_decimal(amount_usd)
+        native_price = _decimal(order.get("native_price_usd")) or DEFAULT_NATIVE_PRICE_USD
+        if not str(order.get("native_price_usd") or "").strip():
+            order["native_price_usd"] = _fmt_decimal(native_price)
+        if _decimal(order.get("out_native_amount")) <= 0 and native_price > 0:
+            order["out_native_amount"] = _fmt_decimal(amount_usd / native_price)
+
+
+def _find_position(state: dict[str, Any], token_id: Any) -> dict[str, Any] | None:
+    normalized = _normalize_token_id(token_id)
+    for row in state.get("paper_positions", []):
+        if not isinstance(row, dict):
+            continue
+        if _normalize_token_id(row.get("token_id") or row.get("addr") or "") == normalized:
+            return row
+    return None
+
+
+def _is_insufficient_paper_cash(state: dict[str, Any], order: dict[str, Any]) -> bool:
+    if str(order.get("action") or "") == "trade.sell_draft" or _is_native_sol_order(order):
+        return False
+    required = _decimal(order.get("native_amount")) or _extract_amount(order.get("amount"))
+    return required > 0 and required > _paper_cash(state)
 
 
 def _paper_cash(state: dict[str, Any]) -> Decimal:
@@ -176,6 +233,11 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value or "0").strip() or "0")
     except (InvalidOperation, ValueError):
         return Decimal("0")
+
+
+def _decimal_money(value: Any) -> Decimal:
+    text = str(value or "0").replace("$", "").replace(",", "").strip()
+    return _decimal(text)
 
 
 def _fmt_decimal(value: Decimal) -> str:

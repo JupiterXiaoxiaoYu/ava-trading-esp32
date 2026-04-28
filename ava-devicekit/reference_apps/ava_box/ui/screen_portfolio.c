@@ -56,6 +56,8 @@ typedef struct {
     char contract_tail[12];
     char source_tag[24];
     char balance_raw[96]; /* machine/raw balance string for sell quantity */
+    char last_price_usd[24];
+    char cost_basis_usd[24];
 } holding_t;
 
 static holding_t s_holdings[MAX_HOLDINGS];
@@ -466,6 +468,8 @@ static void _parse(const char *json) {
         _str(obj, "chain",       h->chain,       sizeof(h->chain));
         _str(obj, "contract_tail", h->contract_tail, sizeof(h->contract_tail));
         _str(obj, "source_tag",  h->source_tag,  sizeof(h->source_tag));
+        _str(obj, "last_price_usd", h->last_price_usd, sizeof(h->last_price_usd));
+        _str(obj, "cost_basis_usd", h->cost_basis_usd, sizeof(h->cost_basis_usd));
         /* accept either "balance_raw" or "amount_raw", but fail closed on truncation */
         if (!_machine_raw_exact(obj, "balance_raw", h->balance_raw, sizeof(h->balance_raw)))
             _machine_raw_exact(obj, "amount_raw", h->balance_raw, sizeof(h->balance_raw));
@@ -1057,14 +1061,16 @@ void screen_portfolio_key(int key)
         if (s_holding_count < 1 || s_sel_idx < 0 || s_sel_idx >= s_holding_count) return;
         const holding_t *hx = &s_holdings[s_sel_idx];
         if (hx->addr[0] == '\0' || hx->chain[0] == '\0' || hx->balance_raw[0] == '\0') return;
-        char msg[512];
+        char msg[768];
         ave_sm_json_field_t fields[] = {
             {"addr", hx->addr},
             {"chain", hx->chain},
             {"symbol", hx->symbol},
             {"balance_raw", hx->balance_raw},
+            {"last_price_usd", hx->last_price_usd},
+            {"cost_basis_usd", hx->cost_basis_usd},
         };
-        if (!ave_sm_build_key_action_json("portfolio_sell", fields, 4, msg, sizeof(msg))) return;
+        if (!ave_sm_build_key_action_json("portfolio_sell", fields, 6, msg, sizeof(msg))) return;
         ave_send_json(msg);
     } else if (key == AVE_KEY_Y) {
         ave_send_json("{\"type\":\"key_action\",\"action\":\"feed_home\"}");
