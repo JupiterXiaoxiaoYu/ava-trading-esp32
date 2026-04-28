@@ -97,6 +97,9 @@ class AvaBoxApp:
         action = str(action or "").strip().lower()
         trade_mode = self._trade_mode()
         trade_mode_payload = {"execution_mode": trade_mode}
+        if action == "back" and self.context.screen == "result" and self.context.state.get("return_after_result") == "portfolio":
+            self.context.state.pop("return_after_result", None)
+            return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if action in {"home", "feed", "refresh", "feed_home", "back"}:
             return self._remember_screen(self.chain_adapter.get_feed(topic="trending", context=self.context))
         if action == "confirm":
@@ -148,6 +151,7 @@ class AvaBoxApp:
             self._remember_screen(draft.screen)
             return draft
         if action == "portfolio_sell":
+            self.context.state["return_after_result"] = "portfolio"
             sell_payload = {
                 **payload,
                 "token_id": payload.get("token_id") or payload.get("addr") or self._selected_token_id(),

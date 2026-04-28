@@ -198,6 +198,57 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     assert portfolio_after_sell["data"]["pnl_reason"] == "Cash: 1 SOL"
 
 
+def test_portfolio_sell_legacy_na_position_removes_and_returns_to_portfolio(tmp_path):
+    import json
+
+    store_path = tmp_path / "skills.json"
+    legacy_addr = "Legacy111"
+    store_path.write_text(
+        json.dumps(
+            {
+                "trade_mode": "paper",
+                "paper_cash_sol": "0.9",
+                "paper_starting_sol": "1",
+                "paper_orders": [],
+                "paper_positions": [
+                    {
+                        "symbol": "OLD",
+                        "chain": "solana",
+                        "token_id": f"{legacy_addr}-solana",
+                        "amount": "0.1",
+                        "value": "0.1 SOL",
+                        "pnl": "$0",
+                        "source": "paper",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    session = create_device_session(mock=True, skill_store_path=str(store_path))
+    portfolio = session.handle({"type": "key_action", "action": "portfolio"})
+    holding = portfolio["data"]["holdings"][0]
+    assert holding["avg_cost_usd"] == "N/A"
+
+    draft = session.handle(
+        {
+            "type": "key_action",
+            "action": "portfolio_sell",
+            "addr": legacy_addr,
+            "chain": "solana",
+            "symbol": "OLD",
+            "balance_raw": "0.1",
+        }
+    )
+    assert draft["screen"] == "confirm"
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["screen"] == "result"
+
+    back = session.handle({"type": "key_action", "action": "back"})
+    assert back["screen"] == "portfolio"
+    assert back["data"]["holdings"][0]["symbol"] == "EMPTY"
+
+
 def test_legacy_screen_context_token_is_treated_as_selected():
     session = create_device_session(mock=True)
     reply = session.handle(

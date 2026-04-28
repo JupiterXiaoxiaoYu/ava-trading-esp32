@@ -28,7 +28,7 @@ class PaperExecutionProvider:
             "status": "paper_filled",
             "action": str(summary.get("action") or ""),
             "symbol": str(summary.get("symbol") or "TOKEN"),
-            "token_id": str(summary.get("token_id") or params.get("token_id") or ""),
+            "token_id": _normalize_token_id(summary.get("token_id") or params.get("token_id") or ""),
             "amount": str(summary.get("amount") or ""),
             "limit_price": str(summary.get("limit_price") or ""),
             "amount_usd": str(summary.get("amount_usd_raw") or params.get("amount_usd_raw") or ""),
@@ -52,11 +52,11 @@ class PaperExecutionProvider:
 
 def _apply_position(state: dict[str, Any], order: dict[str, Any]) -> None:
     action = str(order.get("action") or "")
-    token_id = str(order.get("token_id") or "")
+    token_id = _normalize_token_id(order.get("token_id") or "")
     if not token_id:
         return
     positions = [row for row in state.get("paper_positions", []) if isinstance(row, dict)]
-    existing = next((row for row in positions if row.get("token_id") == token_id), None)
+    existing = next((row for row in positions if _normalize_token_id(row.get("token_id") or row.get("addr") or "") == token_id), None)
     if not existing:
         existing = {
             "symbol": order.get("symbol") or "TOKEN",
@@ -138,6 +138,13 @@ def _token_delta(order: dict[str, Any]) -> Decimal:
     if trade_usd > 0 and price_usd > 0:
         return trade_usd / price_usd
     return _extract_amount(order.get("amount"))
+
+
+def _normalize_token_id(value: Any) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    return token if token.endswith("-solana") else f"{token}-solana"
 
 
 def _sell_cash_delta(order: dict[str, Any]) -> Decimal:
