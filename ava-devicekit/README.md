@@ -1,6 +1,6 @@
 # Ava DeviceKit
 
-Ava DeviceKit is the clean framework boundary for ESP32-based Solana AI hardware apps. It is intentionally separate from the legacy assistant runtime in the parent repo.
+Ava DeviceKit is the clean framework boundary for ESP32-based Solana AI hardware apps. It is intentionally separate from the previous monorepo assistant runtime and exposes its own app, device, provider, OTA, and control-plane contracts.
 
 ## What This Contains
 
@@ -18,7 +18,7 @@ Ava DeviceKit is the clean framework boundary for ESP32-based Solana AI hardware
 
 ## Boundary
 
-The clean framework must not import parent-repo legacy modules such as `core.*`, `plugins_func.*`, or legacy-assistant-specific registration/connection classes.
+The clean framework must not import parent-repo assistant-runtime modules such as `core.*`, `plugins_func.*`, or implementation-specific registration/connection classes.
 
 ## Userland Boundary
 
@@ -57,7 +57,7 @@ Backend code should use `ava_devicekit.formatting.numbers`; C/LVGL code should u
 
 ## Standalone Runtime
 
-Ava Box can run through DeviceKit without importing the legacy assistant backend. The gateway builds a session from a hardware app manifest, an adapter registry, and app-local skills:
+Ava Box can run through DeviceKit without importing the previous assistant backend. The gateway builds a session from a hardware app manifest, an adapter registry, and app-local skills:
 
 | Layer | Current Implementation |
 |---|---|
@@ -68,8 +68,8 @@ Ava Box can run through DeviceKit without importing the legacy assistant backend
 | HTTP gateway | `gateway/http_server.py` exposes boot/message/state/outbox endpoints |
 | WebSocket gateway | `gateway/websocket_server.py` exposes the same session flow over optional WebSocket transport |
 | Control plane | `control_plane/store.py` manages local users, projects, provisioned devices, one-time registration, and per-device tokens |
-| legacy firmware compatibility shim | `gateway/legacy_firmware.py` accepts existing firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
-| OTA/settings runtime | `runtime/settings.py` and `ota/` emit the existing firmware OTA contract without importing legacy server code |
+| firmware compatibility bridge | `gateway/legacy_firmware.py` accepts deployed firmware `hello`, `listen`, and `key_action` frames and routes them into `DeviceSession` |
+| OTA/settings runtime | `runtime/settings.py` and `ota/` emit the deployed firmware OTA contract without importing the previous server implementation |
 | Model providers | `providers/` defines ASR, LLM, TTS, and voice fallback boundaries |
 | Market streams | `streams/` defines live/polling market update boundaries |
 | Scratch Arcade port | `firmware/ports/scratch_arcade/` maps the reference hardware buttons, OTA path, and WebSocket path |
@@ -207,12 +207,12 @@ Example runtime config:
 }
 ```
 
-This preserves the legacy firmware wire protocol while keeping the implementation inside DeviceKit-owned modules.
+This preserves the deployed firmware wire protocol while keeping the implementation inside DeviceKit-owned modules.
 
 
-## Legacy Capability Review
+## Migration Capability Review
 
-Before migrating more code from the parent repo, review `docs/legacy-capability-inventory.md`. Every legacy capability must be explicitly marked `keep`, `replace`, `drop`, or `later` before implementation. This prevents accidental dependency on the old assistant framework while still preserving useful runtime capabilities such as Wi-Fi provisioning, OTA, audio, model providers, and live market streams.
+Before migrating more code from the parent repo, review `docs/legacy-capability-inventory.md`. Every carried-over capability must be explicitly marked `keep`, `replace`, `drop`, or `later` before implementation. This prevents accidental dependency on the previous assistant runtime while still preserving useful production capabilities such as Wi-Fi provisioning, OTA, audio, model providers, and live market streams.
 
 ## Run Local Checks
 
