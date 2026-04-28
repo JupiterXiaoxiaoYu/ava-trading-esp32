@@ -138,12 +138,12 @@ class AvaBoxApp:
         if action in {"feed_prev", "feed_next"}:
             return self._route_feed_nav(action)
         if action in {"buy", "quick_buy"}:
-            draft = self.skills.create_action_draft("trade.market_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.market_draft", self._trade_params(payload, trade_mode_payload), context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
         if action in {"sell", "quick_sell"}:
-            draft = self.skills.create_action_draft("trade.sell_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.sell_draft", self._trade_params(payload, trade_mode_payload), context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
@@ -154,7 +154,7 @@ class AvaBoxApp:
             self._remember_screen(draft.screen)
             return draft
         if action in {"limit", "limit_buy"}:
-            draft = self.skills.create_action_draft("trade.limit_draft", {**payload, **trade_mode_payload, "token_id": payload.get("token_id") or self._selected_token_id(), "symbol": payload.get("symbol") or self._selected_symbol()}, context=self.context)
+            draft = self.skills.create_action_draft("trade.limit_draft", self._trade_params(payload, trade_mode_payload), context=self.context)
             self.last_draft = draft
             self._remember_screen(draft.screen)
             return draft
@@ -312,6 +312,30 @@ class AvaBoxApp:
 
     def _selected_symbol(self) -> str:
         return self.context.selected.symbol if self.context.selected else "TOKEN"
+
+    def _selected_market_row(self) -> dict[str, Any]:
+        token_id = self._selected_token_id()
+        for row in self.context.visible_rows:
+            if not isinstance(row, dict):
+                continue
+            if token_id and str(row.get("token_id") or "") == token_id:
+                return row
+        if self.last_screen and self.last_screen.screen == "spotlight":
+            return dict(self.last_screen.payload)
+        return {}
+
+    def _trade_params(self, payload: dict[str, Any], mode_payload: dict[str, Any]) -> dict[str, Any]:
+        market = self._selected_market_row()
+        price = payload.get("price_raw") or payload.get("price_usd") or market.get("price_raw") or market.get("price")
+        return {
+            **market,
+            **payload,
+            **mode_payload,
+            "token_id": payload.get("token_id") or market.get("token_id") or self._selected_token_id(),
+            "symbol": payload.get("symbol") or market.get("symbol") or self._selected_symbol(),
+            "price_usd": payload.get("price_usd") or price,
+            "token_price_usd": payload.get("token_price_usd") or price,
+        }
 
     def apply_market_events(self, events: list[MarketStreamEvent]) -> ScreenPayload | None:
         """Apply live market updates to the current screen payload.

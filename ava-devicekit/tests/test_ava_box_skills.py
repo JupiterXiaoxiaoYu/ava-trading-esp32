@@ -43,7 +43,7 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     result = service.confirm_action(draft.request_id, context=context)
     assert result.ok is True
     assert result.screen and result.screen.screen == "result"
-    assert result.data["execution"]["status"] == "confirmed_draft"
+    assert result.data["execution"]["status"] == "paper_filled"
     portfolio_after_trade = service.get_portfolio(context=context)
     holding = portfolio_after_trade.payload["holdings"][0]
     assert holding["symbol"] == "BONK"

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from ava_devicekit.apps.ava_box_skills.config import AvaBoxSkillConfig, SOLANA
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider
 from ava_devicekit.core.types import ActionDraft, ActionResult, AppContext
+from ava_devicekit.formatting.numbers import format_count, format_money, parse_number
 from ava_devicekit.screen import builders
+
+DEFAULT_SOL_PRICE_USD = Decimal("150")
 
 
 @dataclass(slots=True)
@@ -33,12 +37,14 @@ class TradingSkill:
         action_name = normalize_action(action)
         limit_price = params.get("limit_price")
         is_limit = action_name == "trade.limit_draft"
+        estimate = _estimate_trade(action_name, amount_sol, params, symbol)
         summary = {
             "symbol": symbol,
             "token_id": token_id,
             "amount": amount_label(amount_sol),
             "action": action_name,
         }
+        summary.update({k: v for k, v in estimate.items() if v not in (None, "")})
         if limit_price not in (None, ""):
             summary["limit_price"] = str(limit_price)
         screen_payload = {
@@ -48,7 +54,8 @@ class TradingSkill:
             "chain": SOLANA,
             "token_id": token_id,
             "amount_native": amount_label(amount_sol),
-            "amount_usd": str(params.get("amount_usd") or ""),
+            "amount_usd": str(params.get("amount_usd") or estimate.get("amount_usd") or ""),
+            "out_amount": str(params.get("out_amount") or estimate.get("out_amount") or ""),
             "timeout_sec": int(params.get("timeout_sec") or 30),
             "mode_label": str(params.get("mode_label") or execution_mode.upper()),
         }
@@ -73,7 +80,16 @@ class TradingSkill:
             request_id=request_id,
             screen=builders.confirm(screen_payload, context=context, limit=is_limit),
         )
-        self.pending[request_id] = PendingDraft(draft=draft, params={**params, "token_id": token_id, "request_id": request_id, "execution_mode": execution_mode})
+        self.pending[request_id] = PendingDraft(
+            draft=draft,
+            params={
+                **params,
+                **{k: v for k, v in estimate.items() if v not in (None, "")},
+                "token_id": token_id,
+                "request_id": request_id,
+                "execution_mode": execution_mode,
+            },
+        )
         return draft
 
     def confirm(self, request_id: str, *, context: AppContext | None = None) -> ActionResult:
@@ -85,7 +101,7 @@ class TradingSkill:
         execution_mode = str(pending.params.get("execution_mode") or self.config.execution_mode).lower()
         executor = self.paper_executor if execution_mode == "paper" else self.executor
         execution = executor.execute(summary, pending.params) if executor else {}
-        body = f"{summary.get('action')} {summary.get('symbol')} confirmed as {execution_mode} draft."
+        body = _result_body(summary, execution_mode)
         screen = builders.result("Action confirmed", body, ok=True, context=context)
         return ActionResult(True, "confirmed", screen=screen, data={**summary, "execution": execution})
 
@@ -133,6 +149,49 @@ def amount_label(amount: str) -> str:
     return text if "SOL" in text.upper() else f"{text} SOL"
 
 
+def _estimate_trade(action: str, amount_native: Any, params: dict[str, Any], symbol: str) -> dict[str, str]:
+    if action not in {"trade.market_draft", "trade.limit_draft"}:
+        return {}
+    native_amount = _decimal_amount(amount_native)
+    token_price = _decimal_price(params.get("token_price_usd") or params.get("price_usd") or params.get("price_raw") or params.get("current_price"))
+    native_price = _decimal_price(params.get("native_price_usd") or params.get("sol_price_usd")) or DEFAULT_SOL_PRICE_USD
+    if native_amount <= 0:
+        return {}
+    amount_usd = native_amount * native_price
+    out: dict[str, str] = {
+        "amount_usd": format_money(float(amount_usd), max_chars=12),
+        "amount_usd_raw": _fmt_decimal(amount_usd),
+        "native_price_usd": _fmt_decimal(native_price),
+    }
+    if token_price > 0:
+        token_amount = amount_usd / token_price
+        out["token_amount"] = _fmt_decimal(token_amount)
+        out["price_usd"] = _fmt_decimal(token_price)
+        out["out_amount"] = f"{format_count(float(token_amount), max_chars=8)} {symbol or 'TOKEN'}"
+    return out
+
+
+def _decimal_amount(value: Any) -> Decimal:
+    text = str(value or "0").upper().replace("SOL", "").replace(",", "").replace("$", "").strip()
+    return _decimal(text)
+
+
+def _decimal_price(value: Any) -> Decimal:
+    number = parse_number(value, default=0)
+    return _decimal(str(number))
+
+
+def _decimal(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value or "0").strip() or "0")
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
+def _fmt_decimal(value: Decimal) -> str:
+    return format(value.normalize(), "f") if value else "0"
+
+
 def _execution_mode(params: dict[str, Any], context: AppContext | None, default: str) -> str:
     mode = str(params.get("execution_mode") or params.get("trade_mode") or "").lower()
     if not mode and context:
@@ -142,6 +201,17 @@ def _execution_mode(params: dict[str, Any], context: AppContext | None, default:
     if mode in {"real", "proxy", "proxy_wallet", "custodial", "hosted"}:
         return mode
     return str(default or "paper").lower()
+
+
+def _result_body(summary: dict[str, Any], execution_mode: str) -> str:
+    symbol = str(summary.get("symbol") or "TOKEN")
+    action = str(summary.get("action") or "")
+    mode = "Paper" if execution_mode == "paper" else "Real"
+    if action == "trade.sell_draft":
+        return f"{mode} sell filled for {symbol}."
+    if action == "trade.limit_draft":
+        return f"{mode} limit order created for {symbol}."
+    return f"{mode} buy filled for {symbol}."
 
 
 def _selected_token_id(context: AppContext | None) -> str:

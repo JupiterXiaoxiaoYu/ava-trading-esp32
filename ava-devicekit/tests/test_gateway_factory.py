@@ -168,6 +168,8 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     feed = session.boot()
     token = feed["data"]["tokens"][0]
     draft = session.handle({"type": "key_action", "action": "buy", **token})
+    assert draft["data"]["amount_usd"] == "$15"
+    assert draft["data"]["out_amount"] == "750K BONK"
     session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
 
     portfolio = session.handle({"type": "key_action", "action": "portfolio"})
@@ -177,6 +179,9 @@ def test_portfolio_payload_matches_device_screen_contract(tmp_path):
     assert {"total_usd", "pnl", "pnl_pct", "mode_label", "chain_label"} <= set(data)
     required = {"symbol", "avg_cost_usd", "value_usd", "pnl", "pnl_pct", "pnl_positive", "addr", "chain", "contract_tail", "source_tag", "balance_raw"}
     assert required <= set(data["holdings"][0])
+    assert data["holdings"][0]["avg_cost_usd"] == "$0.00002"
+    assert data["holdings"][0]["value_usd"] == "$15.00"
+    assert data["holdings"][0]["pnl"] == "$0"
 
 
 def test_legacy_screen_context_token_is_treated_as_selected():
