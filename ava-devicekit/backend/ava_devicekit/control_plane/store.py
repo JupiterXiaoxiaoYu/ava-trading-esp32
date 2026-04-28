@@ -20,6 +20,25 @@ DEFAULT_DEVICE_CONFIG: dict[str, Any] = {
     "risk_mode": "confirm_all",
 }
 
+DEFAULT_SERVICE_PLANS: list[dict[str, Any]] = [
+    {
+        "plan_id": "plan_internal",
+        "name": "Internal",
+        "status": "active",
+        "price_label": "internal",
+        "limits": {"asr_seconds": 0, "llm_tokens": 0, "tts_chars": 0, "api_calls": 0},
+        "features": ["unlimited_lab_use"],
+    },
+    {
+        "plan_id": "plan_starter",
+        "name": "Starter",
+        "status": "active",
+        "price_label": "manual",
+        "limits": {"asr_seconds": 3600, "llm_tokens": 200000, "tts_chars": 200000, "api_calls": 10000},
+        "features": ["voice", "ota", "basic_support"],
+    },
+]
+
 
 class ControlPlaneStore:
     """Local control-plane store for self-hosted DeviceKit deployments."""
@@ -66,6 +85,8 @@ class ControlPlaneStore:
             "devices": [dict(item) for item in data.get("devices", [])],
             "runtime_config": _redact(dict(data.get("runtime_config") or {})),
             "default_device_config": dict(data.get("default_device_config") or DEFAULT_DEVICE_CONFIG),
+            "service_plans": [dict(item) for item in data.get("service_plans", [])],
+            "usage_summary": self._usage_summary_unlocked(data),
         }
         if not include_secrets:
             for device in items["devices"]:
@@ -81,6 +102,7 @@ class ControlPlaneStore:
                 "active_devices": len([d for d in items["devices"] if d.get("status") in {"active", "online_seen"}]),
                 "registered_devices": len([d for d in items["devices"] if d.get("registered_at")]),
                 "provisioned_devices": len(items["devices"]),
+                "service_plans": len(items["service_plans"]),
             },
         }
 
@@ -189,6 +211,33 @@ class ControlPlaneStore:
         self.store.update(_default_state(), mutate)
         return {"ok": True, "customer": created}
 
+    def create_service_plan(self, body: dict[str, Any]) -> dict[str, Any]:
+        plan_id = str(body.get("plan_id") or _slug(str(body.get("name") or _id("plan")))).replace("-", "_")
+        if not plan_id.startswith("plan_"):
+            plan_id = f"plan_{plan_id}"
+        limits = body.get("limits") if isinstance(body.get("limits"), dict) else {}
+        created: dict[str, Any] = {}
+        now = _now()
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal created
+            _ensure_shape(data)
+            if any(item.get("plan_id") == plan_id for item in data["service_plans"]):
+                raise ValueError("service_plan_exists")
+            created = {
+                "plan_id": plan_id,
+                "name": str(body.get("name") or plan_id),
+                "status": str(body.get("status") or "active"),
+                "price_label": str(body.get("price_label") or "manual"),
+                "limits": _usage_limits(limits),
+                "features": body.get("features") if isinstance(body.get("features"), list) else [],
+                "created_at": now,
+            }
+            data["service_plans"].append(created)
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, "service_plan": created}
+
     def provision_device(self, body: dict[str, Any]) -> dict[str, Any]:
         data = self.bootstrap()
         project_id = str(body.get("project_id") or data["projects"][0]["project_id"])
@@ -223,6 +272,7 @@ class ControlPlaneStore:
                 "last_seen": None,
                 "firmware_version": str(body.get("firmware_version") or ""),
                 "config": _device_config(body),
+                "entitlement": _entitlement(body),
                 "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
                 "provisioning_token_hash": _hash_token(token),
                 "device_token_hash": "",
@@ -357,6 +407,24 @@ class ControlPlaneStore:
         self.store.update(_default_state(), mutate)
         return {"ok": True, "device": _safe_device(updated)}
 
+    def set_device_entitlement(self, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        updated: dict[str, Any] = {}
+
+        def mutate(state: dict[str, Any]) -> None:
+            nonlocal updated
+            _ensure_shape(state)
+            device = _find_device(state, device_id)
+            if not device:
+                raise ValueError("device_not_found")
+            entitlement = _entitlement(body)
+            if entitlement.get("plan_id") and not any(item.get("plan_id") == entitlement["plan_id"] for item in state["service_plans"]):
+                raise ValueError("service_plan_not_found")
+            device["entitlement"] = entitlement
+            updated = dict(device)
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, "device": _safe_device(updated), "entitlement": updated.get("entitlement") or {}}
+
     def update_device_config(self, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
         updated: dict[str, Any] = {}
 
@@ -389,6 +457,72 @@ class ControlPlaneStore:
             _deep_merge(merged, device["config"])
         return merged
 
+    def record_usage(self, body: dict[str, Any]) -> dict[str, Any]:
+        metric = str(body.get("metric") or "").strip()
+        if metric not in {"asr_seconds", "llm_tokens", "tts_chars", "api_calls"}:
+            raise ValueError("invalid_usage_metric")
+        amount = float(body.get("amount") or 0)
+        if amount < 0:
+            raise ValueError("invalid_usage_amount")
+        device_id = normalize_control_device_id(str(body.get("device_id") or ""))
+        if not device_id:
+            raise ValueError("device_id_required")
+        period = str(body.get("period") or _usage_period())
+        recorded: dict[str, Any] = {}
+
+        def mutate(state: dict[str, Any]) -> None:
+            nonlocal recorded
+            _ensure_shape(state)
+            device = _find_device(state, device_id)
+            if not device:
+                raise ValueError("device_not_found")
+            counters = state["usage_counters"].setdefault(period, {}).setdefault(device["device_id"], {})
+            counters[metric] = float(counters.get(metric) or 0) + amount
+            event = {
+                "ts": _now(),
+                "period": period,
+                "device_id": device["device_id"],
+                "customer_id": str(device.get("customer_id") or body.get("customer_id") or ""),
+                "metric": metric,
+                "amount": amount,
+                "source": str(body.get("source") or "manual"),
+                "metadata": body.get("metadata") if isinstance(body.get("metadata"), dict) else {},
+            }
+            state["usage_events"].append(event)
+            state["usage_events"] = state["usage_events"][-1000:]
+            recorded = {"event": event, "counters": dict(counters), "entitlement": dict(device.get("entitlement") or {})}
+
+        self.store.update(_default_state(), mutate)
+        recorded["limit_status"] = self._limit_status(device_id, period)
+        return {"ok": True, **recorded}
+
+    def usage_report(self, *, device_id: str = "", period: str = "") -> dict[str, Any]:
+        data = self.bootstrap()
+        period = period or _usage_period()
+        counters_by_device = data.get("usage_counters", {}).get(period, {})
+        devices = data.get("devices", [])
+        rows: list[dict[str, Any]] = []
+        for device in devices:
+            if device_id and normalize_control_device_id(device_id) != normalize_control_device_id(str(device.get("device_id") or "")):
+                continue
+            counters = dict(counters_by_device.get(device.get("device_id"), {}))
+            row = {
+                "device_id": device.get("device_id"),
+                "customer_id": device.get("customer_id", ""),
+                "status": device.get("status", ""),
+                "entitlement": dict(device.get("entitlement") or {}),
+                "usage": _usage_limits(counters),
+                "limit_status": self._limit_status(str(device.get("device_id") or ""), period),
+            }
+            rows.append(row)
+        return {
+            "ok": True,
+            "period": period,
+            "items": rows,
+            "count": len(rows),
+            "events": [dict(item) for item in data.get("usage_events", []) if (not device_id or normalize_control_device_id(device_id) == normalize_control_device_id(str(item.get("device_id") or "")))][-100:],
+        }
+
     def validate_device_token(self, device_id: str, token: str) -> bool:
         if not device_id or not token:
             return False
@@ -419,9 +553,47 @@ class ControlPlaneStore:
 
         self.store.update(_default_state(), mutate)
 
+    def _usage_summary_unlocked(self, data: dict[str, Any]) -> dict[str, Any]:
+        period = _usage_period()
+        totals = {"asr_seconds": 0.0, "llm_tokens": 0.0, "tts_chars": 0.0, "api_calls": 0.0}
+        for counters in data.get("usage_counters", {}).get(period, {}).values():
+            for key in totals:
+                totals[key] += float(counters.get(key) or 0)
+        return {"period": period, "totals": totals, "events_count": len(data.get("usage_events", []))}
+
+    def _limit_status(self, device_id: str, period: str) -> dict[str, Any]:
+        data = self.bootstrap()
+        device = _find_device(data, device_id)
+        if not device:
+            return {"ok": False, "reason": "device_not_found"}
+        entitlement = dict(device.get("entitlement") or {})
+        if entitlement.get("status") in {"suspended", "expired"}:
+            return {"ok": False, "reason": str(entitlement.get("status"))}
+        expires_at = int(entitlement.get("expires_at") or 0)
+        if expires_at and expires_at < _now():
+            return {"ok": False, "reason": "expired"}
+        plan = next((item for item in data.get("service_plans", []) if item.get("plan_id") == entitlement.get("plan_id")), None)
+        if not plan:
+            return {"ok": True, "reason": "no_plan"}
+        limits = _usage_limits(plan.get("limits") if isinstance(plan.get("limits"), dict) else {})
+        usage = _usage_limits(data.get("usage_counters", {}).get(period, {}).get(device.get("device_id"), {}))
+        exceeded = [key for key, limit in limits.items() if limit > 0 and usage.get(key, 0) > limit]
+        return {"ok": not exceeded, "reason": "limit_exceeded" if exceeded else "ok", "exceeded": exceeded, "limits": limits, "usage": usage}
+
 
 def _default_state() -> dict[str, Any]:
-    return {"version": 1, "users": [], "customers": [], "projects": [], "devices": [], "runtime_config": {}, "default_device_config": dict(DEFAULT_DEVICE_CONFIG)}
+    return {
+        "version": 1,
+        "users": [],
+        "customers": [],
+        "projects": [],
+        "devices": [],
+        "runtime_config": {},
+        "default_device_config": dict(DEFAULT_DEVICE_CONFIG),
+        "service_plans": [dict(item) for item in DEFAULT_SERVICE_PLANS],
+        "usage_counters": {},
+        "usage_events": [],
+    }
 
 
 def _ensure_shape(data: dict[str, Any]) -> None:
@@ -437,6 +609,14 @@ def _ensure_shape(data: dict[str, Any]) -> None:
         data["runtime_config"] = {}
     if not isinstance(data.get("default_device_config"), dict):
         data["default_device_config"] = dict(DEFAULT_DEVICE_CONFIG)
+    if not isinstance(data.get("service_plans"), list):
+        data["service_plans"] = [dict(item) for item in DEFAULT_SERVICE_PLANS]
+    if not data["service_plans"]:
+        data["service_plans"] = [dict(item) for item in DEFAULT_SERVICE_PLANS]
+    if not isinstance(data.get("usage_counters"), dict):
+        data["usage_counters"] = {}
+    if not isinstance(data.get("usage_events"), list):
+        data["usage_events"] = []
     data["version"] = int(data.get("version") or 1)
 
 
@@ -492,6 +672,30 @@ def _slug(value: str) -> str:
 
 def _now() -> int:
     return int(time.time())
+
+
+def _usage_period(ts: int | None = None) -> str:
+    return time.strftime("%Y-%m", time.gmtime(ts or _now()))
+
+
+def _usage_limits(data: dict[str, Any]) -> dict[str, float]:
+    return {
+        "asr_seconds": float(data.get("asr_seconds") or 0),
+        "llm_tokens": float(data.get("llm_tokens") or 0),
+        "tts_chars": float(data.get("tts_chars") or 0),
+        "api_calls": float(data.get("api_calls") or 0),
+    }
+
+
+def _entitlement(body: dict[str, Any]) -> dict[str, Any]:
+    source = body.get("entitlement") if isinstance(body.get("entitlement"), dict) else body
+    return {
+        "plan_id": str(source.get("plan_id") or "plan_internal"),
+        "status": str(source.get("entitlement_status") or source.get("status") or "active"),
+        "started_at": int(source.get("started_at") or _now()),
+        "expires_at": int(source.get("expires_at") or 0),
+        "notes": str(source.get("notes") or ""),
+    }
 
 
 def _device_config(body: dict[str, Any]) -> dict[str, Any]:

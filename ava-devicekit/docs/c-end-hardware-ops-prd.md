@@ -17,8 +17,8 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 | Configure a user's device | Web-edit language, AI name, wake phrases, voice, volume, app id, firmware channel, wallet/risk mode | Implemented MVP |
 | Diagnose user support issues | Per-device diagnostics endpoint with state, connection, events, config | Implemented MVP |
 | Push firmware | Publish bin and queue OTA check | Implemented MVP from previous phase |
-| Track service usage/cost | ASR seconds, LLM tokens, TTS chars, API calls per device/customer | Later |
-| Manage service plans | Free/pro/lifetime/internal entitlement and expiry | Later |
+| Track service usage/cost | ASR seconds, LLM tokens, TTS chars, API calls per device/customer | Implemented MVP |
+| Manage service plans | Free/pro/lifetime/internal entitlement and expiry | Implemented MVP |
 | Run staged OTA rollouts | Firmware channels, cohorts, rollback, OTA result reporting | Later |
 | Submit real Solana DePIN proofs | Device identity registry/proof provider with tx status | Later |
 
@@ -81,18 +81,22 @@ Configuration is resolved as default config -> project config -> device override
 | `GET/POST` | `/admin/runtime/config` | View or update persisted runtime provider/service config and apply it to the running process |
 | `POST` | `/admin/runtime/providers` | Update one provider block from the console |
 | `GET/POST` | `/admin/customers` | List or create C-end customers |
+| `GET/POST` | `/admin/service-plans` | List or create service plans and usage limits |
+| `GET/POST` | `/admin/usage` | View usage reports or record usage for a device |
 | `POST` | `/device/activate` | Bind a provisioned device to a customer using activation code |
 | `GET/POST` | `/admin/devices/{device_id}/config` | View or update device-level config |
 | `POST` | `/admin/devices/{device_id}/status` | Set device status, including suspend/revoke |
+| `POST` | `/admin/devices/{device_id}/entitlement` | Assign a service plan and status to a device |
 | `GET` | `/admin/devices/{device_id}/diagnostics` | View device state, connection, config, and recent events |
 | `GET` | `/device/config` | Device pulls its resolved configuration |
+| `POST` | `/device/usage` | Device reports usage with its bearer token |
 
 ## Remaining Later Work
 
 | Area | Why It Matters |
 |---|---|
-| Usage and cost metering | A personal hardware operator needs to know per-device ASR/LLM/TTS/API cost. |
-| Entitlements/service plans | Devices may need lifetime, beta, trial, or subscription access. |
+| Automatic provider usage instrumentation | MVP accepts usage reports; deeper ASR/LLM/TTS instrumentation should be added provider by provider. |
+| Payment/billing automation | Manual plans and entitlements exist; automated payment collection and renewal is later. |
 | OTA rollout cohorts | Reduces risk when pushing firmware to C-end devices. |
 | OTA result reporting | Operator must know whether C-end devices updated successfully. |
 | Customer-facing portal | Optional later; admin console is enough for the builder/operator MVP. |

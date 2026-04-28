@@ -106,12 +106,15 @@ ESP32 input / voice
 | `GET` | `/admin/control-plane` | Inspect local users, projects, and registered devices |
 | `GET/POST` | `/admin/users` | List or create local control-plane users |
 | `GET/POST` | `/admin/customers` | List or create C-end hardware customers |
+| `GET/POST` | `/admin/service-plans` | List or create service plans and usage limits |
+| `GET/POST` | `/admin/usage` | View usage by device/period or record usage manually |
 | `GET/POST` | `/admin/projects` | List or create projects, defaulting to Solana |
 | `GET` | `/admin/registered-devices` | List provisioned and registered devices |
 | `POST` | `/admin/devices/register` | Provision a device and return a one-time provisioning token |
 | `POST` | `/admin/devices/{device_id}/provision-token` | Rotate a device provisioning token |
 | `GET/POST` | `/admin/devices/{device_id}/config` | View or update device-level app/voice/wake/OTA/wallet config |
 | `POST` | `/admin/devices/{device_id}/status` | Suspend, activate, or revoke a device |
+| `POST` | `/admin/devices/{device_id}/entitlement` | Assign a service plan and entitlement status to a device |
 | `GET` | `/admin/devices/{device_id}/diagnostics` | Inspect device state, connection, config, and recent events |
 | `GET/POST` | `/admin/runtime/config` | View or update persisted runtime provider/service config |
 | `POST` | `/admin/runtime/providers` | Update one ASR/LLM/TTS/chain/execution provider from the web console |
@@ -120,6 +123,7 @@ ESP32 input / voice
 | `POST` | `/device/register` | Exchange a one-time provisioning token for a per-device bearer token |
 | `POST` | `/device/activate` | Bind a physical device to a C-end customer using its activation code |
 | `GET` | `/device/config` | Device pulls its resolved language/voice/wake/app/OTA/wallet config |
+| `POST` | `/device/usage` | Device reports ASR/LLM/TTS/API usage with its bearer token |
 
 
 ## Production Components Added
@@ -134,6 +138,7 @@ ESP32 input / voice
 | Admin API | Framework gateway | `/admin/capabilities`, `/admin/runtime`, `/admin/apps`, `/admin/devices`, `/admin/events`, `/admin/ota/firmware`, `/admin/developer/services`, optional bearer auth |
 | Control plane | Framework gateway | Local users/projects/devices registry, device provisioning token exchange, per-device bearer auth, and sanitized fleet snapshot APIs |
 | C-end hardware ops | Framework control plane | Customer records, activation codes, device status/config, provider config editing, and per-device diagnostics for self-hosted hardware service operation |
+| Usage and entitlements | Framework control plane | Service plans, per-device entitlements, usage reports, and usage recording endpoints for C-end hardware service cost control |
 | Package/CLI | Framework developer surface | `ava-devicekit` CLI with `capabilities`, `validate`, `init-app`, `init-board`, `init-adapter`, `init-provider`, `firmware`, `run-http`, `run-legacy-ws`, and `run-server` |
 | Firmware publish | Framework OTA | `ota/publish.py`, `/admin/ota/firmware`, and `ava-devicekit firmware publish/list` manage pull-based OTA binaries |
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
@@ -161,6 +166,7 @@ ESP32 input / voice
 | `docs/security-hardening.md` | Production mode, auth tokens, allowlists, and wallet/API safety |
 | `docs/ai-depin-cloud-prd.md` | Product requirements for the self-hosted AI DePIN control plane and Solana app template |
 | `docs/c-end-hardware-ops-prd.md` | Product requirements for operating C-end hardware users from a self-hosted console |
+| `docs/hardware-service-product-closure.md` | Stakeholder and product-flow closure for the operator console vs customer/device model |
 
 ## Existing Firmware Compatibility
 

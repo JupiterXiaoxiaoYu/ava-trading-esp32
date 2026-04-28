@@ -53,3 +53,25 @@ def test_control_plane_runtime_config_is_persisted_and_redacted(tmp_path):
     assert store.runtime_config()["providers"]["llm"]["api_key"] == "raw"
     public = store.snapshot()["runtime_config"]
     assert public["providers"]["llm"]["api_key"] == "<redacted>"
+
+
+def test_control_plane_service_plan_entitlement_and_usage(tmp_path):
+    store = ControlPlaneStore(tmp_path / "control.json")
+    provisioned = store.provision_device({"device_id": "metered-box"})
+    store.register_device({"provisioning_token": provisioned["provisioning_token"], "device_id": "metered-box"})
+    plan = store.create_service_plan({"plan_id": "plan_small", "name": "Small", "limits": {"llm_tokens": 100, "api_calls": 2}})["service_plan"]
+    assert plan["limits"]["llm_tokens"] == 100
+
+    entitlement = store.set_device_entitlement("metered_box", {"plan_id": "plan_small", "status": "active"})
+    assert entitlement["entitlement"]["plan_id"] == "plan_small"
+
+    first = store.record_usage({"device_id": "metered_box", "metric": "llm_tokens", "amount": 40, "source": "test"})
+    assert first["limit_status"]["ok"] is True
+    second = store.record_usage({"device_id": "metered_box", "metric": "llm_tokens", "amount": 70, "source": "test"})
+    assert second["limit_status"]["ok"] is False
+    assert second["limit_status"]["reason"] == "limit_exceeded"
+
+    report = store.usage_report(device_id="metered_box")
+    assert report["items"][0]["usage"]["llm_tokens"] == 110
+    assert report["items"][0]["limit_status"]["exceeded"] == ["llm_tokens"]
+    assert store.snapshot()["counts"]["service_plans"] >= 3

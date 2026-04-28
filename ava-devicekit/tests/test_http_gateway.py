@@ -307,3 +307,34 @@ def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_http_gateway_service_plans_entitlement_and_usage(tmp_path):
+    settings = RuntimeSettings(control_plane_store_path=str(tmp_path / "control.json"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(lambda: create_device_session(mock=True), settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        provisioned = _post(base_url, "/admin/devices/register", {"device_id": "usage-box"})
+        registered = _post(base_url, "/device/register", {"provisioning_token": provisioned["provisioning_token"], "device_id": "usage-box"})
+        plan = _post(base_url, "/admin/service-plans", {"plan_id": "plan_usage", "name": "Usage", "limits": {"api_calls": 1}})
+        assert plan["service_plan"]["plan_id"] == "plan_usage"
+        assigned = _post(base_url, "/admin/devices/usage_box/entitlement", {"plan_id": "plan_usage", "status": "active"})
+        assert assigned["entitlement"]["plan_id"] == "plan_usage"
+        first = _post(base_url, "/admin/usage", {"device_id": "usage_box", "metric": "api_calls", "amount": 1})
+        assert first["limit_status"]["ok"] is True
+        req = urllib.request.Request(
+            base_url + "/device/usage",
+            data=json.dumps({"metric": "api_calls", "amount": 1}).encode(),
+            headers={"X-Ava-Device-Id": "usage_box", "Authorization": "Bearer " + registered["device_token"], "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            second = json.loads(resp.read().decode())
+        assert second["limit_status"]["ok"] is False
+        report = _get(base_url, "/admin/usage?device_id=usage_box")
+        assert report["items"][0]["usage"]["api_calls"] == 2
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
