@@ -57,6 +57,18 @@ The admin UI should be read as an operator console with these jobs:
 
 Recent events and the Events tab are server-side runtime event streams. They are not a single-device page unless the operator filters by `device_id`. The UI copy should call them server timeline/events to avoid misunderstanding.
 
+## Dashboard Entry Points
+
+| Operator Question | Dashboard Entry |
+|---|---|
+| What is the overall state of the service? | `Dashboard` shows server-wide posture, fleet totals, provider status, and recent server timeline. |
+| How do I create an app? | `Apps` creates a project/app record and shows CLI app templates such as `init-app --type depin`; code generation remains a CLI/developer workflow. |
+| Where does the C-end user enter? | `Customer Entry` explains the activation flow and binds a purchased device with an activation code. |
+| How do I inspect one device? | `Device Detail` opens diagnostics for a device id, including owner/customer, config, runtime state, connection, usage, and recent events. |
+| How do I see logs for one app? | `Apps -> App logs` filters events by devices assigned to that `app_id`; `Server Timeline` is the global backend log. |
+| How do I manage usage limits? | `Usage` creates service plans, assigns entitlements, records usage, and shows limit status by device. |
+| How do I update AI/model config? | `Providers` edits ASR/LLM/TTS/chain/execution provider settings without editing files. |
+
 ## What Is Complete Now
 
 | Capability | Status |

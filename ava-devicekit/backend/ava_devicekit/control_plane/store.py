@@ -176,6 +176,7 @@ class ControlPlaneStore:
                 "slug": slug,
                 "owner_user_id": owner,
                 "chain": chain,
+                "app_id": str(body.get("app_id") or "ava_box"),
                 "description": description,
                 "device_config": body.get("device_config") if isinstance(body.get("device_config"), dict) else {},
                 "created_at": now,

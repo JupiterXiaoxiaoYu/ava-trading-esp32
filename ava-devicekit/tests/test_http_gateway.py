@@ -88,6 +88,11 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "id=\"invoke-form\"" in html
         assert "data-tab=\"devices\"" in html
         assert "data-tab=\"control\"" in html
+        assert "data-tab=\"apps\"" in html
+        assert "data-tab=\"usage\"" in html
+        assert "Hardware Service Console" in html
+        assert "id=\"app-log-form\"" in html
+        assert "id=\"device-detail-form\"" in html
         assert "providers" in _get(base_url, "/admin/runtime")
         assert _get(base_url, "/admin/control-plane")["counts"]["projects"] >= 1
         assert _get(base_url, "/admin/users")["count"] >= 1
