@@ -409,3 +409,24 @@ def test_market_stream_runtime_updates_live_s1_spotlight_chart():
     assert data["interval"] == "s1"
     assert data["chart_t_end"] == "now"
     assert data["chart"] == [0, 1000]
+
+
+def test_market_stream_runtime_fills_paper_limit_orders(tmp_path):
+    session = create_device_session(mock=True, skill_store_path=str(tmp_path / "skills.json"))
+    feed = session.boot()
+    token = feed["data"]["tokens"][0]
+    draft = session.handle({"type": "key_action", "action": "limit", "limit_price": "0.00001", **token})
+    result = session.handle({"type": "confirm", "trade_id": draft["action_draft"]["request_id"]})
+    assert result["data"]["success"] is True
+
+    orders = session.handle({"type": "key_action", "action": "orders"})
+    assert orders["data"]["tokens"][0]["change_24h"] == "paper_open"
+
+    runtime = MarketStreamRuntime(MockMarketStreamAdapter())
+    emitted = runtime.apply_events(session, [MarketStreamEvent("price", token["token_id"], {"price": "0.000009"})])
+    assert emitted
+    assert emitted[0]["data"]["tokens"][0]["symbol"] == "ORDERS"
+
+    history = session.handle({"type": "key_action", "action": "order_history"})
+    assert history["data"]["tokens"][0]["symbol"] == token["symbol"]
+    assert history["data"]["tokens"][0]["change_24h"] == "paper_filled"

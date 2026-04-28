@@ -129,7 +129,7 @@ def _order_row(row: dict[str, Any]) -> dict[str, Any]:
         "chain": str(row.get("chain") or SOLANA),
         "addr": addr,
         "token_id": token_id if token_id.endswith(f"-{SOLANA}") else f"{token_id}-{SOLANA}" if token_id else "",
-        "price": str(row.get("amount") or row.get("limit_price") or "--"),
+        "price": str(row.get("limit_price") or row.get("amount") or "--"),
         "change_24h": str(row.get("status") or row.get("action") or "draft"),
         "change_positive": str(row.get("status") or "").lower() not in {"failed", "cancelled"},
         "source": "orders",

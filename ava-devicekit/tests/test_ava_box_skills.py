@@ -68,6 +68,14 @@ def test_watchlist_portfolio_and_trade_skills_are_app_layer(tmp_path):
     orders = service.get_orders(context=context)
     assert orders.payload["tokens"][0]["symbol"] == "BONK"
     assert orders.payload["tokens"][0]["change_24h"] == "paper_open"
+    assert orders.payload["tokens"][0]["price"] == "0.00001"
+    assert service.get_portfolio(context=context).payload["pnl_reason"] == "Cash: 0.8 SOL"
+    filled = service.fill_paper_limits({"Bonk111111111111111111111111111111111111111-solana": "0.000009"})
+    assert len(filled) == 1
+    assert filled[0]["status"] == "paper_filled"
+    assert filled[0]["fill_price_usd"] == "0.000009"
+    assert service.get_orders(context=context).payload["tokens"][0]["symbol"] == "ORDERS"
+    assert service.get_history(context=context).payload["tokens"][0]["change_24h"] == "paper_filled"
 
 from ava_devicekit.apps.ava_box_skills.execution import AveSolanaTradeConfig, AveSolanaTradeProvider, build_create_solana_tx_payload
 from ava_devicekit.apps.ava_box_skills.paper import PaperExecutionProvider

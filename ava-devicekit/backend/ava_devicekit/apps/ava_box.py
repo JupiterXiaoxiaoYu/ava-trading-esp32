@@ -369,6 +369,7 @@ class AvaBoxApp:
 
         if not self.last_screen:
             return None
+        filled_limits = self.skills.fill_paper_limits(_price_map_from_events(events)) if self._trade_mode() == "paper" else []
         changed = False
         payload = dict(self.last_screen.payload)
         if self.last_screen.screen == "feed":
@@ -376,6 +377,11 @@ class AvaBoxApp:
             changed = _apply_events_to_rows(rows, events)
             if changed:
                 payload["tokens"] = rows
+            source_label = str(payload.get("source_label") or "").upper()
+            if filled_limits and "ORDERS" in source_label:
+                return self._remember_screen(self.skills.get_orders(mode=self._trade_mode(), context=self.context))
+            if filled_limits and "HISTORY" in source_label:
+                return self._remember_screen(self.skills.get_history(mode=self._trade_mode(), context=self.context))
         elif self.last_screen.screen == "spotlight":
             token_id = str(payload.get("token_id") or "")
             pair_id = str(payload.get("main_pair_id") or "")
@@ -400,6 +406,8 @@ class AvaBoxApp:
                         payload.update(_chart_payload(points))
                         payload["interval"] = selected_interval
                         changed = True
+        elif self.last_screen.screen == "portfolio" and filled_limits:
+            return self._remember_screen(self.skills.get_portfolio(context=self.context))
         if not changed:
             return None
         payload["live"] = True
@@ -434,6 +442,21 @@ def _apply_price(target: dict[str, Any], data: dict[str, Any]) -> None:
         value = _optional_float(change)
         target["change_24h"] = format_percent(value)
         target["change_positive"] = value >= 0
+
+
+def _price_map_from_events(events: list[MarketStreamEvent]) -> dict[str, Any]:
+    prices: dict[str, Any] = {}
+    for event in events:
+        if event.channel != "price":
+            continue
+        price = event.data.get("price_raw") or event.data.get("price") or event.data.get("current_price_usd") or event.data.get("price_usd")
+        if price in (None, ""):
+            continue
+        prices[str(event.token_id or "")] = price
+        symbol = str(event.data.get("symbol") or event.data.get("token_symbol") or "").upper()
+        if symbol:
+            prices[symbol] = price
+    return prices
 
 
 def _event_matches_token(event_token_id: str, token_id: str, payload: dict[str, Any]) -> bool:

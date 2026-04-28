@@ -51,6 +51,8 @@ class PaperExecutionProvider:
             state["paper_orders"] = state["paper_orders"][:100]
             self.store.write(state)
             return order
+        if is_limit:
+            _reserve_limit_cash(state, order)
         state.setdefault("paper_orders", []).insert(0, order)
         state["paper_orders"] = state["paper_orders"][:100]
         if not is_limit and not _is_native_sol_order(order):
@@ -61,6 +63,21 @@ class PaperExecutionProvider:
 
     def orders(self) -> list[dict[str, Any]]:
         return [row for row in _state(self.store).get("paper_orders", []) if isinstance(row, dict)]
+
+    def fill_limits(self, prices: dict[str, Any]) -> list[dict[str, Any]]:
+        state = _state(self.store)
+        filled: list[dict[str, Any]] = []
+        for order in [row for row in state.get("paper_orders", []) if isinstance(row, dict)]:
+            if not _is_open_limit_order(order):
+                continue
+            price = _price_for_order(order, prices)
+            if price <= 0 or price > _decimal_money(order.get("limit_price")):
+                continue
+            _fill_limit_order(state, order, price)
+            filled.append(order)
+        if filled:
+            self.store.write(state)
+        return filled
 
 
 def _apply_position(state: dict[str, Any], order: dict[str, Any]) -> None:
@@ -133,6 +150,30 @@ def _apply_cash(state: dict[str, Any], order: dict[str, Any]) -> None:
     state["paper_cash_sol"] = _fmt_decimal(cash)
 
 
+def _reserve_limit_cash(state: dict[str, Any], order: dict[str, Any]) -> None:
+    reserved = _decimal(order.get("native_amount")) or _extract_amount(order.get("amount"))
+    if reserved <= 0:
+        return
+    order["reserved_native_amount"] = _fmt_decimal(reserved)
+    cash = _paper_cash(state) - reserved
+    state["paper_cash_sol"] = _fmt_decimal(cash if cash > 0 else Decimal("0"))
+
+
+def _fill_limit_order(state: dict[str, Any], order: dict[str, Any], fill_price: Decimal) -> None:
+    native_amount = _decimal(order.get("reserved_native_amount")) or _decimal(order.get("native_amount")) or _extract_amount(order.get("amount"))
+    native_price = _decimal(order.get("native_price_usd")) or DEFAULT_NATIVE_PRICE_USD
+    amount_usd = native_amount * native_price
+    token_amount = amount_usd / fill_price if fill_price > 0 else Decimal("0")
+    order["status"] = "paper_filled"
+    order["filled_ts"] = int(time.time())
+    order["fill_price_usd"] = _fmt_decimal(fill_price)
+    order["price_usd"] = _fmt_decimal(fill_price)
+    order["amount_usd"] = _fmt_decimal(amount_usd)
+    order["token_amount"] = _fmt_decimal(token_amount)
+    order["out_amount"] = _fmt_decimal(token_amount)
+    _apply_position(state, order)
+
+
 def _enrich_sell_order_from_position(state: dict[str, Any], order: dict[str, Any]) -> None:
     if str(order.get("action") or "") != "trade.sell_draft":
         return
@@ -179,6 +220,23 @@ def _is_insufficient_paper_cash(state: dict[str, Any], order: dict[str, Any]) ->
         return False
     required = _decimal(order.get("native_amount")) or _extract_amount(order.get("amount"))
     return required > 0 and required > _paper_cash(state)
+
+
+def _is_open_limit_order(order: dict[str, Any]) -> bool:
+    return str(order.get("action") or "") == "trade.limit_draft" and str(order.get("status") or "").lower() in {"", "open", "pending", "paper_open", "created"}
+
+
+def _price_for_order(order: dict[str, Any], prices: dict[str, Any]) -> Decimal:
+    token_id = _normalize_token_id(order.get("token_id") or "")
+    candidates = [
+        token_id,
+        token_id.replace("-solana", ""),
+        str(order.get("symbol") or "").upper(),
+    ]
+    for key in candidates:
+        if key in prices:
+            return _decimal_money(prices[key])
+    return Decimal("0")
 
 
 def _paper_cash(state: dict[str, Any]) -> Decimal:

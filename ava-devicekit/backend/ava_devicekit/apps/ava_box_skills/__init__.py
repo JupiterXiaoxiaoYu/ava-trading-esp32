@@ -58,6 +58,9 @@ class AvaBoxSkillService:
             return self.portfolio.history(context=context, source_label="PAPER HISTORY")
         return self._real_orders(context=context, source_label="REAL HISTORY", status="")
 
+    def fill_paper_limits(self, prices: dict[str, Any]) -> list[dict[str, Any]]:
+        return self.paper_executor.fill_limits(prices)
+
     def get_watchlist(self, *, context: AppContext | None = None) -> ScreenPayload:
         return self.watchlist.open(context=context)
 
