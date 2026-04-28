@@ -37,6 +37,24 @@ def test_cli_init_app_depin_template(tmp_path, capsys):
     assert "proof.submit" in manifest["actions"]
 
 
+def test_cli_init_app_new_solana_templates(tmp_path, capsys):
+    cases = {
+        "depin_reward_device": "depin_reward_device",
+        "sensor_oracle_device": "sensor_oracle_device",
+        "onchain_event_listener": "onchain_event_listener",
+        "hardware_signer_approval": "hardware_signer_approval",
+    }
+    for app_type, app_id in cases.items():
+        target = tmp_path / app_type
+        main(["init-app", str(target), "--type", app_type])
+        body = json.loads(capsys.readouterr().out)
+        assert body["ok"] is True
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["app_id"] == app_id
+        assert (target / "app.py").exists()
+        assert (target / "README.md").exists()
+
+
 def test_cli_validate_outputs_sanitized_runtime(tmp_path, capsys):
     cfg = tmp_path / "runtime.json"
     cfg.write_text(

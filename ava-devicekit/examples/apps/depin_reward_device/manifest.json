@@ -1,0 +1,15 @@
+{
+  "app_id": "depin_reward_device",
+  "name": "DePIN Reward Device",
+  "description": "Reference app for device identity, signed telemetry, oracle verification, and Solana reward claim drafts.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "any", "inputs": ["button", "microphone", "sensor"], "outputs": ["display", "speaker"], "custody_role": "device_identity_not_user_asset_key"},
+  "adapters": {"chain": "solana", "services": ["device_ingest", "oracle", "reward_distributor"]},
+  "screens": ["reward_home", "proof_detail", "confirm", "result", "notify"],
+  "actions": ["device.identity", "telemetry.submit", "reward.check", "reward.claim", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "device_identity_key_not_user_asset_key", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["reward.claim", "device.identity"]},
+  "screen_contracts": [
+    {"screen_id": "reward_home", "description": "Device identity, telemetry count, and reward eligibility.", "payload_schema": {"type": "object", "required": ["device_id", "status", "reward"]}, "context_schema": {"type": "object", "required": ["screen", "page_data"]}, "actions": ["telemetry.submit", "reward.check", "reward.claim"]},
+    {"screen_id": "proof_detail", "description": "Signed telemetry or reward proof details before submission.", "payload_schema": {"type": "object", "required": ["proof_type", "summary"]}, "context_schema": {"type": "object", "required": ["screen", "selected"]}, "actions": ["action.confirm", "action.cancel"]}
+  ]
+}

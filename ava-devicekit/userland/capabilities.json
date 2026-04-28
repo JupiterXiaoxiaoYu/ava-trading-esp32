@@ -197,6 +197,55 @@
       "path": "docs/security-hardening.md",
       "user_action": "configure",
       "description": "Production mode, bearer-token requirements, and service invocation allowlist guidance."
+    },
+    {
+      "id": "device_identity",
+      "name": "Device Identity",
+      "path": "backend/ava_devicekit/control_plane/store.py",
+      "user_action": "configure_or_extend",
+      "description": "Provisions devices, issues per-device bearer tokens, and defines the hook for device public keys, signed registration challenges, and optional on-chain device registries."
+    },
+    {
+      "id": "oracle_reward_claim",
+      "name": "Oracle Reward Claim Pattern",
+      "path": "examples/apps/depin_reward_device/",
+      "user_action": "use_template",
+      "description": "Reference DePIN pattern where a device signs readings, an oracle verifies eligibility, and a Solana claim draft is physically confirmed on hardware."
+    },
+    {
+      "id": "solana_pay_transaction_request",
+      "name": "Solana Pay Transaction Request",
+      "path": "examples/apps/payment_terminal/",
+      "user_action": "use_template",
+      "description": "Payment terminal pattern for creating Solana Pay transaction requests, showing QR/payment summaries, and executing only after wallet or backend confirmation."
+    },
+    {
+      "id": "hardware_signer_reference",
+      "name": "Hardware Signer Reference",
+      "path": "examples/apps/hardware_signer_approval/",
+      "user_action": "use_template",
+      "description": "Optional signer/approval app pattern for GET_PUBKEY, message review, physical confirmation, and signature-return flows without making signer custody the default app model."
+    },
+    {
+      "id": "wss_http_fallback_transport",
+      "name": "WSS + HTTP Fallback Transport",
+      "path": "userland/hardware_port/templates/",
+      "user_action": "integrate",
+      "description": "Board-port pattern for persistent WebSocket, heartbeat, reconnect interval, and HTTP fallback when the realtime channel is unavailable."
+    },
+    {
+      "id": "secure_element_profile",
+      "name": "Secure Element Profile",
+      "path": "userland/hardware_port/secure_element_profile.md",
+      "user_action": "optional_integrate",
+      "description": "Optional hardware-security profile for devices with secure elements, device identity keys, protected signing, buzzer/LED feedback, and physical confirmation."
+    },
+    {
+      "id": "data_anchor_service",
+      "name": "Data Anchor Service",
+      "path": "backend/ava_devicekit/services/registry.py",
+      "user_action": "configure",
+      "description": "Developer-service type for anchoring batches of sensor/proof/reward data to Solana-compatible data availability or blob-anchor services."
     }
   ],
   "extension_points": [
@@ -307,6 +356,34 @@
       "template": "userland/hardware_port/",
       "user_action": "implement",
       "description": "Map concrete hardware controls to generic InputEvent frames and optional app-level semantic actions."
+    },
+    {
+      "id": "device_identity_provider",
+      "interface": "control_plane device metadata + app-level verifier",
+      "template": "examples/apps/depin_reward_device/",
+      "user_action": "implement_or_configure",
+      "description": "Adds public-key, challenge-response, secure-element, or oracle-backed device identity without requiring user asset keys on ESP32."
+    },
+    {
+      "id": "solana_pay_service",
+      "interface": "developer_services kind=solana_pay",
+      "template": "examples/apps/payment_terminal/",
+      "user_action": "configure",
+      "description": "Creates payment requests, QR payloads, wallet handoff links, and payment confirmation callbacks for physical payment terminals."
+    },
+    {
+      "id": "oracle_service",
+      "interface": "developer_services kind=oracle/reward_distributor",
+      "template": "examples/apps/depin_reward_device/",
+      "user_action": "configure",
+      "description": "Verifies device submissions, signs reward eligibility, and returns claim/action drafts to hardware apps."
+    },
+    {
+      "id": "device_ingest_service",
+      "interface": "developer_services kind=device_ingest",
+      "template": "examples/apps/sensor_oracle_device/",
+      "user_action": "configure",
+      "description": "Receives telemetry via WSS or HTTP fallback, validates per-device auth, and fans out updates to dashboards, storage, or chain adapters."
     }
   ],
   "reference_implementations": [
@@ -331,6 +408,46 @@
       "kind": "hardware_port",
       "paths": [
         "firmware/ports/scratch_arcade/"
+      ]
+    },
+    {
+      "id": "payment_terminal",
+      "kind": "hardware_app_template",
+      "paths": [
+        "examples/apps/payment_terminal/manifest.json",
+        "examples/apps/payment_terminal/app.py"
+      ]
+    },
+    {
+      "id": "depin_reward_device",
+      "kind": "hardware_app_template",
+      "paths": [
+        "examples/apps/depin_reward_device/manifest.json",
+        "examples/apps/depin_reward_device/app.py"
+      ]
+    },
+    {
+      "id": "sensor_oracle_device",
+      "kind": "hardware_app_template",
+      "paths": [
+        "examples/apps/sensor_oracle_device/manifest.json",
+        "examples/apps/sensor_oracle_device/app.py"
+      ]
+    },
+    {
+      "id": "onchain_event_listener",
+      "kind": "hardware_app_template",
+      "paths": [
+        "examples/apps/onchain_event_listener/manifest.json",
+        "examples/apps/onchain_event_listener/app.py"
+      ]
+    },
+    {
+      "id": "hardware_signer_approval",
+      "kind": "hardware_app_template",
+      "paths": [
+        "examples/apps/hardware_signer_approval/manifest.json",
+        "examples/apps/hardware_signer_approval/app.py"
       ]
     }
   ]

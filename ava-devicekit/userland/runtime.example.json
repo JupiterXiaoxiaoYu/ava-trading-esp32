@@ -112,6 +112,105 @@
       "options": {
         "invocable": false
       }
+    },
+    {
+      "id": "solana_rpc",
+      "kind": "solana_rpc",
+      "base_url": "https://api.mainnet-beta.solana.com",
+      "capabilities": [
+        "rpc.get_latest_blockhash",
+        "rpc.send_transaction",
+        "rpc.account_subscribe"
+      ],
+      "options": {
+        "invocable": false
+      }
+    },
+    {
+      "id": "solana_pay",
+      "kind": "solana_pay",
+      "base_url": "https://payments.example.com",
+      "api_key_env": "SOLANA_PAY_API_KEY",
+      "capabilities": [
+        "solana_pay.request",
+        "solana_pay.qr",
+        "payment.status"
+      ],
+      "options": {
+        "invocable": false,
+        "confirmation_required": "external_wallet_or_device_screen"
+      }
+    },
+    {
+      "id": "oracle",
+      "kind": "oracle",
+      "base_url": "https://oracle.example.com",
+      "api_key_env": "ORACLE_API_KEY",
+      "capabilities": [
+        "oracle.verify",
+        "oracle.sign_eligibility"
+      ],
+      "options": {
+        "invocable": false
+      }
+    },
+    {
+      "id": "reward_distributor",
+      "kind": "reward_distributor",
+      "base_url": "https://rewards.example.com",
+      "api_key_env": "REWARD_API_KEY",
+      "capabilities": [
+        "reward.check",
+        "reward.claim_draft",
+        "reward.status"
+      ],
+      "options": {
+        "invocable": false
+      }
+    },
+    {
+      "id": "data_anchor",
+      "kind": "data_anchor",
+      "base_url": "https://data-anchor.example.com",
+      "api_key_env": "DATA_ANCHOR_API_KEY",
+      "capabilities": [
+        "data_anchor.upload",
+        "data_anchor.fetch",
+        "data_anchor.verify"
+      ],
+      "options": {
+        "invocable": false
+      }
+    },
+    {
+      "id": "gasless_tx",
+      "kind": "gasless_tx",
+      "base_url": "https://gasless.example.com",
+      "api_key_env": "GASLESS_TX_API_KEY",
+      "capabilities": [
+        "tx.sponsor",
+        "tx.submit",
+        "tx.status"
+      ],
+      "options": {
+        "invocable": false
+      }
+    },
+    {
+      "id": "device_ingest",
+      "kind": "device_ingest",
+      "base_url": "https://ingest.example.com",
+      "api_key_env": "DEVICE_INGEST_API_KEY",
+      "capabilities": [
+        "device_ingest.wss",
+        "device_ingest.http_fallback",
+        "device_ingest.heartbeat"
+      ],
+      "options": {
+        "invocable": false,
+        "heartbeat_interval_ms": 15000,
+        "http_fallback": true
+      }
     }
   ],
   "production_mode": false

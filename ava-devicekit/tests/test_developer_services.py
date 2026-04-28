@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from ava_devicekit.services.client import invoke_developer_service
-from ava_devicekit.services.registry import DeveloperService, developer_service_report
+from ava_devicekit.services.registry import DeveloperService, developer_service_report, normalize_service_kind, service_kind_catalog
 
 
 def test_developer_service_reports_configured_env(monkeypatch):
@@ -36,8 +36,23 @@ def test_developer_service_report_flags_missing_env(monkeypatch):
     report = developer_service_report([{"id": "data", "kind": "market_data", "api_key_env": "MISSING_KEY"}])
 
     assert report["ok"] is False
+    assert report["items"][0]["kind"] == "market_data_api"
     assert report["items"][0]["status"] == "missing_env"
     assert report["items"][0]["env"]["missing"] == ["MISSING_KEY"]
+    assert any(item["kind"] == "device_ingest" for item in report["kind_catalog"])
+
+
+def test_developer_service_kind_catalog_standardizes_solana_depin_services():
+    kinds = {item["kind"] for item in service_kind_catalog()}
+
+    assert {"solana_rpc", "solana_pay", "oracle", "reward_distributor", "data_anchor", "gasless_tx", "device_ingest"}.issubset(kinds)
+    assert normalize_service_kind("solana-pay") == "solana_pay"
+    assert normalize_service_kind("proxy_wallet") == "custodial_wallet"
+
+    service = DeveloperService.from_dict({"id": "ingest", "kind": "device_ingest"})
+    health = service.health()
+    assert health["configured"] is True
+    assert "device_ingest.heartbeat" in health["capabilities"]
 
 
 def test_developer_service_invocation_requires_allowlist(tmp_path):

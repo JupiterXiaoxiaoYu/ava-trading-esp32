@@ -8,18 +8,70 @@
   },
   "input_map": {
     "capabilities": [
-      {"source": "button_a", "kinds": ["press"], "semantic_actions": ["action.confirm"]},
-      {"source": "button_b", "kinds": ["press"], "semantic_actions": ["action.cancel"]},
-      {"source": "joystick", "kinds": ["move"], "codes": ["up", "down", "left", "right"]},
-      {"source": "microphone", "kinds": ["listen_start", "listen_stop"], "semantic_actions": ["voice.listen"]}
+      {
+        "source": "button_a",
+        "kinds": [
+          "press"
+        ],
+        "semantic_actions": [
+          "action.confirm"
+        ]
+      },
+      {
+        "source": "button_b",
+        "kinds": [
+          "press"
+        ],
+        "semantic_actions": [
+          "action.cancel"
+        ]
+      },
+      {
+        "source": "joystick",
+        "kinds": [
+          "move"
+        ],
+        "codes": [
+          "up",
+          "down",
+          "left",
+          "right"
+        ]
+      },
+      {
+        "source": "microphone",
+        "kinds": [
+          "listen_start",
+          "listen_stop"
+        ],
+        "semantic_actions": [
+          "voice.listen"
+        ]
+      }
     ],
-    "required_actions": ["action.confirm", "action.cancel"]
+    "required_actions": [
+      "action.confirm",
+      "action.cancel"
+    ]
   },
-  "outputs": ["display", "speaker"],
+  "outputs": [
+    "display",
+    "speaker"
+  ],
   "transport": {
     "protocol": "websocket",
     "acks_rendered_payloads": true,
     "supports_ota_check_command": true,
-    "sends_context_snapshot": true
+    "sends_context_snapshot": true,
+    "websocket_primary": true,
+    "http_fallback": true,
+    "heartbeat_interval_ms": 15000,
+    "reconnect_interval_ms": 5000,
+    "uses_per_device_bearer_token": true
+  },
+  "device_identity": {
+    "challenge_response": true,
+    "device_public_key": "optional",
+    "secure_element_profile": "none|nvs_device_key|secure_element_device_key|secure_element_signer"
   }
 }

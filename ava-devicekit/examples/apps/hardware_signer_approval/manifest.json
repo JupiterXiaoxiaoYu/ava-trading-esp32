@@ -1,0 +1,15 @@
+{
+  "app_id": "hardware_signer_approval",
+  "name": "Hardware Signer Approval",
+  "description": "Optional reference app for devices that display a message/transaction summary and return a device signature after physical confirmation.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "any", "inputs": ["button"], "outputs": ["display"], "secure_element": "optional"},
+  "adapters": {"services": ["solana_rpc", "gasless_tx"]},
+  "screens": ["signer_home", "sign_request", "confirm", "result", "notify"],
+  "actions": ["signer.get_pubkey", "signer.review_message", "signer.approve", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "optional_device_key_for_signing", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["signer.approve"], "secure_element_recommended": true},
+  "screen_contracts": [
+    {"screen_id": "signer_home", "description": "Signer public key and readiness state.", "payload_schema": {"type": "object", "required": ["pubkey", "status"]}, "context_schema": {"type": "object", "required": ["screen", "page_data"]}, "actions": ["signer.get_pubkey", "signer.review_message"]},
+    {"screen_id": "sign_request", "description": "Message or transaction summary awaiting physical approval.", "payload_schema": {"type": "object", "required": ["summary", "request_id"]}, "context_schema": {"type": "object", "required": ["screen", "selected"]}, "actions": ["action.confirm", "action.cancel"]}
+  ]
+}

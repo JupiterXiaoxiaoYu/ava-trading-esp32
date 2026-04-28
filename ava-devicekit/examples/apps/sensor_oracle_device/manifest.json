@@ -1,0 +1,14 @@
+{
+  "app_id": "sensor_oracle_device",
+  "name": "Sensor Oracle Device",
+  "description": "Reference app for ESP32 sensor telemetry through WSS, HTTP fallback, device ingest, and oracle services.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "small", "inputs": ["sensor", "button"], "outputs": ["display"]},
+  "adapters": {"services": ["device_ingest", "oracle", "data_anchor"]},
+  "screens": ["sensor_panel", "confirm", "result", "notify"],
+  "actions": ["sensor.read", "sensor.submit", "oracle.verify", "data.anchor", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "no_user_asset_custody", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["data.anchor"]},
+  "screen_contracts": [
+    {"screen_id": "sensor_panel", "description": "Sensor readings, ingest status, oracle status, and anchor status.", "payload_schema": {"type": "object", "required": ["device_id", "readings", "transport"]}, "context_schema": {"type": "object", "required": ["screen", "page_data"]}, "actions": ["sensor.read", "sensor.submit", "data.anchor"]}
+  ]
+}

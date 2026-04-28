@@ -536,6 +536,13 @@ Services 是 developer backend service registry。它描述后台可调用或可
 | `market_data_api` | market data | feed/search/detail/price stream |
 | `payment_api` | payment provider | 支付、收款、invoice |
 | `order_router` | order service | 限价单、市价单、状态查询 |
+| `solana_rpc` | RPC provider | Solana RPC / account subscribe / transaction submit |
+| `solana_pay` | payment request | Solana Pay transaction request、QR、wallet handoff |
+| `oracle` | proof verifier | 设备 telemetry/proof 验证、eligibility signature |
+| `reward_distributor` | reward API | DePIN reward check、claim draft、status |
+| `data_anchor` | blob/proof anchor | 批量传感器数据、proof、reward summary 上链锚定 |
+| `gasless_tx` | fee payer | gasless/sponsored transaction |
+| `device_ingest` | telemetry ingest | WSS 上报、HTTP fallback、heartbeat、fanout |
 | `custom` | 自定义 app 服务 | 开发者业务 API |
 
 后台前端支持 allowlisted invoke test。只有服务 config 中允许的 path 才应该被调用。
@@ -917,7 +924,7 @@ cp ava-devicekit/userland/runtime.example.json runtime.local.json
 | providers.tts | provider/model/base_url/api_key_env/voice/format |
 | adapters.chain | provider/class/options |
 | execution | mode/base_url/api_key_env/secret_key_env/proxy_wallet_id_env |
-| services | proxy_wallet、market_data、payment、order_router 等 |
+| services | proxy_wallet、market_data、solana_rpc、solana_pay、oracle、reward_distributor、data_anchor、gasless_tx、device_ingest 等 |
 
 校验：
 

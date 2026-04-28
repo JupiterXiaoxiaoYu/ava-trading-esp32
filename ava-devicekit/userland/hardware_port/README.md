@@ -57,3 +57,19 @@ avoid stale server-side state.
 
 See `firmware/ports/scratch_arcade/` for the reference board boundary and
 `userland/hardware_port/templates/` for a minimal port template.
+
+
+## Production Transport Pattern
+
+DeviceKit board ports should use WebSocket as the realtime path and HTTP as the fallback path.
+
+| Requirement | Board-Port Behavior |
+|---|---|
+| Heartbeat | Send `heartbeat` every configured interval while WebSocket is connected. |
+| Reconnect interval | If WebSocket is disconnected, retry with backoff or the configured reconnect interval. |
+| HTTP fallback | If realtime transport is down, POST critical telemetry or usage messages to the configured HTTP endpoint. |
+| Per-device token auth | Store the token returned by `/device/register` and send it as a bearer token on HTTP fallback and config pulls. |
+| Device identity | Optionally sign registration or telemetry challenges with a device identity key. |
+| Secure element | Use `secure_element_profile.md` when the board includes protected key storage. |
+
+The template exposes these hooks in `board_port.h`: `send_http_json`, `millis`, `sign_challenge`, `heartbeat_interval_ms`, `reconnect_interval_ms`, `bearer_token`, `device_public_key`, and `secure_element_profile`.

@@ -1,0 +1,14 @@
+{
+  "app_id": "onchain_event_listener",
+  "name": "On-Chain Event Listener",
+  "description": "Reference app for listening to Solana account/program events and converting them into hardware display, speech, or actuator commands.",
+  "chain": "solana",
+  "device": {"target": "esp32", "display": "any", "inputs": ["button", "microphone"], "outputs": ["display", "speaker", "actuator"]},
+  "adapters": {"services": ["solana_rpc", "device_ingest"]},
+  "screens": ["event_feed", "event_detail", "confirm", "result", "notify"],
+  "actions": ["event.subscribe", "event.ack", "event.speak", "actuator.trigger", "action.confirm", "action.cancel"],
+  "safety": {"custody_mode": "no_user_asset_custody", "primary_asset_keys_on_esp32": false, "requires_physical_confirmation": ["actuator.trigger"]},
+  "screen_contracts": [
+    {"screen_id": "event_feed", "description": "Recent on-chain events with cursor and selected event context.", "payload_schema": {"type": "object", "required": ["events"]}, "context_schema": {"type": "object", "required": ["screen", "cursor", "selected"]}, "actions": ["event.ack", "event.speak", "actuator.trigger"]}
+  ]
+}

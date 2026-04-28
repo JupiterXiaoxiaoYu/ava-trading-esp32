@@ -95,6 +95,28 @@ Example runtime config:
 }
 ```
 
+
+## Standard Service Kinds
+
+The admin dashboard and `/admin/developer/services` standardize these service kinds:
+
+| Kind | Purpose |
+|---|---|
+| `custodial_wallet` | Proxy/custodial wallet balance, trade, and order status APIs. |
+| `market_data_api` | Feed, search, token detail, price, and kline APIs. |
+| `payment_api` | Generic payment provider APIs. |
+| `order_router` | Market/limit order router and order status APIs. |
+| `solana_rpc` | Solana RPC or RPC aggregator endpoint. |
+| `solana_pay` | Solana Pay transaction request, QR, wallet handoff, and payment confirmation. |
+| `oracle` | Device telemetry/proof verification and eligibility signatures. |
+| `reward_distributor` | DePIN reward check, claim draft, and reward status. |
+| `data_anchor` | Batch telemetry/proof blob anchoring and verification. |
+| `gasless_tx` | Fee payer, gasless transaction, or sponsored transaction service. |
+| `device_ingest` | WSS telemetry ingest, HTTP fallback, heartbeat, and realtime fanout. |
+| `api` / `custom` | Generic app-specific backend services. |
+
+Aliases such as `market_data`, `proxy_wallet`, `solana-pay`, and `ingest` are normalized by the backend service registry.
+
 Inspect service readiness:
 
 ```bash
