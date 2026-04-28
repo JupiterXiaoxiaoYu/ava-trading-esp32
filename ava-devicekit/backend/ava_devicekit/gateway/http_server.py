@@ -235,6 +235,11 @@ def make_handler(
                     return
                 self._send_json(_dashboard_payload(settings, manager, task_manager, provider_health))
                 return
+            if path == "/admin/onboarding":
+                if not self._authorized_admin():
+                    return
+                self._send_json(_onboarding_payload(settings, manager, provider_health))
+                return
             if path == "/ava/ota/":
                 host_hint = self.headers.get("Host", "127.0.0.1").split(":")[0]
                 message = f"OTA OK. WebSocket: {settings.websocket_endpoint(host_hint)}"
@@ -634,16 +639,95 @@ def _dashboard_payload(
 ) -> dict[str, Any]:
     providers = provider_health() if provider_health else provider_health_report(settings)
     control_plane = ControlPlaneStore(settings.control_plane_store_path).snapshot()
+    firmware = firmware_catalog(settings)
+    developer_services = developer_service_report(settings.developer_services)
     return {
         "ok": True,
         "runtime": settings.sanitized_dict(),
         "control_plane": control_plane,
         "providers": providers,
-        "developer_services": developer_service_report(settings.developer_services),
-        "firmware": firmware_catalog(settings),
+        "developer_services": developer_services,
+        "firmware": firmware,
         "devices": {"items": manager.list_devices(), "count": len(manager.list_devices())},
         "tasks": task_manager.snapshot() if task_manager else {"items": [], "count": 0, "running_count": 0},
         "events": manager.event_log(limit=50),
+        "onboarding": _onboarding_from_parts(settings, manager, control_plane, providers, developer_services, firmware),
+    }
+
+
+def _onboarding_payload(
+    settings: RuntimeSettings,
+    manager: RuntimeManager,
+    provider_health: Callable[[], dict[str, Any]] | None,
+) -> dict[str, Any]:
+    providers = provider_health() if provider_health else provider_health_report(settings)
+    control_plane = ControlPlaneStore(settings.control_plane_store_path).snapshot()
+    firmware = firmware_catalog(settings)
+    developer_services = developer_service_report(settings.developer_services)
+    return _onboarding_from_parts(settings, manager, control_plane, providers, developer_services, firmware)
+
+
+def _onboarding_from_parts(
+    settings: RuntimeSettings,
+    manager: RuntimeManager,
+    control_plane: dict[str, Any],
+    providers: dict[str, Any],
+    developer_services: dict[str, Any],
+    firmware: dict[str, Any],
+) -> dict[str, Any]:
+    projects = control_plane.get("projects") if isinstance(control_plane.get("projects"), list) else []
+    customers = control_plane.get("customers") if isinstance(control_plane.get("customers"), list) else []
+    devices = control_plane.get("devices") if isinstance(control_plane.get("devices"), list) else []
+    plans = control_plane.get("service_plans") if isinstance(control_plane.get("service_plans"), list) else []
+    registered = [item for item in devices if item.get("registered_at")]
+    active = [item for item in devices if item.get("status") in {"active", "online_seen"}]
+    linked = [item for item in devices if item.get("customer_id")]
+    online = [item for item in manager.list_devices() if (item.get("connection") or {}).get("connected")]
+    steps = [
+        _step("app_project", "Create an app/project", bool(projects), "Apps", "POST /admin/projects", "Create the product app record that devices and users attach to."),
+        _step("providers", "Configure providers", bool(providers.get("ok")), "Providers", "POST /admin/runtime/providers", "Set ASR, LLM, TTS, chain, and execution providers by env-key references."),
+        _step("service_plan", "Create service plan", bool(plans), "Usage", "POST /admin/service-plans", "Define the usage and entitlement model for C-end hardware users."),
+        _step("device_provisioned", "Provision hardware", bool(devices), "Fleet Setup", "POST /admin/devices/register", "Create a device record and get its provisioning token plus activation code."),
+        _step("device_registered", "Register device token", bool(registered), "Device firmware", "POST /device/register", "Device exchanges the one-time provisioning token for a per-device bearer token."),
+        _step("customer_registered", "Register one C-end user", bool(customers), "Customer Entry", "POST /customer/register", "Create or reuse a customer account for the hardware user."),
+        _step("user_device_bound", "Bind user to device", bool(linked), "Customer Entry", "POST /customer/register with activation_code", "Activation code links the purchased device to the user and app."),
+        _step("device_active", "Activate device", bool(active), "Customer Entry", "POST /device/activate", "Device is active or has been seen online after activation."),
+        _step("live_session", "Verify live session", bool(online), "Device Detail", "POST /device/boot or WebSocket hello", "Confirm that at least one hardware unit is connected to this backend.", required=False),
+        _step("developer_services", "Configure backend services", bool((developer_services.get("items") or [])), "Services", "runtime services[]", "Register Solana RPC, payment, oracle, reward, data anchor, wallet, or custom APIs.", required=False),
+        _step("firmware", "Publish firmware", bool((firmware.get("items") or [])), "Firmware", "POST /admin/ota/firmware", "Publish at least one OTA binary for pull-based updates.", required=False),
+    ]
+    required = [item for item in steps if item["required"]]
+    complete_required = [item for item in required if item["done"]]
+    next_required = next((item for item in required if not item["done"]), None)
+    next_optional = next((item for item in steps if not item["done"]), None)
+    return {
+        "ok": True,
+        "complete": len(complete_required) == len(required),
+        "percent": int(round((len(complete_required) / max(len(required), 1)) * 100)),
+        "required_done": len(complete_required),
+        "required_total": len(required),
+        "steps": steps,
+        "next_action": next_required or next_optional or {"id": "complete", "title": "Operational loop complete", "tab": "Dashboard", "api": "", "description": "The core app/user/device loop is in place."},
+        "quickstart": [
+            "Create app/project in Apps",
+            "Configure Providers with env var names",
+            "Provision device in Fleet Setup",
+            "Register device with provisioning token",
+            "Register customer with /customer/register and activation_code",
+            "Inspect app users, device diagnostics, usage, events, and OTA",
+        ],
+    }
+
+
+def _step(step_id: str, title: str, done: bool, tab: str, api: str, description: str, *, required: bool = True) -> dict[str, Any]:
+    return {
+        "id": step_id,
+        "title": title,
+        "done": bool(done),
+        "required": required,
+        "tab": tab,
+        "api": api,
+        "description": description,
     }
 
 

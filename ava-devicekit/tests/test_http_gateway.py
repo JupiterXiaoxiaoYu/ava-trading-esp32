@@ -86,6 +86,7 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert "Ava DeviceKit Cloud Control Plane" in html
         assert "id=\"firmware-form\"" in html
         assert "id=\"invoke-form\"" in html
+        assert "id=\"onboarding-list\"" in html
         assert "data-tab=\"devices\"" in html
         assert "data-tab=\"control\"" in html
         assert "data-tab=\"apps\"" in html
@@ -107,6 +108,11 @@ def test_http_gateway_admin_endpoints(tmp_path):
         assert _get(base_url, "/admin/apps")["active"]["app_id"] == "ava_box"
         assert _get(base_url, "/admin/apps/ava_box/customers")["ok"] is True
         assert _get(base_url, "/admin/apps/ava_box/devices")["ok"] is True
+        onboarding = _get(base_url, "/admin/onboarding")
+        assert onboarding["ok"] is True
+        assert onboarding["next_action"]["id"] == "device_provisioned"
+        assert any(item["id"] == "customer_registered" for item in onboarding["steps"])
+        assert _get(base_url, "/admin/dashboard.json")["onboarding"]["required_total"] >= 1
         assert _get(base_url, "/admin/dashboard.json")["ok"] is True
     finally:
         server.shutdown()

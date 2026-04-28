@@ -194,6 +194,8 @@ C 端用户闭环：
 | App 用户管理 | Apps -> App users 或 `GET /admin/apps/{app_id}/customers` | 查看该 app 下的 C 端用户和已绑定设备 |
 | 运营支持 | Device Detail / Usage / Events | 查看单设备 config、usage、logs、OTA 状态 |
 
+后台会通过 `GET /admin/onboarding` 和 Dashboard 的 Setup checklist 返回当前闭环进度。这个 checklist 不依赖前端状态，而是由服务端根据 control plane、provider health、service plan、device registration、customer registration、activation、online session、developer services、firmware catalog 计算，用于告诉开发者/运营下一步该补什么。
+
 框架级 DePIN/设备合约：
 
 | 合约 | 文件 | 作用 |

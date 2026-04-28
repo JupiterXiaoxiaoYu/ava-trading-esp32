@@ -21,6 +21,7 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 | Push firmware | Publish bin and queue OTA check | Implemented MVP from previous phase |
 | Track service usage/cost | ASR seconds, LLM tokens, TTS chars, API calls per device/customer | Implemented MVP |
 | Manage service plans | Free/pro/lifetime/internal entitlement and expiry | Implemented MVP |
+| Know the next setup action | Onboarding checklist computes app/provider/plan/device/customer/activation/live-session progress | Implemented MVP |
 | Run staged OTA rollouts | Firmware channels, cohorts, rollback, OTA result reporting | Later |
 | Submit real Solana DePIN proofs | Device identity registry/proof provider with tx status | Later |
 
@@ -86,6 +87,7 @@ Configuration is resolved as default config -> project config -> device override
 | `POST` | `/customer/register` | C-end user registration; creates/reuses customer and optionally binds an activation code |
 | `GET` | `/admin/apps/{app_id}/customers` | App-scoped user list with bound devices |
 | `GET` | `/admin/apps/{app_id}/devices` | App-scoped hardware list |
+| `GET` | `/admin/onboarding` | Server-side setup checklist and next required action for closing the app/user/device loop |
 | `GET/POST` | `/admin/service-plans` | List or create service plans and usage limits |
 | `GET/POST` | `/admin/usage` | View usage reports or record usage for a device |
 | `POST` | `/device/activate` | Bind a provisioned device to a customer using activation code |

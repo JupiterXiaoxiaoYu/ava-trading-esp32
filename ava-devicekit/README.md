@@ -144,7 +144,7 @@ ESP32 input / voice
 | Developer services | Framework backend registry | `services/registry.py` declares proxy wallets, market-data APIs, payment APIs, order routers, and custom services with redacted health checks |
 | Device protocol | Framework contract | `docs/device-protocol.md` defines hello, input, context, display, TTS, ACK, command, and OTA-trigger frames |
 | Security hardening | Framework deploy policy | `production_mode`, bearer-token enforcement, and service invocation allowlists protect admin/device surfaces |
-| Cloud control plane | Framework admin UI | `/admin` provides a lightweight developer console for devices, OTA, providers, services, events, and raw runtime state without a frontend build step |
+| Cloud control plane | Framework admin UI | `/admin` provides a lightweight developer console for setup checklist, app users, devices, OTA, providers, services, events, and raw runtime state without a frontend build step |
 | UI migration boundary | Framework + app UI | Shared UI screen contracts under `shared_ui/screens`; product LVGL screens consume payloads outside core |
 | Generic page/input/context | Framework contract | Custom `ScreenContract`, `InputEvent`, and `ContextSnapshot` schemas let new pages and new hardware controls attach AI-readable state without changing core |
 
