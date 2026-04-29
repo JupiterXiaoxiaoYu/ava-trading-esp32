@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import time
@@ -128,6 +129,20 @@ def make_handler(
                     return
                 app_id = path.split("/")[3]
                 self._send_json(control_plane.app_devices(app_id))
+                return
+            if path.startswith("/admin/apps/") and path.endswith("/runtime/config"):
+                if not self._authorized_admin():
+                    return
+                app_id = path.split("/")[3]
+                app_config = control_plane.app_runtime_config(app_id)
+                effective = _merged_runtime_config(control_plane.runtime_config(), app_config.get("runtime_config") if isinstance(app_config.get("runtime_config"), dict) else {})
+                self._send_json({**app_config, "effective": RuntimeSettings.from_dict(effective).sanitized_dict()})
+                return
+            if path.startswith("/admin/apps/") and path.endswith("/developer/services"):
+                if not self._authorized_admin():
+                    return
+                app_id = path.split("/")[3]
+                self._send_json(control_plane.app_services(app_id))
                 return
             if path == "/admin/devices":
                 if not self._authorized_admin():
@@ -438,6 +453,40 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path.startswith("/admin/apps/") and path.endswith("/runtime/config"):
+                if not self._authorized_admin():
+                    return
+                try:
+                    app_id = path.split("/")[3]
+                    body = self._read_json()
+                    result = control_plane.update_app_runtime_config(app_id, body)
+                    applied = _apply_app_runtime_if_active(app_id, result["runtime_config"], settings, manager, control_plane)
+                    self._send_json({**result, "applied_to_running_gateway": applied})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/apps/") and path.endswith("/runtime/providers"):
+                if not self._authorized_admin():
+                    return
+                try:
+                    app_id = path.split("/")[3]
+                    result = control_plane.update_app_runtime_config(app_id, _runtime_provider_patch(self._read_json()))
+                    applied = _apply_app_runtime_if_active(app_id, result["runtime_config"], settings, manager, control_plane)
+                    self._send_json({**result, "applied_to_running_gateway": applied, "providers": provider_health_report(settings)})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            if path.startswith("/admin/apps/") and path.endswith("/developer/services"):
+                if not self._authorized_admin():
+                    return
+                try:
+                    app_id = path.split("/")[3]
+                    result = control_plane.upsert_app_service(app_id, self._read_json())
+                    applied = _apply_app_runtime_if_active(app_id, result["runtime_config"], settings, manager, control_plane)
+                    self._send_json({**result, "applied_to_running_gateway": applied, "services": developer_service_report(settings.developer_services)})
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path == "/admin/devices/register":
                 if not self._authorized_admin():
                     return
@@ -693,6 +742,30 @@ def _apply_runtime_config(settings: RuntimeSettings, config: dict[str, Any]) -> 
             settings.execution_options = dict(execution["options"])
     if isinstance(config.get("services"), list):
         settings.developer_services = [dict(item) for item in config["services"] if isinstance(item, dict)]
+
+
+def _apply_app_runtime_if_active(app_id: str, app_config: dict[str, Any], settings: RuntimeSettings, manager: RuntimeManager, control_plane: ControlPlaneStore) -> bool:
+    active_app_id = str(manager.get("default").app.manifest.app_id or "ava_box")
+    if str(app_id or "ava_box") != active_app_id:
+        return False
+    raw = control_plane.app_runtime_config(app_id, include_secrets=True)
+    merged = _merged_runtime_config(control_plane.runtime_config(), raw.get("runtime_config") if isinstance(raw.get("runtime_config"), dict) else app_config)
+    _apply_runtime_config(settings, merged)
+    return True
+
+
+def _merged_runtime_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(base if isinstance(base, dict) else {})
+    _deep_merge(merged, copy.deepcopy(override if isinstance(override, dict) else {}))
+    return merged
+
+
+def _deep_merge(target: dict[str, Any], patch: dict[str, Any]) -> None:
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
 
 
 def _apply_provider(settings: RuntimeSettings, kind: str, data: dict[str, Any]) -> None:

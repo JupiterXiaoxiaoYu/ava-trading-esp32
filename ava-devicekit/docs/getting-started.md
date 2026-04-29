@@ -10,8 +10,9 @@ python3 -m pip install -e .[dev,websocket]
 ## Run The Reference App Against DeviceKit
 
 ```bash
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 127.0.0.1 --port 8788 --config userland/runtime.example.json
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-firmware-ws --host 127.0.0.1 --port 8787 --config userland/runtime.example.json
+cd /path/to/ava-trading-esp32
+cp ava-devicekit/userland/env.example ava-devicekit/.env.local
+./scripts/run-devicekit-local.sh
 ```
 
 Then send device messages to `POST /device/message` or inspect state at `GET /device/state`.
@@ -37,7 +38,7 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 | Project | Internal control-plane record backing an app. | `project_id` is resolved from `app_id` and should not be hand-entered for normal provisioning. |
 | Device | One physical ESP32 hardware unit. | Every device belongs to exactly one `app_id`; provisioning with only `device_id + app_id` is valid. |
 | Hardware profile | Board/model class derived from device `board_model`. | Used for inventory, OTA targeting, and board-port documentation. |
-| Providers/services | Server runtime defaults inherited by apps. | ASR/LLM/TTS/chain/execution and service registry are configured once for the backend until app overrides are added. |
+| Providers/services | Server runtime defaults plus optional app overrides. | Configure defaults in `Providers`; configure app-scoped overrides in `Apps`. Active-app overrides apply to the running gateway immediately. |
 | Purchase/order | Activation-card record for shipped hardware. | Connects `app_id + device_id + plan_id + activation_code + optional customer_wallet`. |
 | Customer | C-end hardware owner. | Customer enters through `/customer`, signs with wallet, then binds an activation code. |
 
@@ -51,6 +52,9 @@ PYTHONPATH=backend python3 -m ava_devicekit.cli validate --config runtime.local.
 | `/admin/apps` | App overview with app -> project -> device/order/customer counts |
 | `/admin/apps/{app_id}/customers` | App-scoped C-end users and their bound devices |
 | `/admin/apps/{app_id}/devices` | App-scoped hardware inventory |
+| `/admin/apps/{app_id}/runtime/config` | App-scoped provider/adapter/execution/service config and effective merged runtime |
+| `/admin/apps/{app_id}/runtime/providers` | Update one app-scoped ASR, LLM, TTS, chain, or execution provider block |
+| `/admin/apps/{app_id}/developer/services` | Register/list app-scoped backend services such as Solana RPC, oracle, data anchor, or proxy wallet |
 | `/admin/projects` | Create/list app project records; project is the internal backing record for an app |
 | `/admin/devices/register` | Provision hardware by `device_id + app_id`; returns provisioning token plus activation code |
 | `/device/register` | Device exchanges provisioning token for a per-device bearer token |
@@ -76,12 +80,21 @@ Use this sequence to verify the local service is usable as a hardware-product ba
 
 1. Open `/admin` and check `Dashboard -> Setup checklist`.
 2. Create an app/project in `Apps`, or use the default `ava_box` project.
-3. Configure providers in `Providers`; secret values stay in environment variables.
+3. Configure server default providers in `Providers`, or app-owned provider overrides in `Apps`.
 4. Create a service plan in `Usage`.
 5. Provision hardware in `Fleet Setup` with `device_id + app_id`; copy the `provisioning_token` and `activation_code`.
 6. Register the device with `POST /device/register`.
 7. Open `/customer`, connect/sign with the hardware buyer wallet, and activate the device with the `activation_code`.
 8. Confirm the user appears in `Apps -> App users`, the device appears in `Hardware`, and the order appears in `Orders`.
+
+## Developer 0-1 Smoke Demo
+
+This script creates an app record, app-level provider override, app-level Solana RPC service, service plan, purchase activation card, device registration, and first device messages against an in-process DeviceKit server:
+
+```bash
+PYTHONPATH=ava-devicekit/backend \
+python3 ava-devicekit/examples/developer_zero_to_one_flow.py
+```
 
 ## Wallet-Signature Purchase Flow
 

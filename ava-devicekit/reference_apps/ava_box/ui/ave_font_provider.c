@@ -27,5 +27,9 @@ const lv_font_t *ave_font_cjk_16(void)
 
 const char *ave_font_debug_sim_misans_path(void)
 {
+#if defined(LV_SIMULATOR)
+    return "assets/fonts/MiSans-Regular.ttf";
+#else
     return NULL;
+#endif
 }

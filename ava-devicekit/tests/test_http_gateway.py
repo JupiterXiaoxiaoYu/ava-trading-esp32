@@ -344,6 +344,21 @@ def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
     try:
         provider = _post(base_url, "/admin/runtime/providers", {"kind": "llm", "provider": "openai-compatible", "model": "qwen-test", "base_url": "https://example.test/v1", "api_key_env": "DASHSCOPE_API_KEY"})
         assert provider["providers"]["items"][1]["model"] == "qwen-test"
+        app_provider = _post(base_url, "/admin/apps/ava_box/runtime/providers", {"kind": "tts", "provider": "alibl", "model": "cosyvoice-app", "api_key_env": "DASHSCOPE_API_KEY"})
+        assert app_provider["applied_to_running_gateway"] is True
+        assert app_provider["providers"]["items"][2]["model"] == "cosyvoice-app"
+        app_runtime = _get(base_url, "/admin/apps/ava_box/runtime/config")
+        assert app_runtime["runtime_config"]["providers"]["tts"]["model"] == "cosyvoice-app"
+        assert app_runtime["effective"]["providers"]["llm"]["model"] == "qwen-test"
+        app_service = _post(
+            base_url,
+            "/admin/apps/ava_box/developer/services",
+            {"id": "rpc", "kind": "solana_rpc", "base_url": "https://rpc.example", "allow_paths": ["/"], "capabilities": ["rpc"]},
+        )
+        assert app_service["applied_to_running_gateway"] is True
+        assert app_service["services"]["items"][0]["id"] == "rpc"
+        assert _get(base_url, "/admin/apps/ava_box/developer/services")["count"] == 1
+        assert _get(base_url, "/admin/apps")["items"][0]["service_scope"] == "app_override"
         _post(
             base_url,
             "/admin/runtime/providers",

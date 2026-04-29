@@ -32,8 +32,8 @@ The product unit is the app. A project is the internal control-plane record that
 | Relationship | Rule | Current Behavior |
 |---|---|---|
 | App -> Project | One app has a backing project record. | Creating an app creates a project/app record; provisioning can also auto-create the backing project from `app_id`. |
-| App -> Providers | Apps inherit server default providers. | ASR, LLM, TTS, chain, and execution provider config are server-wide defaults in the MVP. |
-| App -> Services | Apps inherit server service registry entries. | Solana RPC, wallet proxy, oracle, payment, data anchor, and custom APIs are registered at backend level. |
+| App -> Providers | Apps can inherit server defaults or define app-level overrides. | ASR, LLM, TTS, chain, and execution provider config can be edited from Apps; active-app overrides apply to the running gateway. |
+| App -> Services | Apps can inherit server services or define app-owned backend services. | Solana RPC, wallet proxy, oracle, payment, data anchor, and custom APIs can be registered per app. |
 | App -> Hardware profiles | Hardware profiles are the board models used by devices under the app. | The console groups profiles from device `board_model`; OTA/profile targeting can build on this. |
 | App -> Devices | Every physical unit belongs to one app. | `/admin/devices/register` accepts `device_id + app_id`; `project_id` is resolved internally. |
 | App -> Orders | A purchase/activation card is scoped to the app and device. | `/admin/purchases` records `app_id`, `device_id`, `plan_id`, optional wallet lock, and activation URL. |

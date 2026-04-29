@@ -46,7 +46,7 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 |---|---|
 | Device belongs to app | Provisioning accepts `device_id + app_id`; the backend stores `device.app_id` and resolves/creates the backing project. |
 | Project id is not an operator input | `project_id` remains accepted for compatibility, but normal UI does not expose it for provisioning. |
-| Providers/services have clear scope | Provider and service registry entries are shown as `server_default` inherited by apps until per-app overrides are implemented. |
+| Providers/services have clear scope | Provider and service registry entries can be configured as server defaults or app-level overrides. |
 | Hardware is visible by app | Admin Hardware page lists `app_id`, `board_model`, `device_id`, customer, plan, and status. |
 | Orders are visible by app | Admin Orders page lists purchase/order records with app, device, wallet lock, activation code, plan, and status. |
 | Customers are visible by app | `/admin/apps/{app_id}/customers` returns wallet-authenticated customers and their bound devices. |
@@ -92,7 +92,7 @@ Secrets remain in environment variables or an external secret manager. The conso
 | `wallet_mode` | proxy/external/paper wallet mode |
 | `risk_mode` | confirmation and high-risk action policy |
 
-Configuration is resolved as default config -> project config -> device override. The current MVP implements default plus device override, and leaves richer project-level editing for the next phase.
+Configuration is resolved as server default -> app/project runtime override -> device override. The current MVP includes web-editable app provider/service overrides and device-level customer configuration.
 
 ## API Additions
 

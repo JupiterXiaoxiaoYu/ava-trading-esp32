@@ -54,7 +54,7 @@ static const int k_keys_press_a[] = {AVE_KEY_A};
 static const int k_keys_press_b[] = {AVE_KEY_B};
 static const int k_keys_feed_open_explore[] = {AVE_KEY_B};
 static const int k_keys_feed_open_search_guide[] = {AVE_KEY_B, AVE_KEY_A};
-static const int k_keys_feed_open_sources[] = {AVE_KEY_B, AVE_KEY_DOWN, AVE_KEY_DOWN, AVE_KEY_A};
+static const int k_keys_feed_open_sources[] = {AVE_KEY_B, AVE_KEY_DOWN, AVE_KEY_DOWN, AVE_KEY_DOWN, AVE_KEY_DOWN, AVE_KEY_A};
 
 static const screenshot_case_t k_cases[] = {
     {"feed", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed.ppm", NULL, 0, 2, -1, NULL, 0},
@@ -63,9 +63,9 @@ static const screenshot_case_t k_cases[] = {
     {"feed_orders", "mock/mock_scenes/12_feed_orders.json", "mock/screenshot/baselines/feed_orders.ppm", NULL, 0, 2, -1, NULL, 0},
     {"disambiguation", "mock/mock_scenes/13_disambiguation.json", "mock/screenshot/baselines/disambiguation.ppm", NULL, 0, 2, -1, NULL, 0},
     {"disambiguation_overflow", "mock/mock_scenes/14_disambiguation_overflow.json", "mock/screenshot/baselines/disambiguation_overflow.ppm", NULL, 0, 2, -1, NULL, 0},
-    {"feed_explore_panel", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_panel.ppm", k_keys_feed_open_explore, 1, 4, 0, NULL, 1},
-    {"feed_explore_search_guide", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_search_guide.ppm", k_keys_feed_open_search_guide, 2, 4, 0, NULL, 1},
-    {"feed_explore_sources", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_sources.ppm", k_keys_feed_open_sources, 4, 4, 0, NULL, 1},
+    {"feed_explore_panel", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_panel.ppm", k_keys_feed_open_explore, 1, 4, 1, "{\"type\":\"key_action\",\"action\":\"explorer_sync\"}", 1},
+    {"feed_explore_search_guide", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_search_guide.ppm", k_keys_feed_open_search_guide, 2, 4, 1, "{\"type\":\"key_action\",\"action\":\"explorer_sync\"}", 1},
+    {"feed_explore_sources", "mock/mock_scenes/01_feed_bonk.json", "mock/screenshot/baselines/feed_explore_sources.ppm", k_keys_feed_open_sources, 6, 4, 1, "{\"type\":\"key_action\",\"action\":\"explorer_sync\"}", 1},
     {"feed_signals", "mock/mock_scenes/16_feed_signals.json", "mock/screenshot/baselines/feed_signals.ppm", NULL, 0, 2, -1, NULL, 0},
     {"feed_watchlist", "mock/mock_scenes/17_feed_watchlist.json", "mock/screenshot/baselines/feed_watchlist.ppm", NULL, 0, 2, -1, NULL, 0},
     /* Orders mode: A/RIGHT must be disabled (no outbound "watch" key_action). */
@@ -386,17 +386,17 @@ static int assert_feed_explore_labels(const screenshot_case_t *test_case)
         if (count_labels_with_text_recursive(scr, "Search") <= 0 ||
             count_labels_with_text_recursive(scr, "Orders") <= 0 ||
             count_labels_with_text_recursive(scr, "Sources") <= 0 ||
-            count_labels_with_text_recursive(scr, "TRENDING") <= 0) {
+            count_labels_with_text_recursive(scr, "Watchlist") <= 0) {
             fprintf(stderr,
-                    "FAIL: [feed_explore_panel] expected FEED plus Search / Orders / Sources\n");
+                    "FAIL: [feed_explore_panel] expected Explorer menu with Search / Orders / Sources / Watchlist\n");
             return 0;
         }
         return 1;
     }
 
     if (strcmp(test_case->screen_name, "feed_explore_search_guide") == 0) {
-        if (count_labels_containing_text_recursive(scr, "FN") <= 0 ||
-            count_labels_containing_text_recursive(scr, "币名") <= 0) {
+        if (count_labels_containing_text_recursive(scr, "Hold FN") <= 0 ||
+            count_labels_containing_text_recursive(scr, "Say token") <= 0) {
             fprintf(stderr,
                     "FAIL: [feed_explore_search_guide] expected FN guidance copy\n");
             return 0;
@@ -445,8 +445,9 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
                 fprintf(stderr, "FAIL: [%s] expected top hint mentioning 'BACK TO FEED'\n", test_case->screen_name);
                 return 0;
             }
-            if (count_labels_containing_text_recursive(scr, "| Y PORTFOLIO") <= 0) {
-                fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning '| Y PORTFOLIO'\n", test_case->screen_name);
+            if (count_labels_containing_text_recursive(scr, "Y Portfolio") <= 0 &&
+                count_labels_containing_text_recursive(scr, "Y PORTFOLIO") <= 0) {
+                fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning 'Y Portfolio'\n", test_case->screen_name);
                 return 0;
             }
             return 1;
@@ -479,12 +480,13 @@ static int assert_affordance_labels(const screenshot_case_t *test_case)
             }
             return 1;
         }
-        if (count_labels_containing_text_recursive(scr, "<- REFRESH | X CHANGE") <= 0) {
-            fprintf(stderr, "FAIL: [%s] expected top hint mentioning '<- REFRESH | X CHANGE'\n", test_case->screen_name);
+        if (count_labels_containing_text_recursive(scr, "Refresh | X Change") <= 0) {
+            fprintf(stderr, "FAIL: [%s] expected top hint mentioning 'Refresh | X Change'\n", test_case->screen_name);
             return 0;
         }
-        if (count_labels_containing_text_recursive(scr, "| Y PORTFOLIO") <= 0) {
-            fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning '| Y PORTFOLIO'\n", test_case->screen_name);
+        if (count_labels_containing_text_recursive(scr, "Y Portfolio") <= 0 &&
+            count_labels_containing_text_recursive(scr, "Y PORTFOLIO") <= 0) {
+            fprintf(stderr, "FAIL: [%s] expected FEED affordance mentioning 'Y Portfolio'\n", test_case->screen_name);
             return 0;
         }
         return 1;

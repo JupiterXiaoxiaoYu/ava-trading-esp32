@@ -72,6 +72,7 @@ class ControlPlaneStore:
                         "chain": "solana",
                         "app_id": "ava_box",
                         "description": "Default project for local ESP32 Solana hardware apps.",
+                        "runtime_config": {},
                         "created_at": now,
                     }
                 )
@@ -84,7 +85,7 @@ class ControlPlaneStore:
             "version": data.get("version", 1),
             "users": [dict(item) for item in data.get("users", [])],
             "customers": [_safe_customer(item) for item in data.get("customers", [])],
-            "projects": [dict(item) for item in data.get("projects", [])],
+            "projects": [_redact(dict(item)) for item in data.get("projects", [])],
             "devices": [dict(item) for item in data.get("devices", [])],
             "purchases": [_safe_purchase(item) for item in data.get("purchases", [])],
             "runtime_config": _redact(dict(data.get("runtime_config") or {})),
@@ -184,6 +185,7 @@ class ControlPlaneStore:
                 "app_id": str(body.get("app_id") or "ava_box"),
                 "description": description,
                 "device_config": body.get("device_config") if isinstance(body.get("device_config"), dict) else {},
+                "runtime_config": _sanitize_runtime_config(body.get("runtime_config") if isinstance(body.get("runtime_config"), dict) else {}),
                 "created_at": now,
             }
             state["projects"].append(created)
@@ -477,6 +479,63 @@ class ControlPlaneStore:
         rows = [_safe_device(item) for item in data.get("devices", []) if not app_id or item.get("app_id") == app_id]
         return {"ok": True, "app_id": app_id, "items": rows, "count": len(rows)}
 
+    def app_runtime_config(self, app_id: str, *, include_secrets: bool = False) -> dict[str, Any]:
+        data = self.bootstrap()
+        project = _resolve_project_for_app(data, app_id=app_id)
+        config = _sanitize_runtime_config(project.get("runtime_config") if isinstance(project.get("runtime_config"), dict) else {})
+        return {"ok": True, "app_id": str(project.get("app_id") or app_id or "ava_box"), "project_id": str(project.get("project_id") or ""), "runtime_config": config if include_secrets else _redact(config)}
+
+    def update_app_runtime_config(self, app_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        app_id = str(app_id or "ava_box").strip()
+        updated: dict[str, Any] = {}
+        project_id = ""
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal updated, project_id
+            _ensure_shape(data)
+            project = _resolve_project_for_app(data, app_id=app_id)
+            current = project.get("runtime_config")
+            if not isinstance(current, dict):
+                current = {}
+                project["runtime_config"] = current
+            _deep_merge(current, _sanitize_runtime_config(body))
+            updated = _sanitize_runtime_config(current)
+            project_id = str(project.get("project_id") or "")
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, "app_id": app_id, "project_id": project_id, "runtime_config": _redact(updated)}
+
+    def app_services(self, app_id: str) -> dict[str, Any]:
+        config = self.app_runtime_config(app_id)["runtime_config"]
+        services = config.get("services") if isinstance(config.get("services"), list) else []
+        return {"ok": True, "app_id": str(app_id or "ava_box"), "items": services, "count": len(services)}
+
+    def upsert_app_service(self, app_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        service = dict(body.get("service") if isinstance(body.get("service"), dict) else body)
+        service_id = str(service.get("id") or service.get("service_id") or "").strip()
+        if not service_id:
+            raise ValueError("service_id_required")
+        updated_services: list[dict[str, Any]] = []
+        config_result: dict[str, Any] = {}
+
+        def mutate(data: dict[str, Any]) -> None:
+            nonlocal updated_services, config_result
+            _ensure_shape(data)
+            project = _resolve_project_for_app(data, app_id=app_id)
+            current = project.get("runtime_config")
+            if not isinstance(current, dict):
+                current = {}
+                project["runtime_config"] = current
+            existing = current.get("services") if isinstance(current.get("services"), list) else []
+            rows = [dict(item) for item in existing if isinstance(item, dict) and str(item.get("id") or item.get("service_id") or "") != service_id]
+            rows.append(service)
+            current["services"] = rows
+            updated_services = [_redact(dict(item)) for item in rows]
+            config_result = _redact(_sanitize_runtime_config(current))
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, "app_id": str(app_id or "ava_box"), "service": _redact(service), "items": updated_services, "count": len(updated_services), "runtime_config": config_result}
+
     def apps_overview(self, *, active_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
         data = self.bootstrap()
         projects = [dict(item) for item in data.get("projects", [])]
@@ -500,6 +559,9 @@ class ControlPlaneStore:
                 if app_id in set(item.get("app_ids") or []) or str(item.get("customer_id") or "") in customer_ids
             ]
             hardware_profiles = sorted({str(item.get("board_model") or "esp32") for item in app_devices})
+            app_config = (project or {}).get("runtime_config") if isinstance((project or {}).get("runtime_config"), dict) else {}
+            has_provider_overrides = bool(app_config.get("providers") or app_config.get("adapters") or app_config.get("execution"))
+            has_service_overrides = bool(app_config.get("services"))
             rows.append(
                 {
                     "app_id": app_id,
@@ -512,8 +574,9 @@ class ControlPlaneStore:
                     "customers_count": len(app_customers),
                     "purchases_count": len(app_purchases),
                     "hardware_profiles": hardware_profiles,
-                    "provider_scope": "server_default",
-                    "service_scope": "server_default",
+                    "provider_scope": "app_override" if has_provider_overrides else "server_default",
+                    "service_scope": "app_override" if has_service_overrides else "server_default",
+                    "runtime_config": _redact(_sanitize_runtime_config(app_config)),
                 }
             )
         return {"ok": True, "items": rows, "count": len(rows), "active": active_manifest or {}}
@@ -1133,6 +1196,8 @@ def _ensure_shape(data: dict[str, Any]) -> None:
             continue
         if not project.get("app_id"):
             project["app_id"] = "ava_box" if project.get("project_id") == "prj_default_solana" else _slug(str(project.get("name") or "app")).replace("-", "_")
+        if not isinstance(project.get("runtime_config"), dict):
+            project["runtime_config"] = {}
     data["version"] = int(data.get("version") or 1)
 
 
@@ -1270,6 +1335,7 @@ def _resolve_project_for_app(
         "app_id": app_id,
         "description": "Auto-created from app id during device provisioning.",
         "device_config": {},
+        "runtime_config": {},
         "created_at": _now(),
     }
     data["projects"].append(project)
