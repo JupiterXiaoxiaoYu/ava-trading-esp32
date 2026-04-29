@@ -25,10 +25,13 @@ CUSTOMER_PAGE = r'''<!doctype html>
       <div class="title">Buy hardware</div>
       <p class="copy">Local demo: checkout automatically creates a device, provisions it, and returns the activation code normally printed on the package or sent after fulfillment.</p>
       <form id="demo-purchase-form" class="form">
+        <input type="hidden" name="app_id" id="purchase_app_id" value="ava_box">
+        <input type="hidden" name="plan_id" value="plan_starter">
+        <input type="hidden" name="board_model" value="esp32s3">
         <div class="purchase-row">
-          <div class="field"><label>App id</label><input name="app_id" id="purchase_app_id" value="ava_box"></div>
-          <div class="field"><label>Plan</label><input name="plan_id" value="plan_starter"></div>
-          <div class="field"><label>Board model</label><input name="board_model" value="esp32s3"></div>
+          <div class="step"><b>Ava Box</b><span>Solana AI hardware app</span></div>
+          <div class="step"><b>Starter</b><span>Default service plan</span></div>
+          <div class="step"><b>ESP32-S3</b><span>Developer-defined board profile</span></div>
         </div>
         <div class="buy-line">
           <button class="btn primary" type="submit">Demo buy Ava hardware</button>

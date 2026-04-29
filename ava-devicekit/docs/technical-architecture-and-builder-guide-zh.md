@@ -229,7 +229,7 @@ Customer portal 的当前信息架构：
 | 区域 | 显示时机 | 作用 |
 |---|---|---|
 | 左侧主区域 | 默认显示 | 产品说明、三步流程、购买硬件 demo |
-| Buy hardware 横排表单 | 默认显示；移动端折叠为竖排 | 选择 app、plan、board model，可选择是否 wallet lock，然后创建 demo purchase/activation card |
+| Buy hardware 横排区域 | 默认显示；移动端折叠为竖排 | 展示开发者/运营预设的产品、plan、board profile；C 端用户只能发起 checkout，并可选择是否 wallet lock |
 | Activation card | demo buy 后或 URL 带 activation code 时 | 展示 activation code、device、app、wallet lock 状态和 activation URL |
 | 右侧激活面板 | demo buy 后、activation URL 进入、或本地已有 customer session 时显示 | 钱包签名、激活码绑定、查看已绑定设备 |
 

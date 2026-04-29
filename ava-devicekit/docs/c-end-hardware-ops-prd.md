@@ -165,7 +165,7 @@ The customer portal should make the hardware ownership sequence visible from lef
 | Area | When Visible | Purpose |
 |---|---|---|
 | Left primary area | Always visible | Product story, three-step flow, and horizontal `Buy hardware` demo checkout. |
-| Buy hardware row | Always visible on desktop, stacked on mobile | Select app, plan, board model, optional wallet lock, then create the demo purchase/activation card. |
+| Buy hardware row | Always visible on desktop, stacked on mobile | Shows the developer-defined product, plan, and board profile; customer can only start checkout and optionally wallet-lock the activation code. |
 | Activation card | After checkout or activation URL preload | Shows activation code, device id, app id, wallet-lock state, and activation URL. |
 | Right activation panel | After checkout, activation-code URL, or restored customer session | Wallet sign-in, activation-code binding, and bound-device list. |
 

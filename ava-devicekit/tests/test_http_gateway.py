@@ -416,6 +416,12 @@ def test_http_gateway_customer_portal_login_and_activation(tmp_path):
         html = _get_text(base_url, "/customer")
         assert "Activate Ava Hardware" in html
         assert "id=\"demo-purchase-form\"" in html
+        assert "name=\"app_id\" id=\"purchase_app_id\" value=\"ava_box\"" in html
+        assert "name=\"plan_id\" value=\"plan_starter\"" in html
+        assert "name=\"board_model\" value=\"esp32s3\"" in html
+        assert "<label>App id</label>" not in html
+        assert "<label>Plan</label>" not in html
+        assert "<label>Board model</label>" not in html
         assert "id=\"wallet-login-form\"" in html
         assert "id=\"activation-form\"" in html
 
