@@ -863,6 +863,48 @@ class ControlPlaneStore:
         self.store.update(_default_state(), mutate)
         return {"ok": True, "device": _safe_device(updated)}
 
+    def delete_device(self, device_id: str) -> dict[str, Any]:
+        normalized = normalize_control_device_id(device_id)
+        deleted: dict[str, Any] = {}
+        deleted_purchases = 0
+
+        def mutate(state: dict[str, Any]) -> None:
+            nonlocal deleted, deleted_purchases
+            _ensure_shape(state)
+            device = _find_device(state, normalized)
+            if not device:
+                raise ValueError("device_not_found")
+            deleted = dict(device)
+            state["devices"] = [
+                item
+                for item in state.get("devices", [])
+                if normalize_control_device_id(str(item.get("device_id") or "")) != normalized
+            ]
+            before_purchases = len(state.get("purchases", []))
+            state["purchases"] = [
+                item
+                for item in state.get("purchases", [])
+                if normalize_control_device_id(str(item.get("device_id") or "")) != normalized
+            ]
+            deleted_purchases = before_purchases - len(state.get("purchases", []))
+            for period, counters in list((state.get("usage_counters") or {}).items()):
+                if isinstance(counters, dict):
+                    counters.pop(str(deleted.get("device_id") or normalized), None)
+            state["usage_events"] = [
+                item
+                for item in state.get("usage_events", [])
+                if normalize_control_device_id(str(item.get("device_id") or "")) != normalized
+            ]
+            _remove_orphan_customer_links(
+                state,
+                customer_id=str(deleted.get("customer_id") or ""),
+                app_id=str(deleted.get("app_id") or ""),
+                project_id=str(deleted.get("project_id") or ""),
+            )
+
+        self.store.update(_default_state(), mutate)
+        return {"ok": True, "deleted_device": _safe_device(deleted), "deleted_purchases_count": deleted_purchases}
+
     def set_device_entitlement(self, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
         updated: dict[str, Any] = {}
 
@@ -1147,6 +1189,30 @@ def _ensure_customer_app_link(customer: dict[str, Any], *, app_id: str = "", pro
         project_ids.append(project_id)
     customer["app_ids"] = app_ids
     customer["project_ids"] = project_ids
+
+
+def _remove_orphan_customer_links(state: dict[str, Any], *, customer_id: str = "", app_id: str = "", project_id: str = "") -> None:
+    if not customer_id:
+        return
+    customer = _find_customer(state, customer_id)
+    if not customer:
+        return
+    has_app_device = any(
+        item.get("customer_id") == customer_id and (not app_id or item.get("app_id") == app_id)
+        for item in state.get("devices", [])
+    )
+    has_app_purchase = any(
+        item.get("customer_id") == customer_id and (not app_id or item.get("app_id") == app_id)
+        for item in state.get("purchases", [])
+    )
+    if not has_app_device and not has_app_purchase and app_id:
+        customer["app_ids"] = [item for item in customer.get("app_ids", []) if item != app_id]
+    has_project_device = any(
+        item.get("customer_id") == customer_id and (not project_id or item.get("project_id") == project_id)
+        for item in state.get("devices", [])
+    )
+    if not has_project_device and project_id:
+        customer["project_ids"] = [item for item in customer.get("project_ids", []) if item != project_id]
 
 
 def normalize_control_device_id(device_id: str) -> str:

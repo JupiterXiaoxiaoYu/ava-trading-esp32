@@ -473,6 +473,15 @@ def make_handler(
                 except Exception as exc:
                     self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
                 return
+            if path.startswith("/admin/devices/") and path.endswith("/delete"):
+                if not self._authorized_admin():
+                    return
+                device_id = path.split("/")[3]
+                try:
+                    self._send_json(control_plane.delete_device(device_id))
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
             if path.startswith("/admin/devices/") and path.endswith("/entitlement"):
                 if not self._authorized_admin():
                     return

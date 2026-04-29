@@ -62,6 +62,8 @@ The product is not a hosted SaaS for third-party developers yet. The immediate p
 | `suspended` | Device temporarily blocked by operator | Customer support, unpaid service, suspected abuse |
 | `revoked` | Device tokens are invalidated | Lost/stolen/replaced unit |
 
+`revoked` is intentionally not a delete operation: it keeps the inventory/support record and only clears device credentials. To reuse the same `device_id` for a fresh provision/activation flow, use the admin delete action. Delete removes the device inventory record, related purchase activation cards, and usage counters; it does not delete the customer account.
+
 ## Provider Configuration Requirements
 
 The web console must allow changing runtime provider selection without editing server files. It should configure names and env-key references, not raw secrets.
@@ -113,6 +115,7 @@ Configuration is resolved as default config -> project config -> device override
 | `POST` | `/device/activate` | Bind a provisioned device to a customer using activation code |
 | `GET/POST` | `/admin/devices/{device_id}/config` | View or update device-level config |
 | `POST` | `/admin/devices/{device_id}/status` | Set device status, including suspend/revoke |
+| `POST` | `/admin/devices/{device_id}/delete` | Delete a device record and related activation cards/usage so the same `device_id` can be provisioned again |
 | `POST` | `/admin/devices/{device_id}/entitlement` | Assign a service plan and status to a device |
 | `GET` | `/admin/devices/{device_id}/diagnostics` | View device state, connection, config, and recent events |
 | `GET` | `/device/config` | Device pulls its resolved configuration |

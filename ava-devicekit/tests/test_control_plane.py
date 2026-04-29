@@ -104,6 +104,14 @@ def test_control_plane_purchase_keeps_existing_device_project_aligned_to_app(tmp
     assert device["device_id"] == "retail_one"
     assert device["project_id"] == purchase["purchase"]["project_id"]
 
+    deleted = store.delete_device("retail-one")
+    assert deleted["deleted_device"]["device_id"] == "retail_one"
+    assert deleted["deleted_purchases_count"] == 1
+    assert store.app_devices("payment_terminal")["count"] == 0
+    assert store.purchases()["count"] == 0
+    reprovisioned = store.provision_device({"device_id": "retail-one", "app_id": "payment_terminal"})
+    assert reprovisioned["device"]["device_id"] == "retail_one"
+
 
 def test_control_plane_customer_session_token_and_activation(tmp_path):
     store = ControlPlaneStore(tmp_path / "control.json")

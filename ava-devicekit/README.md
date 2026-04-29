@@ -114,6 +114,7 @@ ESP32 input / voice
 | `POST` | `/admin/devices/{device_id}/provision-token` | Rotate a device provisioning token |
 | `GET/POST` | `/admin/devices/{device_id}/config` | View or update device-level app/voice/wake/OTA/wallet config |
 | `POST` | `/admin/devices/{device_id}/status` | Suspend, activate, or revoke a device |
+| `POST` | `/admin/devices/{device_id}/delete` | Remove a device inventory record plus related activation cards/usage so the device id can be provisioned again |
 | `POST` | `/admin/devices/{device_id}/entitlement` | Assign a service plan and entitlement status to a device |
 | `GET` | `/admin/devices/{device_id}/diagnostics` | Inspect device state, connection, config, and recent events |
 | `GET/POST` | `/admin/runtime/config` | View or update persisted runtime provider/service config |

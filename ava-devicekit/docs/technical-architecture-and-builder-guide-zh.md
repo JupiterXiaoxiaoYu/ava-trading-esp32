@@ -171,6 +171,13 @@ Control Plane 是当前自托管后台的数据层，默认存储在 JSON 文件
 | service_plans | 设备套餐和 usage limits |
 | usage_counters / usage_events | 按设备、周期记录 ASR/LLM/TTS/API 使用量 |
 
+`revoke` 和 `delete` 的语义不同：
+
+| 操作 | 作用 | 什么时候用 |
+|---|---|---|
+| `POST /admin/devices/{device_id}/status` with `revoked` | 清空设备 token，保留库存/售后记录 | 设备丢失、被盗、停用但仍需保留记录 |
+| `POST /admin/devices/{device_id}/delete` | 删除设备库存记录、相关 purchase/activation card、usage counters | 需要释放同一个 `device_id`，重新 provision / 重新绑定 / 重新激活 |
+
 设备生命周期：
 
 ```text

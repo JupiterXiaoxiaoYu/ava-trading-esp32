@@ -371,6 +371,11 @@ def test_http_gateway_runtime_provider_and_customer_device_config(tmp_path):
         assert _get(base_url, "/admin/devices/ava_box_ops/diagnostics")["ok"] is True
         revoked = _post(base_url, "/admin/devices/ava_box_ops/status", {"status": "revoked"})
         assert revoked["device"]["status"] == "revoked"
+        deleted = _post(base_url, "/admin/devices/ava_box_ops/delete")
+        assert deleted["deleted_device"]["device_id"] == "ava_box_ops"
+        assert _get(base_url, "/admin/apps/ava_box/devices")["count"] == 0
+        reprovisioned = _post(base_url, "/admin/devices/register", {"device_id": "ava-box-ops", "app_id": "ava_box"})
+        assert reprovisioned["device"]["device_id"] == "ava_box_ops"
     finally:
         server.shutdown()
         thread.join(timeout=5)
