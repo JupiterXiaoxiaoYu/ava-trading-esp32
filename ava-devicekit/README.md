@@ -183,10 +183,11 @@ ESP32 input / voice
 The current production firmware can be moved over incrementally by pointing its OTA URL at the DeviceKit HTTP gateway and its WebSocket URL at the compatibility gateway:
 
 ```bash
-cd ava-devicekit
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-http --host 0.0.0.0 --port 8788 --config runtime.local.json
-PYTHONPATH=backend python3 -m ava_devicekit.cli run-firmware-ws --host 0.0.0.0 --port 8787 --config runtime.local.json
+cp ava-devicekit/userland/env.example ava-devicekit/.env.local
+./scripts/run-devicekit-local.sh
 ```
+
+`ava-devicekit/.env.local` is the local-only secret file for DeviceKit runs. It is git-ignored and replaces any legacy environment file as the startup source.
 
 Example runtime config:
 

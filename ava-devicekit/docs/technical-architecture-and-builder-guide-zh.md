@@ -117,14 +117,11 @@ Gateway 是设备、后台前端和外部调用进入框架的入口。
 ```bash
 cd /mnt/c/Users/72988/Desktop/AVE/ava-trading-esp32
 
-PYTHONPATH=ava-devicekit/backend \
-python3 -m ava_devicekit.cli run-server \
-  --host 127.0.0.1 \
-  --port 8788 \
-  --ws-port 8787 \
-  --config /tmp/ava_devicekit_runtime.real.json \
-  --skill-store data/ava_box_app_state.json
+cp ava-devicekit/userland/env.example ava-devicekit/.env.local
+./scripts/run-devicekit-local.sh
 ```
+
+`ava-devicekit/.env.local` 是 DeviceKit 本地运行的唯一默认密钥入口，文件被 git ignore，不应提交。旧 runtime 的 `.env` 只能作为迁移密钥来源，不能作为 DeviceKit 启动入口。
 
 ### 3.2 Runtime Manager
 
